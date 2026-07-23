@@ -44,7 +44,7 @@ To ensure maximum efficiency across the entire organization, the application mus
 
 ### Frontend Architecture
 - **Framework:** React 19 (Functional components, Hooks).
-- **Build & Dev Server:** Vite (High-performance HMR).
+- **Build & Dev Server:** Vite (High-performance HMR) running on **Port 4001**.
 - **Language:** TypeScript (`~5.8.2`).
 - **Styling & Design System:** Tailwind CSS v4 (Utility-first styling, integrated via `@tailwindcss/vite`).
 - **UI & Interaction:** 
@@ -54,7 +54,7 @@ To ensure maximum efficiency across the entire organization, the application mus
 - **State Management:** React local state (`useState`, `useMemo`, `useEffect`) combined with prop-drilling or Context for the specific wizard views.
 
 ### Backend Architecture
-- **Server Framework:** Express.js (`4.21.2`) running on Node.js (or upgrade to NestJS for strict enterprise DI patterns).
+- **Server Framework:** Express.js (`4.21.2`) running on Node.js on **Port 4009**.
 - **Runtime Tooling:** Standard `tsc` compiler for production. The API should be strictly decoupled from the Vite frontend, operating in its own repository or monorepo workspace.
 - **Routing:** A structured REST/GraphQL API layer handling configurations, submissions, and Azure integrations.
 - **Data Persistence Strategy:** 

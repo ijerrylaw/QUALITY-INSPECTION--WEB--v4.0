@@ -1,0 +1,242 @@
+// ============================================================
+// QUALITY INSPECTION (WEB) v4.0 — Prisma Schema
+// Source of Truth: V4_MASTER_BLUEPRINT.md § 4 (Core Data Structures)
+// ORM:      Prisma 7 (Early Access)
+// Provider: SQLite (dev) — swap datasource.url for PostgreSQL in prod
+// ============================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ============================================================
+// SUBMISSION
+// Maps to: export interface Submission
+// The central record of a single AQL inspection session.
+// ============================================================
+model Submission {
+  /// Primary key — mirrors the `id: string` typed as 'sub_XXXXXXXXX'
+  id                  String          @id @default(cuid())
+
+  // --- Batch / Product Metadata ---
+  productCode         String
+  productionDate      String          // ISO date string, e.g. '2025-02-01'
+  samplingTime        String          // HH:MM string recorded at time of inspection
+  submissionTimestamp String          // ISO 8601 with ms precision, set by server
+  machineId           String
+  shift               String
+  batchNumber         String
+  size                String          // Glove size: 'XS' | 'S' | 'M' | 'L' | 'XL'
+  sampleSize          Int
+
+  // --- Measurement Data (stored as JSON blobs) ---
+  // DimensionMeasurements: { thickness: number[]; length: number[] }
+  dimensions          String          // JSON — DimensionMeasurements
+
+  // DimensionMinimums: { thickness: number; length: number }
+  dimensionMins       String          // JSON — DimensionMinimums
+
+  // DefectCounts: Record<DefectId, number>
+  defects             String          // JSON — Record<string, number>
+
+  // --- Verdict & Compliance ---
+  verdict             String          // 'PASSED' | 'FAILED'
+
+  // --- Microsoft 365 / Azure AD Identity ---
+  /// Azure AD Object ID pulled securely from the MS365 token
+  aadObjectId         String
+  /// UPN (email) pulled securely from the MS365 token
+  userPrincipalName   String
+
+  // --- Amendment Workflow ---
+  amendmentStatus     String          @default("UNMODIFIED")
+  // AmendmentStatus: 'UNMODIFIED' | 'AMENDMENT_DRAFTED' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED'
+
+  // --- Optional Fields ---
+  totalCarton         Int?
+  gloveWeight         Float?
+
+  // --- Profile Reference ---
+  /// Foreign key to InspectionProfile (nullable — uses default profile if null)
+  profileId           String?
+  profile             InspectionProfile? @relation(fields: [profileId], references: [id])
+
+  // --- Relations ---
+  amendmentLogs       AmendmentLog[]
+
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  @@index([productCode])
+  @@index([submissionTimestamp])
+  @@index([machineId, shift])
+  @@index([amendmentStatus])
+}
+
+// ============================================================
+// AMENDMENT LOG
+// Maps to: export interface AmendmentLog (implied by Submission.amendmentLogs)
+// An immutable audit trail entry for every change made after submission.
+// ============================================================
+model AmendmentLog {
+  id              String      @id @default(cuid())
+
+  submissionId    String
+  submission      Submission  @relation(fields: [submissionId], references: [id])
+
+  /// Serialized JSON snapshot of the original field values before the amendment
+  originalValues  String      // JSON — Partial<Submission>
+
+  /// Serialized JSON snapshot of the proposed new field values
+  newValues       String      // JSON — Partial<Submission>
+
+  /// Who authored the amendment draft (UPN / email)
+  requestedBy     String
+  requestedAt     String      // ISO 8601 timestamp
+
+  /// Who approved or rejected the amendment (UPN / email)
+  reviewedBy      String?
+  reviewedAt      String?     // ISO 8601 timestamp
+
+  /// 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED'
+  status          String      @default("PENDING_APPROVAL")
+
+  /// Optional notes/reason supplied by the Supervisor
+  supervisorNote  String?
+
+  createdAt       DateTime    @default(now())
+
+  @@index([submissionId])
+}
+
+// ============================================================
+// INSPECTION PROFILE
+// Maps to: export interface InspectionProfile
+// A named ruleset that defines AQL categories and which defects apply.
+// Multiple profiles allow per-client AQL overrides (e.g., Ansell profile).
+// ============================================================
+model InspectionProfile {
+  id                  String              @id @default(cuid())
+  name                String              @unique
+  isDefault           Boolean             @default(false)
+
+  // --- Relations ---
+  aqlCategories       AQLCategory[]
+  defectDefinitions   DefectDefinition[]
+  submissions         Submission[]
+
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+}
+
+// ============================================================
+// AQL CATEGORY
+// Maps to: export interface AQLCategory
+// A single category within an InspectionProfile (e.g., 'Major Visual',
+// 'Barrier Defects'). Stores its own AQL level and evaluation mode.
+// ============================================================
+model AQLCategory {
+  id              String            @id @default(cuid())
+  name            String
+  /// AQL level string: '0.65', '1.0', '1.5', '2.5', 'AND (Zero Tolerance)', etc.
+  aqlLevel        String
+  /// Evaluation strategy: 'CUMULATIVE' | 'GRANULAR' | 'N/A' | ''
+  evaluationMode  String            @default("")
+
+  profileId       String
+  profile         InspectionProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@unique([profileId, name])
+  @@index([profileId])
+}
+
+// ============================================================
+// DEFECT DEFINITION
+// Maps to: export interface DefectDefinition
+// A single defect type (e.g., 'Pinhole At Crotch') with a class assignment
+// that can be overridden per InspectionProfile without touching global config.
+// ============================================================
+model DefectDefinition {
+  id              String            @id @default(cuid())
+  name            String
+  /// The factory-wide default class: 'BARRIER' | 'MAJOR_VISUAL' | 'MINOR_VISUAL' etc.
+  defaultClass    String
+  /// The class as overridden for this specific profile (starts equal to defaultClass)
+  currentClass    String
+
+  profileId       String
+  profile         InspectionProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@unique([profileId, name])
+  @@index([profileId])
+}
+
+// ============================================================
+// APP CONFIG
+// Maps to: export interface AppConfig
+// A SINGLETON table (only one row should ever exist).
+// Stores all dynamic, hot-swappable system configuration.
+// Lists and SKU builder dictionaries are stored as JSON blobs.
+// ============================================================
+model AppConfig {
+  /// Singleton sentinel — always '1'
+  id                  String   @id @default("1")
+
+  // --- Simple string/number array lists (stored as JSON) ---
+  /// JSON: string[] — e.g., ['N035SKB-OC-24FT', 'N100FNB-EC-9.5IN']
+  productCodes        String   @default("[]")
+
+  /// JSON: { id: string; name: string }[]
+  lines               String   @default("[]")
+
+  /// JSON: { id: string; name: string }[]
+  shifts              String   @default("[]")
+
+  /// JSON: string[] — e.g., ['XS', 'S', 'M', 'L', 'XL']
+  sizes               String   @default("[]")
+
+  /// JSON: number[] — valid AQL sample sizes, e.g. [13, 20, 32, 50, 80, 125, 200]
+  sampleSizes         String   @default("[]")
+
+  // --- Product to Profile Mapping ---
+  /// JSON: Record<productCode, profileId>
+  productProfileMap   String   @default("{}")
+
+  // --- Branding (Blueprint Section 8: Dynamic White-Label) ---
+  /// Company display name, e.g., 'GLOVE CORP'
+  companyName         String   @default("QUALITY INSPECTION")
+  /// Portal tab title
+  portalTitle         String   @default("QI Portal v4.0")
+  /// Base64 or URL of corporate logo
+  logoImage           String?
+  /// Primary accent colour token, e.g., 'emerald' | 'cobalt' | 'violet'
+  accentColor         String   @default("emerald")
+
+  // --- SKU Builder Dictionaries (Blueprint Section 5 / Section 7) ---
+  /// JSON: { value: string; label: string }[]
+  skuMaterials        String   @default("[]")
+  /// JSON: { value: string; label: string }[]
+  skuWeights          String   @default("[]")
+  /// JSON: { value: string; label: string }[]
+  skuColors           String   @default("[]")
+  /// JSON: { value: string; label: string }[]
+  skuTreatments       String   @default("[]")
+  /// JSON: { value: string; label: string }[]
+  skuLengths          String   @default("[]")
+  /// JSON: { value: string; label: string }[]
+  skuTextures         String   @default("[]")
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
