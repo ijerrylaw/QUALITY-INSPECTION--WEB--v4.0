@@ -1,0 +1,12 @@
+{
+  "name": "quality-inspection-web-v4",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "npx concurrently \"npm run dev --workspace=frontend\" \"npm run dev --workspace=backend\""
+  }
+}
