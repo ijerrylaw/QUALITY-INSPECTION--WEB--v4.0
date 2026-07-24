@@ -1,0 +1,17 @@
+{
+  "sampleSize": 125,
+  "categories": [
+    { "id": "cat-1", "name": "Barrier Defects", "aqlLevel": "AND (Zero Tolerance)", "evaluationMode": "GRANULAR" },
+    { "id": "cat-2", "name": "Major Visual",    "aqlLevel": "2.5",                   "evaluationMode": "CUMULATIVE" }
+  ],
+  "defectDefinitions": [
+    { "id": "def-1", "name": "Pinhole At Crotch", "currentClass": "cat-1" },
+    { "id": "def-2", "name": "Colour Streak",     "currentClass": "cat-2" },
+    { "id": "def-3", "name": "Surface Mark",      "currentClass": "cat-2" }
+  ],
+  "defects": {
+    "def-1": 0,
+    "def-2": 3,
+    "def-3": 2
+  }
+}
