@@ -89,6 +89,7 @@ export interface Submission {
   amendmentStatus: AmendmentStatus;
   totalCarton?: number;
   gloveWeight?: number;
+  operatorToken?: string; // Verification token for submission
   amendmentLogs: AmendmentLog[];
   profileId?: string;
 }
@@ -191,7 +192,8 @@ The system reduces operator cognitive load by linking complex parameters and aut
 ### Data Automations
 - **Batch & Lot Number Automation:** To eliminate manual data-entry typos on critical identifiers, the system automatically derives and constructs the formal Batch Number, Lot Number, and Sequence Number directly from the system Date, Time, Shift, and Machine ID.
   - **Julian Date Conversion:** Dates are automatically mathematically compressed into 3-digit Julian Days (e.g., Feb 1st = `032`) for precise, standardized barcode generation.
-  - **Night Shift Rollover Logic:** If an inspection occurs between Midnight and 8:00 AM, the system automatically assigns it to Shift 'B' (Night Shift) and mathematically subtracts 1 day from the effective Production Date to maintain strict continuous-batch integrity.
+  - **Night Shift Rollover Logic:** If an inspection occurs between Midnight and the start of the Morning Shift, the system automatically assigns it to Shift 'Night' and mathematically subtracts 1 day from the effective Production Date (for Lot generation) to maintain strict continuous-batch integrity.
+- **Dynamic Glove Weight:** The system dynamically extracts the standard glove weight directly from characters 1 to 3 of the Product Code (e.g., `N035SKB-OC-24FT` -> `3.50g`) and auto-populates the wizard/grid.
 - **Real-Time Verdict Automation:** The engine continuously evaluates inputted defect counts against the active AQL thresholds. The final PASS / FAIL verdict is entirely automated; operators cannot manually override the math.
 - **Timestamp & Telemetry Automation:** `submissionTimestamp` is automatically generated with millisecond precision upon submission, preventing backdating.
 - **Enterprise Synchronization:** Background automation services silently push completed records (and their pending amendments) to the Microsoft 365 / SharePoint enterprise list without interrupting the operator workflow on the factory floor.
@@ -220,31 +222,35 @@ This means an Admin can completely overhaul the corporate look and feel of the p
 
 ### 1. DataEntryWizard (`DataEntryWizard.tsx`)
 - **Target Role:** Operator / QA Inspector.
-- **State/Workflow:** A heavily guarded multi-step process.
-  1. **Metadata:** SKU, Batch, Date, Machine, Sample Size.
-  2. **Dimensions:** Entry of physical measurements (thickness arrays, minimums).
-  3. **Defects Tabulation:** Rapid tap UI to increment defect counts across severity tabs.
-  4. **Review & Sign-off:** Automated verdict presentation, capturing PIC name/email, and submission.
+- **State/Workflow:** Dual-Mode Architecture (Header toggle between Guided Wizard & Spreadsheet Grid):
+  - **Mode A: Guided 4-Step Wizard:**
+    1. **Inspection Metadata & Setup (Page 1 - Mandatory):** Profile, Product Code, Glove Size, Line, Side, Date & Time (with manual override), Shift (auto-calculated from time), Lot Number (4-digit Year+Julian based on shift start date, e.g. 6182), Sequence Number (auto-incremented, e.g. 001), Total Carton, Sample Size, Glove Weight (auto-populated from SKU prefix, e.g., N035 = 3.5g, with manual override), and Full System Lot Number (`A004A6182001`).
+    2. **Physical Dimensions (Page 2):** 5-slot measurement arrays with 30-slot real-time evaluation (`28/30 Passed | 2 Out-of-Spec`), utilizing dynamic fallback dimensions if configuration is empty.
+    3. **Defect Tabulation (Page 3):** High-speed defect logging across severity tiers (numeric counters for AQLs `0.65`-`6.5`, 3-way `[PASS|FAIL|NIL]` toggles for qualitative).
+    4. **Review & Submission (Page 4):** Batch summary, AQL Pass/Fail verdict, Retain Context toggle, mandatory Operator Token verification, and "Submit & Next Lot" rapid loop.
+  - **Mode B: Excel-Style Spreadsheet Grid:** High-density multi-lot table mode where workers set shared header metadata once and key in 5-10 lot rows (Seq 001, 002, 003...) with keyboard Tab navigation, inline defect popover overlays, dynamic weight auto-population, and bulk batch submission.
 - **Side-Effects:** POSTs JSON to backend, resets state upon success.
 
 ### 2. ApprovalsQueue (`ApprovalsQueue.tsx`)
-- **Target Role:** Supervisor / Admin.
-- **State/Workflow:** Displays a list of inspections where `amendmentStatus === 'PENDING_APPROVAL'`.
-- **Interactions:** Supervisor reviews side-by-side diffs of `originalValues` vs `newValues`. They can "Approve" (commits the change to DB/SharePoint) or "Reject" (discards the pending amendment).
+- **Target Role:** Executive / Manager / Admin.
+- **State/Workflow:** Fetches pending amendments from `GET /api/amendments/pending` (`amendmentStatus === 'PENDING_APPROVAL'`).
+- **Interactions:** Executive level and above users review side-by-side diffs of `originalValues` vs `newValues`. They can "Approve" (calls `POST /api/amendments/:id/approve` to commit changes to DB/SharePoint and update verdict) or "Reject" (calls `POST /api/amendments/:id/reject` to discard the amendment).
 
 ### 3. History Feed (`HistoryFeed.tsx`)
-- **Target Role:** All Roles (Read-Only for Operators).
-- **State/Workflow:** A paginated, searchable datatable of all past `Submissions`.
-- **Interactions:** View detailed read-only receipts of past inspections.
+- **Target Role:** All Roles.
+- **State/Workflow:** Dynamically fetches past `Submissions` from `GET /api/submissions` (with offline fallback to mock data). Searchable data table by Lot Number or SKU.
+- **Interactions:** View detailed receipts of past inspections and submit amendment requests (`POST /api/submissions/:id/amendments`) with mandatory change reasons.
 
 ### 4. Config Dashboard (`ConfigDashboard.tsx`)
 - **Target Role:** Admin.
-- **State/Workflow:** Complex form UI for editing `AppConfig`. 
+- **State/Workflow:** Complex form UI for editing `AppConfig`. Organized into three clean Left Sidebar submenus without numeric prefixes:
+  - **Factory & Line Setup:** Manage Production Lines (Factory Code + 3 digits, e.g. 'A001'), Shift Patterns (automated by working hours), and Sides ('A' or 'Z').
+  - **Product Engine:** Strict Product Code builder enforcing character lengths (e.g., 3-digit weight, 3-char color), SKU Dimension Target Matrix (Min Spec + Tolerance), Glove Sizes, and ISO Sampling Sizes.
+  - **Quality Rules:** Manage Inspection Profiles, AQL Levels, and Evaluation Modes (`CUMULATIVE`, `GRANULAR`, `N/A`). AQL Level selection is strictly guarded by an immutable ISO 2859 whitelist dropdown containing only 8 valid options (`AND`, `0.65`, `1.0`, `1.5`, `2.5`, `4.0`, `6.5`, `PASS / FAIL / NIL`). Free-text registration of non-ISO AQLs (e.g. 0.7, 1.8) is strictly prohibited. When `AND` or `PASS / FAIL / NIL` is selected, Evaluation Mode automatically locks to `N/A`.
+- **Save Changes Pattern:** Each individual submenu features a dedicated, sticky **"Save Changes" action bar** with a real-time `Unsaved Changes` dirty state indicator. Switching submenus with unsaved edits triggers a confirmation modal asking the user to save or discard changes.
 - **Interactions:** 
-  - Manage Defect Definitions (re-mapping defects to different classes).
-  - Construct/Edit AQL Profiles.
+  - **Defect Management Kanban Matrix:** Integrated interface to Create (`+ Add Defect`), Edit (rename/modify), and Delete defect labels directly on the board, alongside horizontal drag-and-drop remapping between category columns (AND, BARRIER, CRITICAL VISUAL, MAJOR VISUAL, MINOR VISUAL). For `PASS / FAIL / NIL` categories, Page 3 renders 3-way toggle buttons `[PASS | FAIL | NIL]` instead of numeric counters.
   - Map SKUs to specific Profiles.
-  - Modify dropdown lists (Glove Sizes, Shifts, Lines).
 
 ### 5. Login Portal (`LoginPortal.tsx`)
 - **Target Role:** All Roles (Operator, Supervisor, Admin).

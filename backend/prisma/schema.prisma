@@ -204,6 +204,9 @@ model AppConfig {
   /// JSON: { id: string; name: string }[]
   shifts              String   @default("[]")
 
+  /// JSON: { id: string; name: string }[]
+  sides               String   @default("[]")
+
   /// JSON: string[] — e.g., ['XS', 'S', 'M', 'L', 'XL']
   sizes               String   @default("[]")
 
@@ -237,6 +240,13 @@ model AppConfig {
   skuLengths          String   @default("[]")
   /// JSON: { value: string; label: string }[]
   skuTextures         String   @default("[]")
+
+  // --- Dynamic Configuration Data ---
+  dimensions          String   @default("[]")
+  targetWeight        String   @default("{\"target\":0,\"tolerance\":0}")
+  aqlCategories       String   @default("[]")
+  defectDefinitions   String   @default("[]")
+  inspectionProfiles  String   @default("[]")
 
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt

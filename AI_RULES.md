@@ -1,24 +1,26 @@
 # Antigravity AI Project Rules
 
-**Project:** QUALITY INSPECTION (WEB) v4.0
-**Purpose:** This document dictates the strict behavioral rules the AI must follow when operating in this workspace. These rules are designed to prevent token limit exhaustion, prevent design drift, and maintain absolute architectural integrity.
+**Project:** QUALITY INSPECTION (WEB) v4.0  
+**Purpose:** This document dictates the strict behavioral rules the AI must follow when operating in this workspace to prevent token limit exhaustion, avoid design drift, and maintain absolute architectural integrity.
 
 ---
 
 ## 1. INCREMENTAL EXECUTION (The "Micro-Step" Rule)
-*To prevent the AI from burning through the user's 5-hour and weekly usage limits and leaving the app in a broken state:*
-- **The Golden Rule:** Whenever we are working on the v4.0 project, you must always work in micro-steps. Only write one file at a time, stop, and wait for my approval before proceeding.
-- **NEVER** attempt to build an entire feature, module, or phase in a single response.
+- **One File per Turn:** Work strictly in micro-steps. Write or edit only one file at a time, then stop and wait for user approval before proceeding to the next step.
 
 ## 2. ARCHITECTURAL INTEGRITY
-- **The Blueprint is Law:** The `V4_MASTER_BLUEPRINT.md` file contains the absolute truth regarding data schemas, business logic, and tech stack. If you are ever unsure of how to build a feature, you must read the blueprint first.
-- **No Unapproved Dependencies:** Do not install random NPM packages to solve a problem unless it is strictly necessary or explicitly approved by the user. Rely on the core stack (React 19, Vite, Tailwind v4, Lucide, Framer Motion).
+- **Master Blueprint is Law:** Read `V4_MASTER_BLUEPRINT.md` for authoritative data schemas, business logic, and tech stack guidelines before implementing features.
+- **No Unapproved Dependencies:** Rely strictly on the established core stack (React 19, Vite, Tailwind v4, Lucide, Framer Motion). Do not install third-party NPM packages without explicit user approval.
 
 ## 3. DESIGN SYSTEM STRICTNESS (Preventing Design Drift)
-- **No Magic Numbers:** You are forbidden from using raw CSS values (e.g., `color: #FF5733` or `font-size: 14px`) in inline styles or Tailwind arbitrary values.
-- **Enforce Design Tokens:** You must rely entirely on the Tailwind v4 `@theme` configuration (e.g., `bg-canvas`, `text-accent`, `text-sm`). 
-- **Typography Alignment:** Ensure `Inter` is used for readability (headers, labels) and `JetBrains Mono` is used strictly for data tables and numerical inputs.
+- **Single Source of Truth:** `UI_DESIGN_SYSTEM.md` is the authoritative reference for all UI design tokens, color variables, typography casing/fonts, and component geometry (8px radius, 48px touch targets). Strictly consult and adhere to it for all visual work.
+- **No Magic Numbers:** You are forbidden from using raw CSS values (e.g. `color: #FF5733` or `font-size: 14px`) in inline styles or Tailwind arbitrary values.
 
 ## 4. SAFETY & GIT
-- Before executing any massive file deletions or complex cross-file refactoring, you must proactively remind the user: *"Please ensure you have committed your current code in Git before I proceed with this major refactor."*
-- Ensure your code changes are always modular and can easily be reverted without cascading failures across the app.
+- **Pre-Refactor Git Reminder:** Proactively remind the user to commit their code in Git before executing major file deletions or cross-file refactoring.
+- **Modular Architecture:** Ensure code changes are isolated and modular so they can easily be reverted without cascading failures.
+
+## 5. MANDATORY PRE-STEP MODEL RECOMMENDATION
+- **Pre-Step Check:** Before executing any task or proceeding with work steps, you MUST evaluate the task complexity and explicitly recommend the best-suited AI model tier to the user:
+  - **Flash / Lightweight Models:** Best for fast, routine UI tweaks, minor CSS updates, straightforward documentation edits, or single-file bug fixes.
+  - **Pro / Reasoning-Heavy Models:** Best for complex multi-file refactoring, deep architectural changes, database/schema redesigns, complex state orchestration, or multi-agent planning.
