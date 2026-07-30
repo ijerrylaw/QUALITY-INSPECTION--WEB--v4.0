@@ -51,7 +51,7 @@ Optimized for high-density desktop & tablet keyboard entry (`Tab` key cell-by-ce
    - Profile, Product Code, Glove Size, Production Line, Side (A/Z), Production Date & Time, Shift (Auto), Sample Size.
 2. **Multi-Lot Data Table (Rows = Lots, Columns = Measurements):**
    - **Graphical Contrast:** Presents a multi-lot high-density table (compact `h-9` cells) rather than single-lot cards. Both modes share the exact same design tokens (`bg-canvas`, `bg-surface`, `font-mono`) and color logic (Emerald for spec pass, Rose for out-of-spec).
-   - **Keyboard Navigable Input Cells (`font-mono`):** Glove Weight (`xx.xx`), 5 Palm Widths, 5 Glove Lengths, 5 Thicknesses (Beading, Cuff, Palm, Finger). Workers press `Tab` / `Enter` to jump cell-by-cell across rows.
+   - **Keyboard Navigable Input Cells (`font-mono`):** Glove Weight (`xx.xx`), 5 Palm Widths, 5 Glove Lengths, 5 Thicknesses (Beading Thickness, Cuff Thickness, Palm Thickness, Finger Thickness). Workers press `Tab` / `Enter` to jump cell-by-cell across rows.
    - **Quick Defect Popover Modal (UI Spec in `UI_DESIGN_SYSTEM.md` § 9):** Each row displays a `Defects (0)` badge chip. Pressing `Spacebar` or clicking opens a rapid popover overlay (`bg-surface`, severity tabs, 48px touch counters or `[PASS|FAIL|NIL]` toggles) to tap defect counts for that lot row.
    - **Real-Time Status Readout:** 30-slot compliance badge + AQL Pass/Fail verdict calculated per row instantly.
 3. **Batch Actions:**

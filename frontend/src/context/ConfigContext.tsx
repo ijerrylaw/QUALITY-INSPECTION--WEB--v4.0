@@ -48,6 +48,35 @@ export interface SKUOption {
   label: string;
 }
 
+export interface ProductDimensionDef {
+  id: string;
+  name: string;
+  unit: string;
+  isMin?: boolean;
+}
+
+export interface ProductDimensionValue {
+  minSpec: string;
+  tolerance: string;
+}
+
+export interface SizeConfig {
+  weightTarget: string;
+  weightTolerance: string;
+  lengthTarget?: string;
+  lengthTolerance?: string;
+  palmWidthTarget?: string;
+  palmWidthTolerance?: string;
+  dimensions: Record<string, ProductDimensionValue>; // keyed by dimension id
+}
+
+export interface ProductConfig {
+  dimensionDefs: ProductDimensionDef[];
+  sizes: Record<string, SizeConfig>;
+  lastAmended?: string; // ISO date string tracking the last time this config was successfully saved
+}
+
+
 /**
  * Parsed AppConfig — all JSON string fields from the backend are already
  * deserialized into their native JS types by formatAppConfig() in config.routes.ts.
@@ -64,7 +93,8 @@ export interface AppConfig {
   sides: SideOption[];
   sizes: string[];
   sampleSizes: number[];
-  productProfileMap: Record<string, string>;
+  productProfileMap: Record<string, string[]>;
+  productMatrixConfig: Record<string, ProductConfig>;
   skuMaterials: SKUOption[];
   skuWeights: SKUOption[];
   skuColors: SKUOption[];

@@ -4,19 +4,21 @@
  *
  * Provides interfaces to manage:
  * 1. Inspection Profiles (CRUD, Default)
- * 2. ISO 2859-1 AQL Category Mappings (per profile)
- * 3. Defect Management Kanban Board (per profile)
+ * 2. Defect Category Setup — AQL level & Evaluation Mode per category (CUMULATIVE / GRANULAR / N/A)
+ * 3. ISO Sample Sizes — single source of truth (moved from ProductEngine)
+ * 4. Defect Management Kanban Board (per profile, drag-and-drop)
  *
- * Communicates dirty state up to ConfigPage parent.
+ * Data contracts: DATA_SCHEMAS_AND_TYPES.md (EvaluationMode: CUMULATIVE | GRANULAR | N/A)
+ * Math logic: ISO2859_MATH_ENGINE.md
  */
 
 import { useState } from 'react';
-import { 
-  ShieldCheck, 
-  ShieldAlert, 
-  AlertCircle, 
-  AlertTriangle, 
-  Info, 
+import {
+  ShieldCheck,
+  ShieldAlert,
+  AlertCircle,
+  AlertTriangle,
+  Info,
   CheckSquare,
   Lock,
   Plus,
@@ -25,7 +27,11 @@ import {
   LayoutGrid,
   Check,
   X,
-  Settings2
+  Settings2,
+  ChevronDown,
+  ListOrdered,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { useConfig } from '../../context/ConfigContext';
 
@@ -34,8 +40,10 @@ interface QualityRulesProps {
   onChange: (data: any) => void;
 }
 
+// ISO 2859-1 AQL whitelist — ISO2859_MATH_ENGINE.md §1
 const ISO_WHITELIST = ['AND', '0.65', '1.0', '1.5', '2.5', '4.0', '6.5', 'PASS/FAIL/NIL'];
-const EVAL_MODES = ['Single', 'Double', 'Multiple'];
+// Evaluation Modes — DATA_SCHEMAS_AND_TYPES.md §2
+const EVAL_MODES: string[] = ['CUMULATIVE', 'GRANULAR'];
 
 const IconMap: Record<string, any> = {
   ShieldCheck,
@@ -56,11 +64,11 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
       name: 'GLOBAL STANDARD',
       isDefault: true,
       aqlCategories: [
-        { id: 'BARRIER', name: 'BARRIER', iconName: 'ShieldAlert', color: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/30', aql: 'AND', evalMode: 'N/A' },
-        { id: 'CRITICAL', name: 'CRITICAL', iconName: 'AlertCircle', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30', aql: '1.5', evalMode: 'Single' },
-        { id: 'MAJOR', name: 'MAJOR', iconName: 'AlertTriangle', color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', aql: '2.5', evalMode: 'Single' },
-        { id: 'MINOR', name: 'MINOR', iconName: 'Info', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', aql: '4.0', evalMode: 'Single' },
-        { id: 'PACKAGING', name: 'PACKAGING', iconName: 'CheckSquare', color: 'text-cyan-400', bg: 'bg-cyan-500/10', border: 'border-cyan-500/30', aql: 'PASS/FAIL/NIL', evalMode: 'N/A' },
+        { id: 'BARRIER',   name: 'BARRIER',   iconName: 'ShieldAlert',   color: 'text-rose-400',    bg: 'bg-rose-500/10',    border: 'border-rose-500/30',    aql: 'AND',           evalMode: 'N/A' },
+        { id: 'CRITICAL',  name: 'CRITICAL',  iconName: 'AlertCircle',   color: 'text-amber-400',   bg: 'bg-amber-500/10',   border: 'border-amber-500/30',   aql: '1.5',           evalMode: 'CUMULATIVE' },
+        { id: 'MAJOR',     name: 'MAJOR',     iconName: 'AlertTriangle', color: 'text-blue-400',    bg: 'bg-blue-500/10',    border: 'border-blue-500/30',    aql: '2.5',           evalMode: 'CUMULATIVE' },
+        { id: 'MINOR',     name: 'MINOR',     iconName: 'Info',          color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', aql: '4.0',           evalMode: 'GRANULAR' },
+        { id: 'PACKAGING', name: 'PACKAGING', iconName: 'CheckSquare',   color: 'text-cyan-400',    bg: 'bg-cyan-500/10',    border: 'border-cyan-500/30',    aql: 'PASS/FAIL/NIL', evalMode: 'N/A' },
       ],
       defectDefinitions: [
         { id: 'def_hole', name: 'Hole', categoryId: 'BARRIER' },
@@ -80,6 +88,16 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [editProfileName, setEditProfileName] = useState('');
 
+  // ── ISO Sample Sizes State ───────────────────────────────────────────────
+  const DEFAULT_SAMPLE_SIZES = [13, 20, 32, 50, 80, 125, 200, 315, 500, 800, 1250];
+  const [sampleSizes, setSampleSizes] = useState<number[]>(
+    config?.sampleSizes?.length ? config.sampleSizes : DEFAULT_SAMPLE_SIZES
+  );
+  const [newSampleSize, setNewSampleSize] = useState('');
+  const [isAddingSampleSize, setIsAddingSampleSize] = useState(false);
+  const [editingSampleSize, setEditingSampleSize] = useState<number | null>(null);
+  const [editSampleSizeVal, setEditSampleSizeVal] = useState('');
+
   // ── Kanban State ─────────────────────────────────────────────────────────
   const [draggedDefectId, setDraggedDefectId] = useState<string | null>(null);
   const [addingToCategory, setAddingToCategory] = useState<string | null>(null);
@@ -87,10 +105,13 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   const [editingDefectId, setEditingDefectId] = useState<string | null>(null);
   const [editDefectName, setEditDefectName] = useState('');
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
-  const triggerChange = (newProfiles: any[]) => {
+  // ── Generic Change Trigger ────────────────────────────────────────────────
+  const triggerChange = (newProfiles: any[], newSampleSizes?: number[]) => {
     onDirty();
-    onChange({ inspectionProfiles: newProfiles });
+    onChange({
+      inspectionProfiles: newProfiles,
+      ...(newSampleSizes !== undefined ? { sampleSizes: newSampleSizes } : {}),
+    });
   };
 
   const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
@@ -134,7 +155,8 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   };
 
   const saveProfileEdit = (id: string) => {
-    const updated = profiles.map(p => p.id === id ? { ...p, name: editProfileName } : p);
+    if (!editProfileName.trim()) { setEditingProfileId(null); return; }
+    const updated = profiles.map(p => p.id === id ? { ...p, name: editProfileName.trim().toUpperCase() } : p);
     setProfiles(updated);
     setEditingProfileId(null);
     triggerChange(updated);
@@ -146,10 +168,11 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
       if (c.id !== id) return c;
       const newCat = { ...c, [field]: value };
       
+      // Auto-lock evalMode per ISO2859_MATH_ENGINE.md §1 (Zero Tolerance Overrides)
       if (field === 'aql' && (value === 'AND' || value === 'PASS/FAIL/NIL')) {
         newCat.evalMode = 'N/A';
       } else if (field === 'aql' && newCat.evalMode === 'N/A') {
-        newCat.evalMode = 'Single';
+        newCat.evalMode = 'CUMULATIVE';
       }
       return newCat;
     });
@@ -160,19 +183,65 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   };
 
   const handleAddCategory = () => {
-    const newCat = { 
-      id: `cat_${Date.now()}`, 
-      name: 'NEW CATEGORY', 
-      iconName: 'ShieldAlert', 
-      color: 'text-gray-400', 
-      bg: 'bg-gray-500/10', 
-      border: 'border-gray-500/30', 
-      aql: '1.5', 
-      evalMode: 'Single' 
+    const newCat = {
+      id: `cat_${Date.now()}`,
+      name: 'NEW CATEGORY',
+      iconName: 'ShieldAlert',
+      color: 'text-gray-400',
+      bg: 'bg-gray-500/10',
+      border: 'border-gray-500/30',
+      aql: '1.5',
+      evalMode: 'CUMULATIVE',
     };
     const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, aqlCategories: [...activeCategories, newCat] } : p);
     setProfiles(updatedProfiles);
     triggerChange(updatedProfiles);
+  };
+
+  // ── Sample Size Handlers ──────────────────────────────────────────────────
+  const handleAddSampleSize = () => {
+    const val = parseInt(newSampleSize.trim(), 10);
+    if (!isNaN(val) && val > 0 && !sampleSizes.includes(val)) {
+      const updated = [...sampleSizes, val].sort((a, b) => a - b);
+      setSampleSizes(updated);
+      setNewSampleSize('');
+      setIsAddingSampleSize(false);
+      triggerChange(profiles, updated);
+    } else {
+      setIsAddingSampleSize(false);
+      setNewSampleSize('');
+    }
+  };
+
+  const handleEditSampleSize = (oldSize: number, newSizeStr: string) => {
+    const val = parseInt(newSizeStr.trim(), 10);
+    if (isNaN(val) || val <= 0 || (val !== oldSize && sampleSizes.includes(val))) {
+      setEditingSampleSize(null);
+      return;
+    }
+    const updated = sampleSizes.map(s => s === oldSize ? val : s).sort((a, b) => a - b);
+    setSampleSizes(updated);
+    setEditingSampleSize(null);
+    triggerChange(profiles, updated);
+  };
+
+  const handleRemoveSampleSize = (size: number) => {
+    const updated = sampleSizes.filter(s => s !== size);
+    setSampleSizes(updated);
+    triggerChange(profiles, updated);
+  };
+
+  const handleMoveSampleSize = (size: number, dir: 'up' | 'down') => {
+    const idx = sampleSizes.indexOf(size);
+    if (idx < 0) return;
+    if (dir === 'up' && idx === 0) return;
+    if (dir === 'down' && idx === sampleSizes.length - 1) return;
+    const updated = [...sampleSizes];
+    const temp = updated[idx];
+    updated[idx] = updated[dir === 'up' ? idx - 1 : idx + 1];
+    updated[dir === 'up' ? idx - 1 : idx + 1] = temp;
+    setSampleSizes(updated);
+    triggerChange(profiles, updated);
   };
 
   const handleRemoveCategory = (id: string) => {
@@ -261,148 +330,264 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
           </div>
         </div>
         
-        <div className="p-5 flex flex-wrap gap-3">
-          {profiles.map((profile) => (
-            <div key={profile.id} className="relative flex">
-              <button
-                onClick={() => setActiveProfileId(profile.id)}
-                className={`h-12 pl-4 pr-10 rounded-lg text-sm font-semibold uppercase tracking-wide border transition-all outline-none flex items-center gap-2 ${
-                  activeProfileId === profile.id
-                    ? 'bg-brand-primary/10 text-white border-brand-secondary shadow-md ring-1 ring-brand-secondary'
-                    : 'bg-surface text-muted border-gray-700 hover:border-gray-500 hover:text-primary'
-                }`}
-              >
-                {editingProfileId === profile.id ? (
-                  <div className="relative">
-                    <input
-                      autoFocus
-                      value={editProfileName}
-                      onChange={e => setEditProfileName(e.target.value)}
-                      onBlur={() => saveProfileEdit(profile.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') saveProfileEdit(profile.id);
-                        if (e.key === 'Escape') setEditingProfileId(null);
-                      }}
-                      className="bg-transparent border-b border-white outline-none w-36 pr-12 text-sm"
-                      onClick={e => e.stopPropagation()}
-                    />
-                    <span className="absolute right-0 top-1/2 -translate-y-1/2 text-[10px] text-white/50 font-mono pointer-events-none">Enter ↵</span>
-                  </div>
-                ) : (
-                  <span>{profile.name}</span>
-                )}
-                
-                {profile.isDefault && (
-                  <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                    DEFAULT
-                  </span>
-                )}
-              </button>
-              
-              {/* Profile Actions Dropdown (Simulated via icons) */}
-              <div className={`absolute right-1 top-1.5 flex flex-col gap-0.5 ${activeProfileId === profile.id ? 'opacity-100' : 'opacity-0'} transition-opacity`}>
-                 <button onClick={(e) => { e.stopPropagation(); setEditingProfileId(profile.id); setEditProfileName(profile.name); }} className="p-1 text-gray-400 hover:text-white"><Edit2 className="w-3 h-3"/></button>
-                 {!profile.isDefault && <button onClick={(e) => { e.stopPropagation(); handleSetDefaultProfile(profile.id); }} className="p-1 text-gray-400 hover:text-emerald-400" title="Set as Default"><Check className="w-3 h-3"/></button>}
-              </div>
+        <div className="p-5 flex flex-wrap items-center gap-3">
+          <div className="relative flex items-center min-w-[280px]">
+            <select
+              value={activeProfileId}
+              onChange={(e) => setActiveProfileId(e.target.value)}
+              className="w-full h-12 pl-4 pr-10 rounded-lg bg-surface border border-gray-700 text-sm font-semibold uppercase tracking-wide text-primary hover:border-gray-500 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none appearance-none cursor-pointer"
+            >
+              {profiles.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name} {p.isDefault ? '(DEFAULT)' : ''}
+                </option>
+              ))}
+            </select>
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted">
+              <ChevronDown className="w-4 h-4" />
             </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Section 1: ISO 2859-1 Category Mapping ─────────────────────────── */}
-      <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
-        <div className="p-5 border-b border-gray-800 bg-surface flex justify-between items-center">
-          <div>
-            <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
-              <Settings2 className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
-              ISO 2859-1 CATEGORY LIMITS
-            </h3>
-            <p className="text-xs text-muted mt-1">Bind rigid ISO 2859-1 inspection levels to severity categories.</p>
           </div>
-          <button onClick={handleAddCategory} className="h-9 px-4 rounded-md bg-canvas border border-gray-700 text-brand-secondary hover:text-white hover:bg-brand-primary/20 hover:border-brand-secondary font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none">
-            <Plus className="w-4 h-4" strokeWidth={2} />
-            <span>ADD CATEGORY</span>
-          </button>
-        </div>
-        
-        <div className="p-5 overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[700px]">
-            <thead>
-              <tr className="border-b border-gray-800">
-                <th className="pb-3 pl-2 text-[10px] font-bold text-muted uppercase tracking-wider">Severity Category</th>
-                <th className="pb-3 text-[10px] font-bold text-brand-secondary uppercase tracking-wider w-48">Target AQL Level</th>
-                <th className="pb-3 text-[10px] font-bold text-muted uppercase tracking-wider w-48">Evaluation Mode</th>
-                <th className="pb-3 pr-2 text-[10px] font-bold text-muted uppercase tracking-wider text-right w-16">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-800/50">
-              {activeCategories.map((cat: any) => {
-                const Icon = IconMap[cat.iconName] || ShieldAlert;
-                const isAutoLocked = cat.aql === 'AND' || cat.aql === 'PASS/FAIL/NIL';
 
-                return (
-                  <tr key={cat.id} className="hover:bg-surface/50 transition-colors group">
-                    <td className="py-4 pl-2">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-lg ${cat.bg} flex items-center justify-center shrink-0`}>
-                          <Icon className={`w-4 h-4 ${cat.color}`} strokeWidth={2.5} />
-                        </div>
-                        <span className="text-sm font-bold tracking-wide text-primary">{cat.name}</span>
-                      </div>
-                    </td>
-                    
-                    <td className="py-4 pr-4">
-                      <select 
-                        value={cat.aql}
-                        onChange={(e) => handleUpdateCategory(cat.id, 'aql', e.target.value)}
-                        className="w-full h-10 px-3 rounded-md bg-surface border border-gray-700 text-brand-secondary font-mono text-sm font-bold focus:border-brand-secondary outline-none transition-all cursor-pointer"
-                      >
-                        {ISO_WHITELIST.map(aql => (
-                          <option key={aql} value={aql}>{aql}</option>
-                        ))}
-                      </select>
-                    </td>
-
-                    <td className="py-4 pr-4">
-                      <div className="relative">
-                        <select 
-                          value={cat.evalMode}
-                          onChange={(e) => handleUpdateCategory(cat.id, 'evalMode', e.target.value)}
-                          disabled={isAutoLocked}
-                          className={`w-full h-10 px-3 rounded-md border font-mono text-xs font-semibold outline-none transition-all ${
-                            isAutoLocked 
-                              ? 'bg-canvas border-gray-800 text-gray-500 cursor-not-allowed opacity-50' 
-                              : 'bg-surface border-gray-700 text-primary focus:border-brand-secondary cursor-pointer'
-                          }`}
-                        >
-                          {isAutoLocked ? (
-                            <option value="N/A">N/A (Auto-Locked)</option>
-                          ) : (
-                            EVAL_MODES.map(mode => (
-                              <option key={mode} value={mode}>{mode} Plan</option>
-                            ))
-                          )}
-                        </select>
-                        {isAutoLocked && (
-                          <Lock className="w-3.5 h-3.5 text-gray-500 absolute right-8 top-3" strokeWidth={2} />
-                        )}
-                      </div>
-                    </td>
-
-                    <td className="py-4 pr-2 text-right">
-                      <button onClick={() => handleRemoveCategory(cat.id)} className="w-8 h-8 rounded flex items-center justify-center text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-colors outline-none ml-auto">
-                        <Trash className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          {editingProfileId === activeProfileId ? (
+            <div className="flex items-center gap-2 bg-surface p-1 rounded-lg border border-brand-secondary shadow-sm">
+              <input
+                autoFocus
+                value={editProfileName}
+                onChange={e => setEditProfileName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveProfileEdit(activeProfileId);
+                  if (e.key === 'Escape') setEditingProfileId(null);
+                }}
+                className="h-10 px-3 bg-canvas border border-gray-700 rounded text-sm font-semibold uppercase text-primary outline-none focus:border-brand-secondary w-48"
+              />
+              <button onClick={() => saveProfileEdit(activeProfileId)} className="h-10 px-3 rounded bg-brand-primary/20 text-brand-secondary hover:bg-brand-primary/30 flex items-center gap-2 font-bold text-xs outline-none">
+                <Check className="w-4 h-4" /> SAVE
+              </button>
+              <button onClick={() => setEditingProfileId(null)} className="h-10 px-3 rounded bg-canvas text-muted hover:text-white border border-gray-700 flex items-center gap-2 font-bold text-xs outline-none">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button onClick={() => { setEditingProfileId(activeProfileId); setEditProfileName(activeProfile.name); }} className="h-12 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-white flex items-center gap-2 font-bold text-xs transition-colors outline-none">
+                <Edit2 className="w-4 h-4" /> RENAME
+              </button>
+              {!activeProfile?.isDefault && (
+                <button onClick={() => handleSetDefaultProfile(activeProfileId)} className="h-12 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-emerald-400 hover:border-emerald-500/30 flex items-center gap-2 font-bold text-xs transition-colors outline-none">
+                  <Check className="w-4 h-4" /> SET AS DEFAULT
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* ── Section 2: Defect Management Kanban Board ──────────────────────── */}
+      {/* ── Split Grid: Defect Category Setup + ISO Sample Sizes ────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {/* ── Left (2/3): Defect Category Setup ─────────────────────────────── */}
+        <div className="lg:col-span-2 bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
+          <div className="p-5 border-b border-gray-800 bg-surface flex justify-between items-center">
+            <div>
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+                <Settings2 className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
+                DEFECT CATEGORY SETUP
+              </h3>
+              <p className="text-xs text-muted mt-1">Bind ISO 2859-1 inspection levels to severity categories.</p>
+            </div>
+            <button
+              onClick={handleAddCategory}
+              className="h-9 px-4 rounded-md bg-canvas border border-gray-700 text-brand-secondary hover:text-white hover:bg-brand-primary/20 hover:border-brand-secondary font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0"
+            >
+              <Plus className="w-4 h-4" strokeWidth={2} />
+              <span>ADD</span>
+            </button>
+          </div>
+
+          <div className="p-5 overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[480px]">
+              <thead>
+                <tr className="border-b border-gray-800">
+                  <th className="pb-3 pl-2 text-[10px] font-bold text-muted uppercase tracking-wider">Severity Category</th>
+                  <th className="pb-3 text-[10px] font-bold text-brand-secondary uppercase tracking-wider w-36">AQL Level</th>
+                  <th className="pb-3 text-[10px] font-bold text-muted uppercase tracking-wider w-40">Eval Mode</th>
+                  <th className="pb-3 pr-2 text-[10px] font-bold text-muted uppercase tracking-wider text-right w-12">Act.</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800/50">
+                {activeCategories.map((cat: any) => {
+                  const Icon = IconMap[cat.iconName] || ShieldAlert;
+                  const isAutoLocked = cat.aql === 'AND' || cat.aql === 'PASS/FAIL/NIL';
+
+                  return (
+                    <tr key={cat.id} className="hover:bg-surface/50 transition-colors group">
+                      <td className="py-4 pl-2">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-lg ${cat.bg} flex items-center justify-center shrink-0`}>
+                            <Icon className={`w-4 h-4 ${cat.color}`} strokeWidth={2.5} />
+                          </div>
+                          <span className="text-sm font-bold tracking-wide text-primary">{cat.name}</span>
+                        </div>
+                      </td>
+
+                      <td className="py-4 pr-3">
+                        <select
+                          value={cat.aql}
+                          onChange={(e) => handleUpdateCategory(cat.id, 'aql', e.target.value)}
+                          className="w-full h-10 px-3 rounded-md bg-surface border border-gray-700 text-brand-secondary font-mono text-sm font-bold focus:border-brand-secondary outline-none transition-all cursor-pointer"
+                        >
+                          {ISO_WHITELIST.map(aql => (
+                            <option key={aql} value={aql}>{aql}</option>
+                          ))}
+                        </select>
+                      </td>
+
+                      <td className="py-4 pr-3">
+                        <div className="relative">
+                          <select
+                            value={cat.evalMode}
+                            onChange={(e) => handleUpdateCategory(cat.id, 'evalMode', e.target.value)}
+                            disabled={isAutoLocked}
+                            className={`w-full h-10 px-3 rounded-md border font-mono text-xs font-semibold outline-none transition-all ${
+                              isAutoLocked
+                                ? 'bg-canvas border-gray-800 text-gray-500 cursor-not-allowed opacity-50'
+                                : 'bg-surface border-gray-700 text-primary focus:border-brand-secondary cursor-pointer'
+                            }`}
+                          >
+                            {isAutoLocked ? (
+                              <option value="N/A">N/A (Auto-Locked)</option>
+                            ) : (
+                              EVAL_MODES.map(mode => (
+                                <option key={mode} value={mode}>{mode}</option>
+                              ))
+                            )}
+                          </select>
+                          {isAutoLocked && (
+                            <Lock className="w-3.5 h-3.5 text-gray-500 absolute right-8 top-3" strokeWidth={2} />
+                          )}
+                        </div>
+                      </td>
+
+                      <td className="py-4 pr-2 text-right">
+                        <button
+                          onClick={() => handleRemoveCategory(cat.id)}
+                          className="w-8 h-8 rounded flex items-center justify-center text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-colors outline-none ml-auto"
+                        >
+                          <Trash className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* ── Right (1/3): ISO Sample Sizes ──────────────────────────────────── */}
+        <div className="lg:col-span-1 bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm flex flex-col">
+          <div className="p-5 border-b border-gray-800 bg-surface">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+              <ListOrdered className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
+              ISO SAMPLE SIZES
+            </h3>
+            <p className="text-xs text-muted mt-1">Standard AQL bracket sizes for lot sampling.</p>
+          </div>
+
+          <div className="p-5 flex flex-col gap-2 flex-1">
+            <div className="flex flex-col gap-1.5 max-h-72 overflow-y-auto pr-1">
+              {sampleSizes.map((size, idx) => (
+                <div
+                  key={size}
+                  className="h-10 pl-3 pr-1 rounded-lg bg-surface border border-gray-700 flex items-center justify-between group shrink-0"
+                >
+                  {editingSampleSize === size ? (
+                    <div className="relative flex items-center w-full gap-1">
+                      <div className="relative flex-1 min-w-0">
+                        <input
+                          type="number"
+                          autoFocus
+                          value={editSampleSizeVal}
+                          onChange={(e) => setEditSampleSizeVal(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleEditSampleSize(size, editSampleSizeVal);
+                            if (e.key === 'Escape') setEditingSampleSize(null);
+                          }}
+                          className="w-full h-7 px-2 pr-12 rounded bg-canvas border border-brand-secondary text-primary font-mono text-xs outline-none"
+                        />
+                        <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[9px] text-muted font-mono pointer-events-none">Enter ↵</span>
+                      </div>
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <button onClick={() => handleEditSampleSize(size, editSampleSizeVal)} className="w-6 h-6 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-500/20 outline-none">
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => setEditingSampleSize(null)} className="w-6 h-6 rounded flex items-center justify-center text-rose-400 hover:bg-rose-500/20 outline-none">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <span className="font-mono text-sm font-bold text-primary">{size}</span>
+                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => handleMoveSampleSize(size, 'up')} disabled={idx === 0} className="w-6 h-6 rounded flex items-center justify-center text-muted hover:text-primary disabled:opacity-20 outline-none">
+                          <ArrowUp className="w-3 h-3" />
+                        </button>
+                        <button onClick={() => handleMoveSampleSize(size, 'down')} disabled={idx === sampleSizes.length - 1} className="w-6 h-6 rounded flex items-center justify-center text-muted hover:text-primary disabled:opacity-20 outline-none">
+                          <ArrowDown className="w-3 h-3" />
+                        </button>
+                        <button onClick={() => { setEditingSampleSize(size); setEditSampleSizeVal(String(size)); }} className="w-6 h-6 rounded flex items-center justify-center text-muted hover:text-white hover:bg-gray-700 outline-none">
+                          <Edit2 className="w-3 h-3" />
+                        </button>
+                        <button onClick={() => handleRemoveSampleSize(size)} className="w-6 h-6 rounded flex items-center justify-center text-muted hover:text-rose-400 hover:bg-rose-500/10 outline-none">
+                          <Trash className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {isAddingSampleSize ? (
+              <div className="mt-2 bg-canvas border border-gray-700 rounded-lg p-2 flex items-center gap-1">
+                <div className="relative flex-1 min-w-0">
+                  <input
+                    type="number"
+                    autoFocus
+                    value={newSampleSize}
+                    onChange={(e) => setNewSampleSize(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleAddSampleSize();
+                      if (e.key === 'Escape') { setIsAddingSampleSize(false); setNewSampleSize(''); }
+                    }}
+                    placeholder="e.g. 800"
+                    className="w-full h-8 px-2 pr-14 text-xs bg-surface border border-brand-secondary rounded outline-none text-primary font-mono"
+                  />
+                  <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[9px] text-muted font-mono pointer-events-none">Enter ↵</span>
+                </div>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button onClick={handleAddSampleSize} className="p-1.5 rounded text-emerald-400 hover:bg-emerald-500/20 outline-none">
+                    <Check className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={() => { setIsAddingSampleSize(false); setNewSampleSize(''); }} className="p-1.5 rounded text-rose-400 hover:bg-rose-500/20 outline-none">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsAddingSampleSize(true)}
+                className="mt-2 w-full h-10 rounded-lg border border-dashed border-gray-700 text-muted hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 flex items-center justify-center gap-2 font-semibold text-[11px] uppercase tracking-wider transition-all outline-none"
+              >
+                <Plus className="w-3.5 h-3.5" /> ADD SIZE
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Section: Defect Management Kanban Board ──────────────────────────── */}
       <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm flex flex-col">
         <div className="p-5 border-b border-gray-800 bg-surface">
           <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">

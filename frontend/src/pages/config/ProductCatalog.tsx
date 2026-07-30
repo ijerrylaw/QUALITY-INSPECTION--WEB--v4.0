@@ -31,7 +31,6 @@ export function ProductCatalog() {
   const [lines, setLines] = useState<LineOption[]>([]);
   const [shifts, setShifts] = useState<ShiftOption[]>([]);
   const [sizes, setSizes] = useState<string[]>([]);
-  const [sampleSizes, setSampleSizes] = useState<number[]>([]);
 
   // Local state for edits - SKU Builder Dictionaries
   const [productCodes, setProductCodes] = useState<string[]>([]);
@@ -48,7 +47,6 @@ export function ProductCatalog() {
       setLines(config.lines || []);
       setShifts(config.shifts || []);
       setSizes(config.sizes || []);
-      setSampleSizes(config.sampleSizes || []);
       
       setProductCodes(config.productCodes || []);
       setSkuMaterials(config.skuMaterials || []);
@@ -71,7 +69,6 @@ export function ProductCatalog() {
         lines,
         shifts,
         sizes,
-        sampleSizes,
         productCodes,
         skuMaterials,
         skuWeights,
@@ -187,27 +184,6 @@ export function ProductCatalog() {
               </div>
             ))}
           </div>
-        </div>
-
-        {/* AQL Sample Sizes */}
-        <div className="bg-surface border border-gray-800 rounded-lg p-6 flex flex-col gap-4">
-          <div className="flex items-center gap-3 border-b border-gray-800/60 pb-3">
-            <Ruler className="w-5 h-5 text-brand-secondary" strokeWidth={2} />
-            <h3 className="text-lg font-semibold uppercase text-primary tracking-wide">
-              AQL SAMPLE SIZES
-            </h3>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {sampleSizes.map((ss) => (
-              <div 
-                key={ss} 
-                className="bg-brand-primary/10 text-brand-secondary border border-brand-secondary/30 text-xs font-semibold rounded-lg px-3 py-2 font-mono"
-              >
-                {ss}
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
 
       {/* ── SKU Builder Dictionaries ───────────────────────────────────────── */}

@@ -48,7 +48,8 @@ import {
   AlertTriangle, 
   Save, 
   X,
-  Check
+  Check,
+  RotateCcw
 } from 'lucide-react';
 import { FactorySetup } from './config/FactorySetup';
 import { ProductEngine } from './config/ProductEngine';
@@ -80,6 +81,7 @@ export function ConfigPage() {
   
   // Holds the intended target tab if user tries to navigate away while dirty
   const [pendingTab, setPendingTab] = useState<ConfigTab | null>(null);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
 
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
@@ -113,6 +115,13 @@ export function ConfigPage() {
 
   const cancelNavigation = () => {
     setPendingTab(null);
+  };
+
+  const handleConfirmDiscard = () => {
+    setDraftConfig({});
+    refreshConfig();
+    setShowDiscardConfirm(false);
+    addToast('info', 'All unsaved configuration changes discarded.');
   };
 
   const handleSave = async () => {
@@ -246,18 +255,30 @@ export function ConfigPage() {
           )}
         </div>
 
-        <button
-          onClick={handleSave}
-          disabled={!isDirty}
-          className={`h-10 px-8 rounded-lg font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none ${
-            isDirty 
-              ? 'bg-accent-gradient text-white shadow-lg shadow-brand-primary/20 hover:brightness-110'
-              : 'bg-canvas text-gray-600 border border-gray-800 cursor-not-allowed opacity-50'
-          }`}
-        >
-          <Save className="w-4 h-4" strokeWidth={2} />
-          <span>SAVE CONFIGURATION</span>
-        </button>
+        <div className="flex items-center gap-3">
+          {isDirty && (
+            <button
+              onClick={() => setShowDiscardConfirm(true)}
+              className="h-10 px-5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/30 font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none"
+            >
+              <RotateCcw className="w-4 h-4" strokeWidth={2} />
+              <span>DISCARD CHANGES</span>
+            </button>
+          )}
+
+          <button
+            onClick={handleSave}
+            disabled={!isDirty}
+            className={`h-10 px-8 rounded-lg font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none ${
+              isDirty 
+                ? 'bg-accent-gradient text-white shadow-lg shadow-brand-primary/20 hover:brightness-110'
+                : 'bg-canvas text-gray-600 border border-gray-800 cursor-not-allowed opacity-50'
+            }`}
+          >
+            <Save className="w-4 h-4" strokeWidth={2} />
+            <span>SAVE CONFIGURATION</span>
+          </button>
+        </div>
       </div>
 
       {/* ── Tab Content Area (Placeholders for Steps 11-13) ────────────────── */}
@@ -328,6 +349,44 @@ export function ConfigPage() {
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* ── Discard Confirmation Modal ────────────────────────────────────── */}
+      {showDiscardConfirm && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-canvas border border-gray-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
+            <div className="flex items-start gap-4 p-6 border-b border-gray-800">
+              <div className="w-12 h-12 rounded-full bg-rose-500/10 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-6 h-6 text-rose-400" strokeWidth={2} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold uppercase tracking-wide text-primary mb-1">
+                  DISCARD CONFIGURATION?
+                </h3>
+                <p className="text-sm text-muted">
+                  Are you sure you want to discard all unsaved edits in the <span className="font-bold text-white uppercase">{activeTab}</span> configuration? All unsaved modifications will be reverted.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-surface flex items-center justify-end gap-3">
+              <button
+                onClick={() => setShowDiscardConfirm(false)}
+                className="h-10 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-white font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none"
+              >
+                <X className="w-4 h-4" strokeWidth={2} />
+                <span>KEEP EDITING</span>
+              </button>
+              <button
+                onClick={handleConfirmDiscard}
+                className="h-10 px-5 rounded-lg bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none border border-rose-500/50 shadow-sm"
+              >
+                <RotateCcw className="w-4 h-4" strokeWidth={2} />
+                <span>CONFIRM DISCARD</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

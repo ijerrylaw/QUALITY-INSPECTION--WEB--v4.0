@@ -49,16 +49,16 @@ export function WizardPage() {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-gray-800/80 pb-6">
         <div>
           <h1 className="text-3xl font-bold uppercase tracking-tight text-primary">
-            QUALITY INSPECTION
+            QUALITY ENTRY WIZARD
           </h1>
           <p className="text-sm font-normal text-muted mt-1">
-            Record batch inspection data using the wizard or batch grid.
+            Record batch inspection data using single entry wizard or batch entry grid.
           </p>
         </div>
 
         {/* Dual-Mode Header Switcher Component */}
         <div className="inline-flex bg-canvas p-1 rounded-lg border border-gray-800 h-12 items-center gap-1 shadow-inner">
-          {/* Guided Wizard Toggle */}
+          {/* Single Entry Toggle */}
           <button
             onClick={() => setEntryMode('GUIDED')}
             className={
@@ -68,10 +68,10 @@ export function WizardPage() {
             }
           >
             <Wand2 className="w-4 h-4" strokeWidth={2} />
-            Guided 4-Step Wizard
+            Single Entry
           </button>
           
-          {/* Spreadsheet Grid Toggle */}
+          {/* Batch Entry Toggle */}
           <button
             onClick={() => setEntryMode('SPREADSHEET')}
             className={
@@ -81,7 +81,7 @@ export function WizardPage() {
             }
           >
             <Table className="w-4 h-4" strokeWidth={2} />
-            Spreadsheet Grid
+            Batch Entry
           </button>
         </div>
       </div>

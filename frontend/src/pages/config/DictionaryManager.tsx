@@ -76,17 +76,17 @@ export function DictionaryManager({
       <div className="p-3 flex-1 overflow-y-auto">
         <div className="flex flex-col gap-2">
           {options.map((opt, idx) => (
-            <div key={opt.value} className="min-h-8 py-1 pl-2 pr-1 rounded bg-surface border border-gray-700 flex flex-col justify-center group">
+            <div key={opt.value} className="min-h-8 py-1 pl-2 pr-1 rounded bg-surface border border-gray-700 flex flex-col justify-center group relative">
               {editingVal === opt.value ? (
-                <div className="flex items-center gap-1">
-                  <input 
-                    type="text" 
-                    autoFocus
-                    value={editInputVal} 
-                    onChange={(e) => setEditInputVal(e.target.value.toUpperCase().slice(0, maxLength))}
-                    className="w-12 h-6 px-1 rounded bg-canvas border border-brand-secondary text-primary font-mono text-[10px] outline-none"
-                  />
-                  <div className="relative flex-1 min-w-0">
+                <div className="flex items-start gap-1 py-1">
+                  <div className="flex flex-col gap-1 w-full min-w-0">
+                    <input 
+                      type="text" 
+                      autoFocus
+                      value={editInputVal} 
+                      onChange={(e) => setEditInputVal(e.target.value.toUpperCase().slice(0, maxLength))}
+                      className="w-full h-7 px-1.5 rounded bg-canvas border border-brand-secondary text-primary font-mono text-xs outline-none uppercase"
+                    />
                     <input 
                       type="text" 
                       value={editInputLbl} 
@@ -95,28 +95,25 @@ export function DictionaryManager({
                         if (e.key === 'Enter') saveEdit();
                         if (e.key === 'Escape') setEditingVal(null);
                       }}
-                      className="w-full h-6 px-1 pr-12 rounded bg-canvas border border-brand-secondary text-primary text-[10px] outline-none"
+                      className="w-full h-7 px-1.5 rounded bg-canvas border border-gray-700 focus:border-brand-secondary text-primary text-xs outline-none"
                     />
-                    <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[8px] text-muted font-mono pointer-events-none">
-                      Enter ↵
-                    </span>
                   </div>
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    <button onClick={saveEdit} className="w-5 h-5 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-500/20 outline-none" title="Save">
+                  <div className="flex flex-col gap-1 shrink-0">
+                    <button onClick={saveEdit} className="w-6 h-6 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-500/20 outline-none" title="Save">
                       <Check className="w-3 h-3" />
                     </button>
-                    <button onClick={() => setEditingVal(null)} className="w-5 h-5 rounded flex items-center justify-center text-rose-400 hover:bg-rose-500/20 outline-none" title="Cancel (Esc)">
+                    <button onClick={() => setEditingVal(null)} className="w-6 h-6 rounded flex items-center justify-center text-rose-400 hover:bg-rose-500/20 outline-none" title="Cancel (Esc)">
                       <X className="w-3 h-3" />
                     </button>
                   </div>
                 </div>
               ) : (
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold text-brand-secondary">{opt.value}</span>
-                    <span className="text-xs text-primary truncate max-w-[90px]">{opt.label}</span>
+                <div className="flex items-center w-full">
+                  <div className="flex flex-col gap-0.5 overflow-hidden w-full py-0.5">
+                    <span className="font-mono text-xs font-bold text-brand-secondary shrink-0">{opt.value}</span>
+                    <span className="text-xs text-primary truncate leading-tight pr-6">{opt.label}</span>
                   </div>
-                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-surface pl-4 bg-gradient-to-r from-transparent via-surface to-surface">
                     {onMove && (
                       <>
                         <button onClick={() => onMove(opt.value, 'up')} disabled={idx === 0} className="w-5 h-5 rounded flex items-center justify-center text-muted hover:text-primary disabled:opacity-30 outline-none">
@@ -142,16 +139,16 @@ export function DictionaryManager({
           ))}
           
           {isAdding && (
-            <div className="min-h-8 py-1 pl-2 pr-1 rounded bg-surface border border-gray-700 flex items-center gap-1">
-              <input
-                ref={valInputRef}
-                type="text"
-                value={newVal}
-                onChange={(e) => setNewVal(e.target.value.toUpperCase().slice(0, maxLength))}
-                placeholder={valuePlaceholder}
-                className="w-12 h-6 px-1 rounded bg-canvas border border-brand-secondary text-primary font-mono text-[10px] outline-none uppercase"
-              />
-              <div className="relative flex-1 min-w-0">
+            <div className="min-h-8 py-1.5 pl-2 pr-1 rounded bg-surface border border-gray-700 flex items-start gap-1">
+              <div className="flex flex-col gap-1 w-full min-w-0">
+                <input
+                  ref={valInputRef}
+                  type="text"
+                  value={newVal}
+                  onChange={(e) => setNewVal(e.target.value.toUpperCase().slice(0, maxLength))}
+                  placeholder={valuePlaceholder}
+                  className="w-full h-7 px-1.5 rounded bg-canvas border border-brand-secondary text-primary font-mono text-xs outline-none uppercase"
+                />
                 <input
                   type="text"
                   value={newLbl}
@@ -161,17 +158,14 @@ export function DictionaryManager({
                     if (e.key === 'Escape') setIsAdding(false);
                   }}
                   placeholder={labelPlaceholder}
-                  className="w-full h-6 px-1 pr-12 rounded bg-canvas border border-brand-secondary text-primary text-[10px] outline-none"
+                  className="w-full h-7 px-1.5 rounded bg-canvas border border-gray-700 focus:border-brand-secondary text-primary text-xs outline-none"
                 />
-                <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[8px] text-muted font-mono pointer-events-none">
-                  Enter ↵
-                </span>
               </div>
-              <div className="flex items-center gap-0.5 shrink-0">
-                <button onClick={handleSaveNew} className="w-5 h-5 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-500/20 outline-none" title="Save">
+              <div className="flex flex-col gap-1 shrink-0">
+                <button onClick={handleSaveNew} className="w-6 h-6 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-500/20 outline-none" title="Save">
                   <Check className="w-3 h-3" />
                 </button>
-                <button onClick={() => setIsAdding(false)} className="w-5 h-5 rounded flex items-center justify-center text-rose-400 hover:bg-rose-500/20 outline-none" title="Cancel (Esc)">
+                <button onClick={() => setIsAdding(false)} className="w-6 h-6 rounded flex items-center justify-center text-rose-400 hover:bg-rose-500/20 outline-none" title="Cancel (Esc)">
                   <X className="w-3 h-3" />
                 </button>
               </div>

@@ -244,6 +244,7 @@ model AppConfig {
   // --- Dynamic Configuration Data ---
   dimensions          String   @default("[]")
   targetWeight        String   @default("{\"target\":0,\"tolerance\":0}")
+  productMatrixConfig String   @default("{}")
   aqlCategories       String   @default("[]")
   defectDefinitions   String   @default("[]")
   inspectionProfiles  String   @default("[]")

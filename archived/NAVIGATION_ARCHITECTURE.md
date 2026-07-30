@@ -51,11 +51,11 @@ The Left Sidebar dynamically adapts based on the authenticated user's role:
 
 | Route | Icon (Lucide 2px) | Label | Target Role | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `/wizard` | `ClipboardCheck` | **QUALITY INSPECTION** | All Roles | 4-Step Wizard: 1. Inspection Metadata & Setup (Mandatory) ➔ 2. Physical Dimensions (30-Slot Stats & Deltas) ➔ 3. Defect Tabulation ➔ 4. Review & Submit. |
+| `/wizard` | `ClipboardCheck` | **QUALITY ENTRY WIZARD** | All Roles | Dual-Mode Entry: Single Entry (4-Step Wizard: Metadata ➔ Physical Dimensions ➔ Defect Tabulation ➔ Review & Submit) & Batch Entry (Spreadsheet Grid). |
 | `/history` | `History` | **INSPECTION RECORDS** | All Roles | Searchable data table of past tests. Includes **Bulk CSV/Excel Import** for supervisors. |
 | `/approvals` | `ShieldAlert` | **APPROVALS QUEUE** | Manager, Exec, Admin | Side-by-side diff viewer for pending amendment requests. |
 | `/analytics` | `BarChart3` | **QUALITY ANALYTICS** | Supervisor, Executive, Manager, Admin | Dynamic Pareto charts, pass/fail trends, machine comparisons. |
-| `/config` | `Sliders` | **CONFIGURATION CONTROL** | Manager, Exec, Admin | Config engine grouped into 3 submenus:<br>• **Factory & Line Setup:** Lines (A001), Shifts (08:00-19:59), Sides (A/Z).<br>• **Product Engine:** SKU Code Builder, SKU Dimension Specs (Min & Tolerance), Sizes, ISO Sample Sizes.<br>• **Quality Rules:** Inspection Profiles, AQL Levels, Defect Management Kanban Board (+Add/Edit/Delete & Drag-and-Drop). |
+| `/config` | `Sliders` | **CONFIGURATION CONTROL** | Manager, Exec, Admin | See `V4_MASTER_BLUEPRINT.md` Section 9.4 for deep-dive breakdown. |
 | `/system` | `Settings` | **SYSTEM & TENANT ADMIN** | System Admin Only | Azure AD, SharePoint List sync settings, User Role assignments. |
 
 ---

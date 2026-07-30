@@ -66,8 +66,8 @@ export function StepMetadata({ onNext, initialData }: StepMetadataProps) {
   useEffect(() => {
     if (config && productCode) {
       const mapped = config.productProfileMap?.[productCode];
-      if (mapped) {
-        setProfileId(mapped);
+      if (mapped && mapped.length > 0) {
+        setProfileId(mapped[0]);
       } else if (config.inspectionProfiles?.[0]) {
         setProfileId(config.inspectionProfiles[0].id);
       }

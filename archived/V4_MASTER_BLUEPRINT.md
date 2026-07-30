@@ -136,7 +136,8 @@ export interface AppConfig {
   sampleSizes: number[];
   aqlCategories?: AQLCategory[];
   inspectionProfiles?: InspectionProfile[];
-  productProfileMap?: Record<string, string>; // Maps productCode -> profileId
+  productProfileMap?: Record<string, string[]>; // Maps productCode -> array of profileIds
+  productMatrixConfig?: Record<string, ProductConfig>;
   
   // Custom SKU Builder dictionaries
   skuMaterials?: SkuOption[];
@@ -145,6 +146,29 @@ export interface AppConfig {
   skuTreatments?: SkuOption[];
   skuLengths?: SkuOption[];
   skuTextures?: SkuOption[];
+}
+
+export interface ProductDimensionDef {
+  id: string;
+  name: string;
+  unit: string;
+  isMin?: boolean; // If true, tolerance inputs are locked to "MIN" for all sizes
+}
+
+export interface ProductDimensionValue {
+  minSpec: string;
+  tolerance: string;
+}
+
+export interface SizeConfig {
+  weightTarget: string;
+  weightTolerance: string;
+  dimensions: Record<string, ProductDimensionValue>; // keyed by dimension id
+}
+
+export interface ProductConfig {
+  dimensionDefs: ProductDimensionDef[];
+  sizes: Record<string, SizeConfig>;
 }
 ```
 
@@ -166,7 +190,7 @@ The evaluation function (`evaluateAQLVerdict`) determines PASS/FAIL based on map
 
 ### SKU Parsing & Mapping
 SKUs are highly structured combinations of traits (Material + Weight + Color + Treatment + Length + Texture). E.g., `N035SKB-OC-24FT`.
-- The system maps specific SKUs to specific `InspectionProfiles` (`productProfileMap`). This allows a strict customer (e.g., Ansell) to require tighter AQL levels (e.g., 0.65 for Barrier) for specific product codes, overriding the standard factory defaults (1.0).
+- The system maps specific SKUs to multiple `InspectionProfiles` (`productProfileMap`). This allows a strict customer (e.g., Ansell) to require tighter AQL levels (e.g., 0.65 for Barrier) for specific product codes, overriding the standard factory defaults (1.0).
 
 ---
 
@@ -185,7 +209,7 @@ The system reduces operator cognitive load by linking complex parameters and aut
 
 ### Linked Parameters
 - **SKU Specification Linking:** The Product Code (SKU) is not manually typed; it is dynamically linked to and constructed from discrete product specifications (Material, Weight, Color, Treatment, Length, Texture) defined in the config.
-- **SKU to Profile Mapping:** When an operator selects an SKU, the system dynamically queries the `productProfileMap`. This links the SKU to a specific `InspectionProfile`, automatically loading the correct AQL categories, limits, and defect definitions for that product run.
+- **SKU to Profile Mapping:** When an operator selects an SKU, the system dynamically queries the `productProfileMap`. This links the SKU to available `InspectionProfiles`, allowing the operator to select the correct profile for that product run, which then loads the AQL categories, limits, and defect definitions.
 - **Sample Size Bracketing:** The Sample Size input is mathematically linked to the AQL acceptance/rejection thresholds. Changing the sample size dynamically traverses the ISO 2859-1 matrix to recalculate passing parameters in real-time.
 - **State Persistence:** Form fields (Machine ID, Shift, Glove Size, Side) are linked to local storage. Upon completing an inspection, these values automatically pre-populate the next wizard session, assuming contiguous batch testing.
 
@@ -193,6 +217,10 @@ The system reduces operator cognitive load by linking complex parameters and aut
 - **Batch & Lot Number Automation:** To eliminate manual data-entry typos on critical identifiers, the system automatically derives and constructs the formal Batch Number, Lot Number, and Sequence Number directly from the system Date, Time, Shift, and Machine ID.
   - **Julian Date Conversion:** Dates are automatically mathematically compressed into 3-digit Julian Days (e.g., Feb 1st = `032`) for precise, standardized barcode generation.
   - **Night Shift Rollover Logic:** If an inspection occurs between Midnight and the start of the Morning Shift, the system automatically assigns it to Shift 'Night' and mathematically subtracts 1 day from the effective Production Date (for Lot generation) to maintain strict continuous-batch integrity.
+- **Shift Auto-Formatting & Overlap Validation:** 
+  - Time inputs are automatically formatted as 2-digit zero-padded numbers (e.g., `08:00`). 
+  - Live schedule range badges use the 1-minute subtract format (e.g., `08:00 - 19:59` for a 12-hour duration). 
+  - If two shifts overlap in their working hour coverage, the system visually highlights the affected shift card and displays an inline warning.
 - **Dynamic Glove Weight:** The system dynamically extracts the standard glove weight directly from characters 1 to 3 of the Product Code (e.g., `N035SKB-OC-24FT` -> `3.50g`) and auto-populates the wizard/grid.
 - **Real-Time Verdict Automation:** The engine continuously evaluates inputted defect counts against the active AQL thresholds. The final PASS / FAIL verdict is entirely automated; operators cannot manually override the math.
 - **Timestamp & Telemetry Automation:** `submissionTimestamp` is automatically generated with millisecond precision upon submission, preventing backdating.
@@ -245,7 +273,7 @@ This means an Admin can completely overhaul the corporate look and feel of the p
 - **Target Role:** Admin.
 - **State/Workflow:** Complex form UI for editing `AppConfig`. Organized into three clean Left Sidebar submenus without numeric prefixes:
   - **Factory & Line Setup:** Manage Production Lines (Factory Code + 3 digits, e.g. 'A001'), Shift Patterns (automated by working hours), and Sides ('A' or 'Z').
-  - **Product Engine:** Strict Product Code builder enforcing character lengths (e.g., 3-digit weight, 3-char color), SKU Dimension Target Matrix (Min Spec + Tolerance), Glove Sizes, and ISO Sampling Sizes.
+  - **Product Engine:** Strict top-down workflow enforcing: 1. Product Code Dictionary, 2. Product Code Registration, 3. Registered Products with SKU Dimension Target Matrices (including locked baseline physical specs: Glove Weight, Glove Length, and Palm Width), and 4. ISO Sample Sizes.
   - **Quality Rules:** Manage Inspection Profiles, AQL Levels, and Evaluation Modes (`CUMULATIVE`, `GRANULAR`, `N/A`). AQL Level selection is strictly guarded by an immutable ISO 2859 whitelist dropdown containing only 8 valid options (`AND`, `0.65`, `1.0`, `1.5`, `2.5`, `4.0`, `6.5`, `PASS / FAIL / NIL`). Free-text registration of non-ISO AQLs (e.g. 0.7, 1.8) is strictly prohibited. When `AND` or `PASS / FAIL / NIL` is selected, Evaluation Mode automatically locks to `N/A`.
 - **Save Changes Pattern:** Each individual submenu features a dedicated, sticky **"Save Changes" action bar** with a real-time `Unsaved Changes` dirty state indicator. Switching submenus with unsaved edits triggers a confirmation modal asking the user to save or discard changes.
 - **Interactions:** 

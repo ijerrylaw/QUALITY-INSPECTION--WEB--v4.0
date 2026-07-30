@@ -20,8 +20,7 @@ import {
   Box, 
   Ruler, 
   ShieldAlert, 
-  ArrowRight,
-  Key
+  ArrowRight
 } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastProvider';
 
@@ -36,7 +35,6 @@ export function StepReviewSubmit({ inspectionData, onSubmit, onBack }: StepRevie
   
   // Retain Context feature state (defaults to true for rapid entry loop)
   const [retainContext, setRetainContext] = useState<boolean>(true);
-  const [token, setToken] = useState<string>('');
 
   // ── Auto-Generate Final Verdict (ISO 2859-1 Mock Logic) ─────────────────
   const { verdict, reason, totalDefects, failedDimensions } = useMemo(() => {
@@ -80,10 +78,6 @@ export function StepReviewSubmit({ inspectionData, onSubmit, onBack }: StepRevie
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token.trim()) {
-      addToast('error', 'Please enter Operator Token to authorize submission.');
-      return;
-    }
     addToast('success', 'Inspection submitted to system.');
     onSubmit(retainContext);
   };
@@ -194,26 +188,7 @@ export function StepReviewSubmit({ inspectionData, onSubmit, onBack }: StepRevie
 
       </div>
 
-      {/* ── Authorization Card ─────────────────────────────────────────────── */}
-      <div className="bg-surface border border-gray-800 rounded-xl p-6 shadow-sm">
-        <h3 className="text-sm font-bold uppercase tracking-wider text-primary border-b border-gray-800 pb-3 mb-4 flex items-center gap-2">
-          <Key className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
-          AUTHORIZATION
-        </h3>
-        <div className="flex flex-col md:flex-row md:items-center gap-4">
-          <label className="text-xs font-semibold uppercase tracking-wider text-muted whitespace-nowrap">
-            OPERATOR TOKEN
-          </label>
-          <input 
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="Scan or enter token..."
-            className="w-full md:w-64 h-12 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary outline-none shadow-inner transition-colors focus:ring-1 focus:ring-brand-secondary/50"
-            required
-          />
-        </div>
-      </div>
+
 
       {/* ── Bottom Action Navigation & Toggle ─────────────────────────────── */}
       <div className="flex flex-col md:flex-row items-center justify-between pt-6 border-t border-gray-800 gap-6">

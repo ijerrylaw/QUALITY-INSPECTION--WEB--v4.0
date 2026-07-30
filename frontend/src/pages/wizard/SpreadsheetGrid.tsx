@@ -43,10 +43,10 @@ export function SpreadsheetGrid() {
   const defaultDimensions = [
     { id: 'length', name: 'Glove Length', minSpec: '240', tolerance: '5', unit: 'mm' },
     { id: 'palmWidth', name: 'Palm Width', minSpec: '95', tolerance: '5', unit: 'mm' },
-    { id: 'thickBeading', name: 'Thickness (Beading)', minSpec: '0.050', tolerance: '0.010', unit: 'mm' },
-    { id: 'thickCuff', name: 'Thickness (Cuff)', minSpec: '0.060', tolerance: '0.010', unit: 'mm' },
-    { id: 'thickPalm', name: 'Thickness (Palm)', minSpec: '0.080', tolerance: '0.010', unit: 'mm' },
-    { id: 'thickFinger', name: 'Thickness (Finger)', minSpec: '0.100', tolerance: '0.010', unit: 'mm' }
+    { id: 'thickBeading', name: 'Beading Thickness', minSpec: '0.050', tolerance: '0.010', unit: 'mm' },
+    { id: 'thickCuff', name: 'Cuff Thickness', minSpec: '0.060', tolerance: '0.010', unit: 'mm' },
+    { id: 'thickPalm', name: 'Palm Thickness', minSpec: '0.080', tolerance: '0.010', unit: 'mm' },
+    { id: 'thickFinger', name: 'Finger Thickness', minSpec: '0.100', tolerance: '0.010', unit: 'mm' }
   ];
 
   const activeDimensions = config?.dimensions && config.dimensions.length > 0 

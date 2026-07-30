@@ -35,7 +35,7 @@ interface SidebarItem {
 }
 
 const sidebarItems: SidebarItem[] = [
-  { to: '/wizard', label: 'QUALITY INSPECTION', icon: ClipboardCheck, roles: ['OPERATOR', 'LEADER', 'SUPERVISOR', 'MANAGER', 'ADMIN'] },
+  { to: '/wizard', label: 'QUALITY ENTRY WIZARD', icon: ClipboardCheck, roles: ['OPERATOR', 'LEADER', 'SUPERVISOR', 'MANAGER', 'ADMIN'] },
   { to: '/history', label: 'INSPECTION RECORDS', icon: History, roles: ['OPERATOR', 'LEADER', 'SUPERVISOR', 'MANAGER', 'ADMIN'] },
   { to: '/approvals', label: 'APPROVALS QUEUE', icon: ShieldAlert, roles: ['SUPERVISOR', 'MANAGER', 'ADMIN'] },
   { to: '/analytics', label: 'QUALITY ANALYTICS', icon: BarChart3, roles: ['SUPERVISOR', 'MANAGER', 'ADMIN'] },

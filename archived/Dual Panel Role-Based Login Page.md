@@ -46,7 +46,7 @@ Level 6: ADMIN       ── System IT Administrators(Left Panel: M365 SSO only)
 
 | Route | Label | Operator | Leader | Supervisor | Executive | Manager | Admin |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| `/wizard` | QUALITY INSPECTION | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `/wizard` | QUALITY ENTRY WIZARD | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `/history` | INSPECTION RECORDS | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `/approvals` | APPROVALS QUEUE | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
 | `/analytics` | QUALITY ANALYTICS | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |

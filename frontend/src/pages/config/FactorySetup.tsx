@@ -206,9 +206,10 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       
-      {/* ── Section 1: Production Lines ────────────────────────────────────── */}
-      <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
-        <div className="p-5 border-b border-gray-800 bg-surface flex items-center justify-between">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {/* ── Section 1: Production Lines ────────────────────────────────────── */}
+        <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm flex flex-col h-full">
+          <div className="p-5 border-b border-gray-800 bg-surface flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
               <Activity className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
@@ -414,17 +415,19 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
           
           <button 
             onClick={handleAddSide}
-            className="w-full mt-4 h-10 rounded-md border border-dashed border-gray-700 bg-surface-light/30 text-muted hover:text-brand-secondary hover:border-brand-secondary hover:bg-brand-primary/10 font-semibold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all outline-none"
+            className="w-full mt-4 h-10 shrink-0 rounded-md border border-dashed border-gray-700 bg-surface-light/30 text-muted hover:text-brand-secondary hover:border-brand-secondary hover:bg-brand-primary/10 font-semibold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all outline-none"
           >
             <Plus className="w-4 h-4" strokeWidth={2} />
             <span>ADD SIDE</span>
           </button>
         </div>
       </div>
+      
+      </div> {/* End of Grid Wrapper */}
 
       {/* ── Section 3: Shift Registration ────────────────────────────────── */}
       <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm flex flex-col">
-        <div className="p-5 border-b border-gray-800 bg-surface flex items-center justify-between">
+        <div className="p-5 border-b border-gray-800 bg-surface flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
               <Clock className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
