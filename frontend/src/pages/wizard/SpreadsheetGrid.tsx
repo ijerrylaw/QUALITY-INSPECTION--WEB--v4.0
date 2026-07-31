@@ -56,6 +56,7 @@ export function SpreadsheetGrid() {
   // ── Shared Header Metadata State ──────────────────────────────────────────
   const [profileId, setProfileId] = useState<string>('');
   const [productCode, setProductCode] = useState<string>('');
+  const [gloveSize, setGloveSize] = useState<string>('');
   const [lineId, setLineId] = useState<string>('');
   const [side, setSide] = useState<string>('A');
   const [sampleSize, setSampleSize] = useState<string>('');
@@ -71,6 +72,13 @@ export function SpreadsheetGrid() {
     }
   };
 
+  // ── Derive available sizes for the selected product ──────────────────────
+  const availableGloveSizes = useMemo(() => {
+    const matrixEntry = config?.productMatrixConfig?.[productCode];
+    if (matrixEntry?.sizes) return Object.keys(matrixEntry.sizes);
+    return ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+  }, [config, productCode]);
+
   useEffect(() => {
     if (config) {
       if (!profileId && config.inspectionProfiles?.[0]) setProfileId(config.inspectionProfiles[0].id);
@@ -79,6 +87,13 @@ export function SpreadsheetGrid() {
       if (!sampleSize && config.sampleSizes?.[0]) setSampleSize(config.sampleSizes[0].toString());
     }
   }, [config, profileId, productCode, lineId, sampleSize, availableLines]);
+
+  // Reset gloveSize when product changes or sizes list changes
+  useEffect(() => {
+    if (availableGloveSizes.length > 0 && !availableGloveSizes.includes(gloveSize)) {
+      setGloveSize(availableGloveSizes[0]);
+    }
+  }, [availableGloveSizes, gloveSize]);
 
   const selectedLine = useMemo(() => availableLines.find((l: any) => l.id === lineId) || availableLines[0], [availableLines, lineId]);
 
@@ -157,26 +172,42 @@ export function SpreadsheetGrid() {
 
 
   // ── Multi-Lot Data Table State (Rows) ────────────────────────────────────
+  // ── Weight target from ProductConfig setup per size ───────────────────────
+  const weightDecimalPlaces = config?.productMatrixConfig?.[productCode]?.weightDecimals ?? 0;
+  const weightStep = weightDecimalPlaces === 0 ? '1' : (1 / Math.pow(10, weightDecimalPlaces)).toFixed(weightDecimalPlaces);
+
+  const getDefaultWeight = () => {
+    const sizeEntry = config?.productMatrixConfig?.[productCode]?.sizes?.[gloveSize];
+    if (sizeEntry?.weightTarget) return sizeEntry.weightTarget;
+    return '';
+  };
+
+  const snapToDecimals = (val: string, dec: number): string => {
+    const n = parseFloat(val);
+    if (isNaN(n)) return val;
+    return n.toFixed(dec);
+  };
+
+  const getDimStep = (dim: any): string => {
+    const dec = typeof dim.decimals === 'number' ? dim.decimals : (dim.id?.includes('thick') ? 3 : 0);
+    if (dec === 0) return '1';
+    return (1 / Math.pow(10, dec)).toFixed(dec);
+  };
+
+  const getDimDecimals = (dim: any): number => {
+    return typeof dim.decimals === 'number' ? dim.decimals : (dim.id?.includes('thick') ? 3 : 0);
+  };
+
   const createEmptyRow = (seq: string) => {
     const measurements: Record<string, string[]> = {};
     if (activeDimensions) {
       activeDimensions.forEach((d: any) => { measurements[d.id] = ['', '', '', '', '']; });
     }
-    
-    let defaultWeight = '';
-    if (productCode && productCode.length >= 4) {
-      const weightStr = productCode.substring(1, 4);
-      const weightVal = parseFloat(weightStr) / 10;
-      if (!isNaN(weightVal)) {
-        defaultWeight = weightVal.toFixed(2);
-      }
-    }
-
     return { 
       id: crypto.randomUUID(), 
       sequenceNo: seq, 
       totalCarton: '', 
-      gloveWeight: defaultWeight, 
+      gloveWeight: getDefaultWeight(), 
       measurements,
       defects: {},
       qualitative: {}
@@ -185,22 +216,17 @@ export function SpreadsheetGrid() {
 
   const [rows, setRows] = useState<any[]>([createEmptyRow('001')]);
 
-  // Auto-fill empty weights when Product Code changes
+  // Auto-fill empty weights when Product Code or Size changes
   useEffect(() => {
-    if (productCode && productCode.length >= 4) {
-      const weightStr = productCode.substring(1, 4);
-      const weightVal = parseFloat(weightStr) / 10;
-      if (!isNaN(weightVal)) {
-        const defaultWeight = weightVal.toFixed(2);
-        setRows(prev => prev.map(r => {
-          if (!r.gloveWeight) {
-            return { ...r, gloveWeight: defaultWeight };
-          }
-          return r;
-        }));
-      }
+    const defaultWeight = getDefaultWeight();
+    if (defaultWeight) {
+      setRows(prev => prev.map(r => ({
+        ...r,
+        gloveWeight: r.gloveWeight ? r.gloveWeight : defaultWeight,
+      })));
     }
-  }, [productCode]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productCode, gloveSize]);
 
   const handleAddLotRow = () => {
     setRows(prev => {
@@ -283,6 +309,14 @@ export function SpreadsheetGrid() {
             </label>
             <select value={productCode} onChange={(e) => setProductCode(e.target.value)} className="w-full h-10 px-3 rounded-md bg-canvas border border-gray-700 text-primary font-mono text-xs focus:border-brand-secondary outline-none">
               {(config.productCodes || []).map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-semibold uppercase tracking-wider text-muted flex items-center gap-1">
+              <Scaling className="w-3 h-3 text-brand-secondary" strokeWidth={2} /> SIZE
+            </label>
+            <select value={gloveSize} onChange={(e) => setGloveSize(e.target.value)} className="w-full h-10 px-3 rounded-md bg-canvas border border-gray-700 text-primary font-mono text-xs focus:border-brand-secondary outline-none">
+              {availableGloveSizes.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           <div className="space-y-1">
@@ -426,10 +460,14 @@ export function SpreadsheetGrid() {
                     </td>
                     <td className="p-1 border-r border-gray-800 w-20">
                       <input 
-                        type="number" 
-                        step="0.01"
+                        type="number"
+                        step={weightStep}
                         value={row.gloveWeight}
                         onChange={(e) => handleRowChange(row.id, 'gloveWeight', e.target.value)}
+                        onBlur={(e) => {
+                          const snapped = snapToDecimals(e.target.value, weightDecimalPlaces);
+                          if (snapped !== e.target.value) handleRowChange(row.id, 'gloveWeight', snapped);
+                        }}
                         onKeyDown={(e) => handleKeyDown(e, rowIndex, 'wt', row.id)}
                         data-row={rowIndex}
                         data-col="wt"
@@ -446,17 +484,25 @@ export function SpreadsheetGrid() {
                         const isFailCell = !isNaN(numVal) && numVal < threshold;
                         const isPassCell = !isNaN(numVal) && numVal >= threshold;
                         
+                        // UI_DESIGN_SYSTEM.md §5.2: Fail = bg-rose-500/20 (no deviation label, preserve row height)
                         let bgClass = "bg-canvas border-gray-700 text-primary";
-                        if (isFailCell) bgClass = "bg-rose-500/10 border-rose-500/50 text-rose-400";
+                        if (isFailCell) bgClass = "bg-rose-500/20 border-rose-500/50 text-rose-500";
                         else if (isPassCell) bgClass = "bg-emerald-500/10 border-emerald-500/50 text-emerald-400";
+
+                        const dimDec = getDimDecimals(d);
+                        const dimStep = getDimStep(d);
 
                         return (
                           <td key={`${d.id}-${idx}`} className={`p-1 ${idx === 4 ? 'border-r border-gray-800' : ''}`}>
                             <input
                               type="number"
-                              step={d.id.includes('thick') ? '0.001' : '1'}
+                              step={dimStep}
                               value={val}
                               onChange={(e) => handleMeasurementChange(row.id, d.id, idx, e.target.value)}
+                              onBlur={(e) => {
+                                const snapped = snapToDecimals(e.target.value, dimDec);
+                                if (snapped !== e.target.value) handleMeasurementChange(row.id, d.id, idx, snapped);
+                              }}
                               onKeyDown={(e) => handleKeyDown(e, rowIndex, `${d.id}-${idx}`, row.id)}
                               data-row={rowIndex}
                               data-col={`${d.id}-${idx}`}

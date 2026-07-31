@@ -93,8 +93,12 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
 ### 3.4 Mass Data Entry Inputs (Measurement Grids)
 * **Purpose**: Rapid numeric data entry via numpad (e.g., 5 sample inputs for Glove Length).
 * **Geometry**: Large hit-targets (`h-12 w-full`), placed in a tight grid (`gap-2`).
-* **Typography**: `JetBrains Mono text-lg text-center text-primary`.
-* **Interaction**: Focus states must aggressively highlight to track rapid cursor movement (e.g., `focus:ring-2 focus:ring-brand-secondary focus:border-transparent`).
+* **Typography**: `JetBrains Mono text-lg text-center`.
+* **Pre-Fill Untouched vs. Touched State**:
+  - Untouched pre-filled target values MUST be `text-muted opacity-80` to visually signal auto-populated baseline data.
+  - Touched/edited values MUST switch to `text-primary` (bright white) to confirm user validation.
+  - Out-of-spec failing values MUST switch to `text-rose-400 bg-rose-500/5 border-rose-500/50`.
+* **Interaction**: Focus states must aggressively highlight to track rapid cursor movement (e.g., `focus:ring-1 focus:ring-brand-secondary focus:border-brand-secondary`).
 
 ### 3.5 Inline Add Actions (Dashed Buttons)
 * Standardize all inline add actions to universally say `+ ADD`.
@@ -142,7 +146,11 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
 
 ### 4.7 Badges, Chips & Dynamic Trackers
 * **State Badges** (e.g., Warning, Setup Required): `bg-{color}-500/10 border border-{color}-500/30 text-{color}-400 text-[10px] font-bold uppercase tracking-wider`
-* **Value Chips** (e.g., Timestamps, Shift times): `bg-gray-800/50 border border-gray-700/50 text-muted font-mono text-[10px] uppercase`
+* **Value Chips** (e.g., Timestamps, Shift times, Dimension MIN/MAX badges): `bg-gray-800/50 border border-gray-700/50 text-muted font-mono text-[10px] uppercase`
+* **Dimension Card Header Badges**:
+  - Inline Spec: Rendered immediately after the card title in `text-muted font-mono text-xs font-normal` (e.g. `250.0±5.0mm` or `≥0.060mm`).
+  - Top-Right Metric Chips: `MIN` and `MAX` chips sit top right. `MIN` turns red (`bg-rose-500/10 border-rose-500/30 text-rose-400`) if below threshold. `MAX` turns red if above max threshold.
+  - Conditional Suppression: When `isMin === true` (minimum-only boundary), the `MAX` chip MUST be hidden entirely.
 * **Dynamic Composite Badges (e.g., Compliance Tracker)**
   - **Purpose**: Large, multi-line status trackers that change semantic color state entirely based on underlying data.
   - **Layout**: Icon on the left, stacked text on the right.

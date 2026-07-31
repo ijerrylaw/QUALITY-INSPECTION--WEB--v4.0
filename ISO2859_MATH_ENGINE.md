@@ -27,3 +27,16 @@ The evaluation function determines the final PASS/FAIL verdict by mapping record
 * **Night Shift Rollover Logic:** If an inspection occurs between Midnight (`00:00`) and the start of the Morning Shift, it is assigned to Shift 'Night', and exactly 1 day is subtracted from the effective Production Date[cite: 6].
 * **Lot Number Assembly:** Fully constructs lot codes using the formula: `[Line] + [Machine] + [JulianDate] + [Sequence]` (e.g., `A004A6182001`)[cite: 6].
 * **Time Auto-Formatting:** Time inputs format to 2-digit zero-padded numbers (e.g., `08:00`), and shift duration badges use 1-minute subtract formatting (e.g., `08:00 - 19:59`)[cite: 6].
+
+## 5. PHYSICAL DIMENSION EVALUATION LOGIC (`StepDimensions`)
+* **Threshold Formulas**:
+  - Minimum Threshold: $\text{minThreshold} = \text{minSpec} - \text{tolerance}$
+  - Maximum Threshold: $\text{maxThreshold} = \begin{cases} \infty & \text{if } \text{isMin} = \text{true} \text{ or } \text{tolerance} = 0 \\ \text{minSpec} + \text{tolerance} & \text{otherwise} \end{cases}$
+* **Slot Pass/Fail Condition**: A measurement value $x$ fails if:
+  $$x < \text{minThreshold} \quad \lor \quad (x > \text{maxThreshold})$$
+* **Slot Delta Labels**:
+  - Under-spec failure ($x < \text{minThreshold}$): Delta $= x - \text{minThreshold}$ (negative value, e.g. `-2.0mm`).
+  - Over-spec failure ($x > \text{maxThreshold}$): Delta $= +(x - \text{maxThreshold})$ (positive value, e.g. `+2.0mm`).
+* **Initial State & Pre-Population**:
+  - Input slots auto-populate with $\text{minSpec}$ formatted to appropriate decimal places (3 decimals for thickness, 1 decimal for lengths/widths).
+  - Pre-filled slots initialize as untouched (`text-muted`). Editing a slot converts it to validated (`text-primary`).

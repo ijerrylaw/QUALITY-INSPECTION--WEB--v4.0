@@ -70,6 +70,8 @@ export interface ProductDimensionDef {
   name: string;
   unit: string;
   isMin?: boolean;
+  /** Number of decimal places (0–3). Controls both the config setup grid and the Wizard entry inputs. Default: 0 (integer). */
+  decimals?: number;
 }
 
 export interface ProductDimensionValue {
@@ -91,6 +93,10 @@ export interface ProductConfig {
   dimensionDefs: ProductDimensionDef[];
   sizes: Record<string, SizeConfig>;
   lastAmended?: string;
+  /** Decimal places for fixed rows. Default: 0. */
+  weightDecimals?: number;
+  lengthDecimals?: number;
+  palmWidthDecimals?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

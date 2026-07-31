@@ -79,11 +79,22 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
     };
   };
 
-  // ── Decimal precision helper based on dimension type ─────────────────────
-  const getDecimalPlaces = (dim: ProductDimensionDef) => {
-    const id = dim.id.toLowerCase();
-    if (id.includes('thick')) return 3;
-    return 1;
+  // ── Decimal precision helper — driven by the format control set in Product Config ──
+  const getDecimalPlaces = (dim: ProductDimensionDef): number => {
+    // Prefer explicit decimals set via the format dropdown in ProductConfigAccordion
+    if (typeof dim.decimals === 'number') return dim.decimals;
+    // Legacy fallback: infer from the productMatrixConfig values
+    const matrixEntry = config?.productMatrixConfig?.[productCode];
+    if (matrixEntry?.sizes) {
+      let maxDec = 0;
+      Object.values(matrixEntry.sizes).forEach((sizeConfig) => {
+        const dimVal = sizeConfig.dimensions?.[dim.id];
+        if (dimVal?.minSpec?.includes('.')) maxDec = Math.max(maxDec, dimVal.minSpec.split('.')[1].length);
+        if (dimVal?.tolerance?.includes('.')) maxDec = Math.max(maxDec, dimVal.tolerance.split('.')[1].length);
+      });
+      if (maxDec > 0) return maxDec;
+    }
+    return 0;
   };
 
   // ── Measurement State (dimId → string[SLOTS_PER_DIM]) ────────────────────
@@ -126,16 +137,18 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
     let filled = 0;
     let passed = 0;
     let failed = 0;
-    const calcStats: Record<string, { min: number; avg: number; fails: boolean[]; threshold: number }> = {};
+    const calcStats: Record<string, { min: number; max: number; avg: number; fails: boolean[]; threshold: number; maxThreshold: number }> = {};
 
     activeDimensions.forEach((dim) => {
       const { minSpec, tolerance } = getDimSpec(dim.id);
-      const threshold = minSpec - tolerance;
+      const threshold = minSpec > 0 ? minSpec - tolerance : 0;
+      const maxThreshold = minSpec > 0 && tolerance > 0 ? minSpec + tolerance : Infinity;
       const vals = measurements[dim.id] ?? Array(SLOTS_PER_DIM).fill('');
 
       const fails = vals.map((v) => {
         const num = parseFloat(v);
-        return !isNaN(num) && num < threshold;
+        if (isNaN(num)) return false;
+        return num < threshold || (tolerance > 0 && num > maxThreshold);
       });
 
       vals.forEach((v, i) => {
@@ -148,9 +161,10 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
 
       const numVals = vals.map((v) => parseFloat(v)).filter((v) => !isNaN(v));
       const min = numVals.length > 0 ? Math.min(...numVals) : 0;
+      const max = numVals.length > 0 ? Math.max(...numVals) : 0;
       const avg = numVals.length > 0 ? numVals.reduce((a, b) => a + b, 0) / numVals.length : 0;
 
-      calcStats[dim.id] = { min, avg, fails, threshold };
+      calcStats[dim.id] = { min, max, avg, fails, threshold, maxThreshold };
     });
 
     const tSlots = activeDimensions.length * SLOTS_PER_DIM;
@@ -173,8 +187,10 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
   };
 
 
-  const getStep = (dim: ProductDimensionDef) => {
-    return getDecimalPlaces(dim) === 3 ? '0.001' : '1';
+  const getStep = (dim: ProductDimensionDef): string => {
+    const dec = getDecimalPlaces(dim);
+    if (dec === 0) return '1';
+    return (1 / Math.pow(10, dec)).toFixed(dec);
   };
 
   return (
@@ -245,9 +261,10 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
       {activeDimensions.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {activeDimensions.map((dim) => {
-            const dimStats = stats[dim.id] ?? { min: 0, avg: 0, fails: [], threshold: 0 };
+            const dimStats = stats[dim.id] ?? { min: 0, max: 0, avg: 0, fails: [], threshold: 0, maxThreshold: Infinity };
             const { minSpec, tolerance } = getDimSpec(dim.id);
             const threshold = dimStats.threshold;
+            const maxThreshold = dimStats.maxThreshold;
             const decPlaces = getDecimalPlaces(dim);
 
             return (
@@ -255,26 +272,37 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
 
                 {/* Card Header */}
                 <div className="flex items-center justify-between border-b border-gray-800/80 pb-3 mb-4">
-                  <span className="text-sm font-bold uppercase tracking-wider text-primary">
+                  {/* Title + inline spec */}
+                  <span className="text-sm font-bold uppercase tracking-wider text-primary flex items-baseline gap-2">
                     {dim.name}
-                    <span className="text-muted text-xs normal-case ml-1 font-normal">({dim.unit})</span>
+                    {minSpec > 0 && (
+                      <span className="text-xs font-mono font-normal normal-case text-muted">
+                        {dim.isMin
+                          ? `\u2265${minSpec.toFixed(decPlaces)}${dim.unit}`
+                          : `${minSpec.toFixed(decPlaces)}${tolerance > 0 ? '\u00b1' + tolerance.toFixed(decPlaces) : ''}${dim.unit}`
+                        }
+                      </span>
+                    )}
                   </span>
-                  
-                  {/* Top-Right Metrics Dashboard */}
+
+                  {/* Top-Right Metrics Badges */}
                   <div className="flex items-center gap-2">
-                    <span className="bg-gray-800/50 border border-gray-700/50 text-muted font-mono text-[10px] uppercase px-2 py-1 rounded-md">
-                      SPEC: {minSpec > 0 ? `${minSpec.toFixed(decPlaces)}${tolerance > 0 ? '±' + tolerance.toFixed(decPlaces) : ''}${dim.unit}` : '—'}
-                    </span>
                     <span className={`font-mono text-[10px] uppercase px-2 py-1 rounded-md border ${
-                      dimStats.min > 0 && dimStats.min < threshold 
-                        ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 font-bold' 
+                      dimStats.min > 0 && dimStats.min < threshold
+                        ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 font-bold'
                         : 'bg-gray-800/50 border-gray-700/50 text-muted'
                     }`}>
-                      MIN: {dimStats.min > 0 ? `${dimStats.min.toFixed(decPlaces)}${dim.unit}` : '—'}
+                      MIN: {dimStats.min > 0 ? `${dimStats.min.toFixed(decPlaces)}${dim.unit}` : '\u2014'}
                     </span>
-                    <span className="bg-gray-800/50 border border-gray-700/50 text-muted font-mono text-[10px] uppercase px-2 py-1 rounded-md">
-                      AVG: {dimStats.avg > 0 ? `${dimStats.avg.toFixed(decPlaces)}${dim.unit}` : '—'}
-                    </span>
+                    {!dim.isMin && (
+                      <span className={`font-mono text-[10px] uppercase px-2 py-1 rounded-md border ${
+                        tolerance > 0 && dimStats.max > 0 && dimStats.max > maxThreshold
+                          ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 font-bold'
+                          : 'bg-gray-800/50 border-gray-700/50 text-muted'
+                      }`}>
+                        MAX: {dimStats.max > 0 ? `${dimStats.max.toFixed(decPlaces)}${dim.unit}` : '\u2014'}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -284,7 +312,15 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
                   {(measurements[dim.id] ?? Array(SLOTS_PER_DIM).fill('')).map((val, idx) => {
                     const isFail = dimStats.fails[idx] ?? false;
                     const numVal = parseFloat(val);
-                    const delta = (!isNaN(numVal) && isFail) ? (numVal - threshold).toFixed(decPlaces) : null;
+                    // Compute delta: negative means under-spec, positive means over-spec
+                    let delta: string | null = null;
+                    if (!isNaN(numVal) && isFail) {
+                      if (numVal < threshold) {
+                        delta = (numVal - threshold).toFixed(decPlaces);
+                      } else if (tolerance > 0 && numVal > maxThreshold) {
+                        delta = '+' + (numVal - maxThreshold).toFixed(decPlaces);
+                      }
+                    }
 
                     return (
                       <div key={idx} className="flex flex-col items-center">
@@ -293,6 +329,15 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
                           step={getStep(dim)}
                           value={val}
                           onChange={(e) => handleSlotChange(dim.id, idx, e.target.value)}
+                          onBlur={(e) => {
+                            const raw = e.target.value;
+                            const dec = getDecimalPlaces(dim);
+                            const n = parseFloat(raw);
+                            if (!isNaN(n)) {
+                              const snapped = n.toFixed(dec);
+                              if (snapped !== raw) handleSlotChange(dim.id, idx, snapped);
+                            }
+                          }}
                           placeholder={(idx + 1).toString()}
                           className={`w-full h-12 rounded-lg bg-canvas text-center font-mono text-sm shadow-inner transition-all outline-none border focus:ring-1 
                             ${isFail

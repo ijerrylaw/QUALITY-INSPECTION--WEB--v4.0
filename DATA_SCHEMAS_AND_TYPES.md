@@ -107,12 +107,12 @@ export interface ProductDimensionDef {
   id: string;
   name: string;
   unit: string;
-  isMin?: boolean;
+  isMin?: boolean; // When true, specifies a minimum-only boundary (e.g. ≥0.060mm) and suppresses MAX upper limit checks
 }
 
 export interface SizeConfig {
   weightTarget: string;
   weightTolerance: string;
-  dimensions: Record<string, { minSpec: string; tolerance: string }>;
+  dimensions: Record<string, { minSpec: string; tolerance: string }>; // Target & Tolerance per dimension ID; slots auto-populate with minSpec on load
 }
 ```

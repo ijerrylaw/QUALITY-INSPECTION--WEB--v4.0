@@ -20,12 +20,87 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
     onChange({ ...config, ...updates });
   };
 
+  // ── Format helpers ──────────────────────────────────────────────────────────
+  const FORMAT_OPTIONS = [
+    { label: '0',     decimals: 0 },
+    { label: '0.0',   decimals: 1 },
+    { label: '0.00',  decimals: 2 },
+    { label: '0.000', decimals: 3 },
+  ];
+
   const formatTolerance = (val: string) => {
     const upper = val.toUpperCase();
     if (upper.startsWith('M')) return 'MIN';
     return upper.replace(/[^0-9.]/g, '');
   };
 
+  const applyDecimalsToValue = (v: string, dec: number) => {
+    if (!v || v.toUpperCase() === 'MIN') return v;
+    const n = parseFloat(v);
+    return isNaN(n) ? v : n.toFixed(dec);
+  };
+
+  // ── Fixed-row format change ──────────────────────────────────────────────────
+  const handleFixedRowFormatChange = (
+    decimalField: 'weightDecimals' | 'lengthDecimals' | 'palmWidthDecimals',
+    targetField: 'weightTarget' | 'lengthTarget' | 'palmWidthTarget',
+    tolField: 'weightTolerance' | 'lengthTolerance' | 'palmWidthTolerance',
+    dec: number,
+  ) => {
+    if (isReadOnly) return;
+    const updatedSizes = { ...sizes };
+    Object.keys(updatedSizes).forEach(k => {
+      const t = updatedSizes[k][targetField];
+      const tol = updatedSizes[k][tolField];
+      updatedSizes[k] = {
+        ...updatedSizes[k],
+        [targetField]: applyDecimalsToValue(t || '', dec),
+        [tolField]: applyDecimalsToValue(tol || '', dec),
+      };
+    });
+    triggerChange({ sizes: updatedSizes, [decimalField]: dec });
+  };
+
+  // ── Dynamic dimension format change ─────────────────────────────────────────
+  const handleDimFormatChange = (dimId: string, dec: number) => {
+    if (isReadOnly) return;
+    const updatedSizes = { ...sizes };
+    Object.keys(updatedSizes).forEach(k => {
+      const dims = { ...updatedSizes[k].dimensions };
+      if (dims[dimId]) {
+        dims[dimId] = {
+          minSpec: applyDecimalsToValue(dims[dimId].minSpec, dec),
+          tolerance: applyDecimalsToValue(dims[dimId].tolerance, dec),
+        };
+      }
+      updatedSizes[k] = { ...updatedSizes[k], dimensions: dims };
+    });
+    const updatedDefs = dimensionDefs.map(d => d.id === dimId ? { ...d, decimals: dec } : d);
+    triggerChange({ dimensionDefs: updatedDefs, sizes: updatedSizes });
+  };
+
+  // ── Format selector UI component ─────────────────────────────────────────────
+  const FormatSelect = ({
+    value,
+    onChange: onChangeFn,
+  }: { value: number; onChange: (dec: number) => void }) => (
+    <select
+      value={value}
+      disabled={isReadOnly}
+      onChange={e => onChangeFn(parseInt(e.target.value))}
+      className={`w-full mt-1 rounded px-1 text-[10px] font-mono font-bold text-center outline-none transition-all border ${
+        isReadOnly
+          ? 'bg-transparent border-transparent text-gray-600 cursor-default'
+          : 'bg-canvas border-gray-700 text-brand-secondary hover:border-brand-secondary focus:border-brand-secondary cursor-pointer'
+      }`}
+    >
+      {FORMAT_OPTIONS.map(o => (
+        <option key={o.decimals} value={o.decimals}>{o.label}</option>
+      ))}
+    </select>
+  );
+
+  // ── Dimension management ─────────────────────────────────────────────────────
   const handleMoveDimension = (index: number, direction: 'up' | 'down') => {
     const updatedDefs = [...dimensionDefs];
     if (direction === 'up' && index > 0) {
@@ -56,9 +131,8 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
 
   const handleAddDimension = () => {
     const newId = `dim_${Date.now()}`;
-    const newDef: ProductDimensionDef = { id: newId, name: 'NEW DIM', unit: 'mm' };
+    const newDef: ProductDimensionDef = { id: newId, name: 'NEW DIM', unit: 'mm', decimals: 0 };
     const updatedDefs = [...dimensionDefs, newDef];
-    
     const updatedSizes = { ...sizes };
     for (const s of Object.keys(updatedSizes)) {
       updatedSizes[s] = {
@@ -94,16 +168,13 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
   const handleUpdateFixed = (sizeKey: string, field: 'weightTarget' | 'weightTolerance' | 'lengthTarget' | 'lengthTolerance' | 'palmWidthTarget' | 'palmWidthTolerance', val: string) => {
     if (!sizes[sizeKey]) return;
     const updatedSizes = { ...sizes };
-    
     if (field === 'lengthTarget' || field === 'lengthTolerance') {
-      // Glove Length is standardized across all sizes
       Object.keys(updatedSizes).forEach(k => {
         updatedSizes[k] = { ...updatedSizes[k], [field]: val };
       });
     } else {
       updatedSizes[sizeKey] = { ...updatedSizes[sizeKey], [field]: val };
     }
-    
     triggerChange({ sizes: updatedSizes });
   };
 
@@ -161,8 +232,12 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
               <td className="py-2.5 px-3 border-r border-gray-800/50 text-sm font-semibold text-brand-secondary uppercase">
                 GLOVE WEIGHT
               </td>
-              <td className="py-2.5 px-3 border-r border-gray-800/50 text-center">
-                <span className="text-[11px] font-bold uppercase text-muted font-mono">gram</span>
+              <td className="py-2 px-2 border-r border-gray-800/50 text-center align-top">
+                <span className="text-[11px] font-bold uppercase text-muted font-mono block">gram</span>
+                <FormatSelect
+                  value={config.weightDecimals ?? 0}
+                  onChange={dec => handleFixedRowFormatChange('weightDecimals', 'weightTarget', 'weightTolerance', dec)}
+                />
               </td>
               
               {STANDARD_SIZES.map(size => {
@@ -208,8 +283,12 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
               <td className="py-2.5 px-3 border-r border-gray-800/50 text-sm font-semibold text-brand-secondary uppercase">
                 GLOVE LENGTH
               </td>
-              <td className="py-2.5 px-3 border-r border-gray-800/50 text-center">
-                <span className="text-[11px] font-bold uppercase text-muted font-mono">mm</span>
+              <td className="py-2 px-2 border-r border-gray-800/50 text-center align-top">
+                <span className="text-[11px] font-bold uppercase text-muted font-mono block">mm</span>
+                <FormatSelect
+                  value={config.lengthDecimals ?? 0}
+                  onChange={dec => handleFixedRowFormatChange('lengthDecimals', 'lengthTarget', 'lengthTolerance', dec)}
+                />
               </td>
               
               {STANDARD_SIZES.map(size => {
@@ -255,8 +334,12 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
               <td className="py-2.5 px-3 border-r border-gray-800/50 text-sm font-semibold text-brand-secondary uppercase">
                 PALM WIDTH
               </td>
-              <td className="py-2.5 px-3 border-r border-gray-800/50 text-center">
-                <span className="text-[11px] font-bold uppercase text-muted font-mono">mm</span>
+              <td className="py-2 px-2 border-r border-gray-800/50 text-center align-top">
+                <span className="text-[11px] font-bold uppercase text-muted font-mono block">mm</span>
+                <FormatSelect
+                  value={config.palmWidthDecimals ?? 0}
+                  onChange={dec => handleFixedRowFormatChange('palmWidthDecimals', 'palmWidthTarget', 'palmWidthTolerance', dec)}
+                />
               </td>
               
               {STANDARD_SIZES.map(size => {
@@ -358,7 +441,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                       </div>
                     )}
                   </td>
-                  <td className="py-2.5 px-3 border-r border-gray-800/50 text-center">
+                  <td className="py-2 px-2 border-r border-gray-800/50 text-center align-top">
                     {isEditing ? (
                       <input 
                         type="text"
@@ -367,8 +450,12 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         className="w-full min-w-[40px] bg-canvas border border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded px-1 h-7 text-[11px] font-bold text-primary text-center outline-none"
                       />
                     ) : (
-                      <span className="text-[11px] font-bold text-muted uppercase font-mono">{def.unit}</span>
+                      <span className="text-[11px] font-bold text-muted uppercase font-mono block">{def.unit}</span>
                     )}
+                    <FormatSelect
+                      value={def.decimals ?? 0}
+                      onChange={dec => handleDimFormatChange(def.id, dec)}
+                    />
                   </td>
 
                   {STANDARD_SIZES.map(size => {
