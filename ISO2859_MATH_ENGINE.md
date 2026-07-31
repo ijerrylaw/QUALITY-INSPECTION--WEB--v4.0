@@ -18,17 +18,21 @@ The evaluation function determines the final PASS/FAIL verdict by mapping record
 * **PASS / FAIL / NIL Mode:** Fails if any qualitative item logs a fail state[cite: 6].
 
 ## 3. DATA AUTOMATIONS & LINKED PARAMETERS
-* **SKU Weight Auto-Extraction:** The engine dynamically extracts standard glove weight from characters 1 to 3 of the Product Code string (e.g., `N035SKB-OC-24FT` converts to `3.50g`)[cite: 6].
-* **Profile Mapping:** Selecting a SKU triggers a lookup in `productProfileMap` to load the correct `InspectionProfile` limits[cite: 6].
-* **Timestamp Precision:** `submissionTimestamp` is generated with millisecond precision upon submission to prevent backdating[cite: 6].
+* **SKU Weight Resolution:** Default glove weight is resolved from `weightTarget` in `ProductConfig` for the selected size (e.g. `sizes['M'].weightTarget`). If unset, it falls back to parsing characters 1 to 3 of the Product Code string (e.g., `N035SKB-OC-24FT` converts to `3.50g`).
+* **Profile Mapping:** Selecting a SKU triggers a lookup in `productProfileMap` to load the correct `InspectionProfile` limits.
+* **Timestamp Precision:** `submissionTimestamp` is generated with millisecond precision upon submission to prevent backdating.
 
 ## 4. DATE & SHIFT ALGORITHMS
-* **Julian Date Compression:** Production dates are mathematically compressed into 3-digit Julian Days (e.g., Feb 1st = `032`) for standardization[cite: 6].
-* **Night Shift Rollover Logic:** If an inspection occurs between Midnight (`00:00`) and the start of the Morning Shift, it is assigned to Shift 'Night', and exactly 1 day is subtracted from the effective Production Date[cite: 6].
-* **Lot Number Assembly:** Fully constructs lot codes using the formula: `[Line] + [Machine] + [JulianDate] + [Sequence]` (e.g., `A004A6182001`)[cite: 6].
-* **Time Auto-Formatting:** Time inputs format to 2-digit zero-padded numbers (e.g., `08:00`), and shift duration badges use 1-minute subtract formatting (e.g., `08:00 - 19:59`)[cite: 6].
+* **Julian Date Compression:** Production dates are mathematically compressed into 3-digit Julian Days (e.g., Feb 1st = `032`) for standardization.
+* **Night Shift Rollover Logic:** If an inspection occurs between Midnight (`00:00`) and the start of the Morning Shift, it is assigned to Shift 'Night', and exactly 1 day is subtracted from the effective Production Date.
+* **Lot Number Assembly:** Fully constructs lot codes using the formula: `[Line] + [Machine] + [JulianDate] + [Sequence]` (e.g., `A004A6182001`).
+* **Time Auto-Formatting:** Time inputs format to 2-digit zero-padded numbers (e.g., `08:00`), and shift duration badges use 1-minute subtract formatting (e.g., `08:00 - 19:59`).
 
-## 5. PHYSICAL DIMENSION EVALUATION LOGIC (`StepDimensions`)
+## 5. PHYSICAL DIMENSION EVALUATION LOGIC (`StepDimensions` & `SpreadsheetGrid`)
+* **Parameter Format Control**:
+  - Each dimension row (fixed or dynamic) in Product Config features a format dropdown in the UOM cell (`0`, `0.0`, `0.00`, `0.000`).
+  - Changing the format immediately reformats all target/spec values in that row to the specified decimal precision.
+  - The format setting directly controls input step size (`step="1"`, `step="0.1"`, `step="0.01"`, `step="0.001"`) and `onBlur` precision snapping in both Single and Batch Inspection Wizards.
 * **Threshold Formulas**:
   - Minimum Threshold: $\text{minThreshold} = \text{minSpec} - \text{tolerance}$
   - Maximum Threshold: $\text{maxThreshold} = \begin{cases} \infty & \text{if } \text{isMin} = \text{true} \text{ or } \text{tolerance} = 0 \\ \text{minSpec} + \text{tolerance} & \text{otherwise} \end{cases}$
@@ -38,5 +42,5 @@ The evaluation function determines the final PASS/FAIL verdict by mapping record
   - Under-spec failure ($x < \text{minThreshold}$): Delta $= x - \text{minThreshold}$ (negative value, e.g. `-2.0mm`).
   - Over-spec failure ($x > \text{maxThreshold}$): Delta $= +(x - \text{maxThreshold})$ (positive value, e.g. `+2.0mm`).
 * **Initial State & Pre-Population**:
-  - Input slots auto-populate with $\text{minSpec}$ formatted to appropriate decimal places (3 decimals for thickness, 1 decimal for lengths/widths).
+  - Input slots auto-populate with $\text{minSpec}$ formatted according to configured row decimals.
   - Pre-filled slots initialize as untouched (`text-muted`). Editing a slot converts it to validated (`text-primary`).

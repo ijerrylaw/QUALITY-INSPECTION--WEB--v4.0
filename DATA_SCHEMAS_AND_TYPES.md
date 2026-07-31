@@ -101,6 +101,10 @@ export interface SkuOption {
 export interface ProductConfig {
   dimensionDefs: ProductDimensionDef[];
   sizes: Record<string, SizeConfig>;
+  lastAmended?: string;
+  weightDecimals?: number;    // Format precision for weight (0–3 decimals)
+  lengthDecimals?: number;    // Format precision for length (0–3 decimals)
+  palmWidthDecimals?: number; // Format precision for palm width (0–3 decimals)
 }
 
 export interface ProductDimensionDef {
@@ -108,11 +112,16 @@ export interface ProductDimensionDef {
   name: string;
   unit: string;
   isMin?: boolean; // When true, specifies a minimum-only boundary (e.g. ≥0.060mm) and suppresses MAX upper limit checks
+  decimals?: number; // Format precision for dynamic dimensions (0–3 decimals, e.g. 0, 1, 2, 3)
 }
 
 export interface SizeConfig {
   weightTarget: string;
   weightTolerance: string;
-  dimensions: Record<string, { minSpec: string; tolerance: string }>; // Target & Tolerance per dimension ID; slots auto-populate with minSpec on load
+  lengthTarget?: string;
+  lengthTolerance?: string;
+  palmWidthTarget?: string;
+  palmWidthTolerance?: string;
+  dimensions: Record<string, { minSpec: string; tolerance: string }>; // Target & Tolerance per dimension ID
 }
 ```

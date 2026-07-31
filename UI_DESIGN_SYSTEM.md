@@ -105,6 +105,12 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
 * Base state: `border border-dashed border-gray-700 bg-transparent text-muted text-[11px] font-semibold uppercase tracking-wider`
 * Hover state: `hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 transition-all`
 
+### 3.6 Parameter Format Selectors (Setup Grids)
+* **Location**: Vertically embedded inside the UOM table cell (`align-top` layout) directly beneath the unit label (e.g., `gram`, `mm`).
+* **Geometry & Styling**: Compact `<select>` control (`text-[10px] font-mono font-bold text-center border-gray-700 text-brand-secondary bg-canvas`).
+* **Options**: `0`, `0.0`, `0.00`, `0.000` representing integer through 3 decimal places.
+* **Behavior**: Selecting a format immediately reformats all target & tolerance numbers in that row to match, and propagates step increment (`1`, `0.1`, `0.01`, `0.001`) and `onBlur` precision snapping to entry wizards.
+
 ---
 
 ## CHAPTER 4: DATA DISPLAYS & LISTS
