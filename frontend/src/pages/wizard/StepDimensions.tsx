@@ -79,12 +79,31 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
     };
   };
 
+  // ── Decimal precision helper based on dimension type ─────────────────────
+  const getDecimalPlaces = (dim: ProductDimensionDef) => {
+    const id = dim.id.toLowerCase();
+    if (id.includes('thick')) return 3;
+    return 1;
+  };
+
   // ── Measurement State (dimId → string[SLOTS_PER_DIM]) ────────────────────
   const [measurements, setMeasurements] = useState<Record<string, string[]>>(() => {
-    if (initialData?.dimensions) return initialData.dimensions;
+    if (initialData?.dimensions && Object.keys(initialData.dimensions).length > 0) return initialData.dimensions;
     const init: Record<string, string[]> = {};
     activeDimensions.forEach((d) => {
-      init[d.id] = Array(SLOTS_PER_DIM).fill('');
+      const { minSpec } = getDimSpec(d.id);
+      const dec = getDecimalPlaces(d);
+      init[d.id] = Array(SLOTS_PER_DIM).fill(minSpec > 0 ? minSpec.toFixed(dec) : '');
+    });
+    return init;
+  });
+
+  // Track which slots have been actively edited by the user
+  const [dirtySlots, setDirtySlots] = useState<Record<string, boolean[]>>(() => {
+    const init: Record<string, boolean[]> = {};
+    const hasInitial = !!(initialData?.dimensions && Object.keys(initialData.dimensions).length > 0);
+    activeDimensions.forEach((d) => {
+      init[d.id] = Array(SLOTS_PER_DIM).fill(hasInitial);
     });
     return init;
   });
@@ -93,6 +112,11 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
     setMeasurements((prev) => {
       const arr = [...(prev[dimId] ?? Array(SLOTS_PER_DIM).fill(''))];
       arr[index] = value;
+      return { ...prev, [dimId]: arr };
+    });
+    setDirtySlots((prev) => {
+      const arr = [...(prev[dimId] ?? Array(SLOTS_PER_DIM).fill(false))];
+      arr[index] = true;
       return { ...prev, [dimId]: arr };
     });
   };
@@ -148,12 +172,6 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
     onNext({ dimensions: measurements, dimensionStats: stats, totalSlots });
   };
 
-  // ── Decimal precision helper based on dimension type ─────────────────────
-  const getDecimalPlaces = (dim: ProductDimensionDef) => {
-    const id = dim.id.toLowerCase();
-    if (id.includes('thick')) return 3;
-    return 1;
-  };
 
   const getStep = (dim: ProductDimensionDef) => {
     return getDecimalPlaces(dim) === 3 ? '0.001' : '1';
@@ -241,23 +259,25 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
                     {dim.name}
                     <span className="text-muted text-xs normal-case ml-1 font-normal">({dim.unit})</span>
                   </span>
+                  
+                  {/* Top-Right Metrics Dashboard */}
                   <div className="flex items-center gap-2">
-                    {/* Min Spec badge */}
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-brand-secondary bg-brand-primary/10 px-2 py-1 rounded-md border border-brand-secondary/30 font-mono">
-                      MIN: {minSpec > 0 ? threshold.toFixed(decPlaces) : '—'}{dim.unit}
+                    <span className="bg-gray-800/50 border border-gray-700/50 text-muted font-mono text-[10px] uppercase px-2 py-1 rounded-md">
+                      SPEC: {minSpec > 0 ? `${minSpec.toFixed(decPlaces)}${tolerance > 0 ? '±' + tolerance.toFixed(decPlaces) : ''}${dim.unit}` : '—'}
+                    </span>
+                    <span className={`font-mono text-[10px] uppercase px-2 py-1 rounded-md border ${
+                      dimStats.min > 0 && dimStats.min < threshold 
+                        ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 font-bold' 
+                        : 'bg-gray-800/50 border-gray-700/50 text-muted'
+                    }`}>
+                      MIN: {dimStats.min > 0 ? `${dimStats.min.toFixed(decPlaces)}${dim.unit}` : '—'}
+                    </span>
+                    <span className="bg-gray-800/50 border border-gray-700/50 text-muted font-mono text-[10px] uppercase px-2 py-1 rounded-md">
+                      AVG: {dimStats.avg > 0 ? `${dimStats.avg.toFixed(decPlaces)}${dim.unit}` : '—'}
                     </span>
                   </div>
                 </div>
 
-                {/* Spec sub-line */}
-                {minSpec > 0 && (
-                  <div className="flex items-center gap-3 mb-3">
-                    <span className="text-[10px] font-bold text-muted uppercase tracking-widest">SPEC</span>
-                    <span className="text-[11px] font-mono text-muted">
-                      Min: {minSpec.toFixed(decPlaces)}{dim.unit} &nbsp;±&nbsp; {tolerance.toFixed(decPlaces)}{dim.unit}
-                    </span>
-                  </div>
-                )}
 
                 {/* 5-Slot Input Grid — 48px touch targets per UI_DESIGN_SYSTEM.md §3.4 */}
                 <div className="grid grid-cols-5 gap-2">
@@ -277,7 +297,9 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
                           className={`w-full h-12 rounded-lg bg-canvas text-center font-mono text-sm shadow-inner transition-all outline-none border focus:ring-1 
                             ${isFail
                               ? 'border-rose-500/50 text-rose-400 bg-rose-500/5 focus:ring-rose-500/30'
-                              : 'border-gray-700 text-primary focus:border-brand-secondary focus:ring-brand-secondary/30'
+                              : dirtySlots[dim.id]?.[idx]
+                                ? 'border-gray-700 text-primary focus:border-brand-secondary focus:ring-brand-secondary/30'
+                                : 'border-gray-700 text-muted opacity-80 focus:opacity-100 focus:border-brand-secondary focus:ring-brand-secondary/30'
                             }`}
                         />
                         {/* Slot-level delta — UI_DESIGN_SYSTEM.md §5.2 */}
@@ -291,27 +313,7 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
                   })}
                 </div>
 
-                {/* Auto-Calculated Stats — UI_DESIGN_SYSTEM.md §4.5 */}
-                <div className="mt-4 flex items-center gap-6 pt-3 border-t border-gray-800/50">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">MINIMUM</span>
-                    <span className={`text-sm font-mono ${dimStats.min > 0 && dimStats.min < threshold ? 'text-rose-400' : 'text-primary'}`}>
-                      {dimStats.min > 0 ? dimStats.min.toFixed(decPlaces) : '—'}
-                    </span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">AVERAGE</span>
-                    <span className="text-sm font-mono text-primary">
-                      {dimStats.avg > 0 ? dimStats.avg.toFixed(decPlaces) : '—'}
-                    </span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">THRESHOLD</span>
-                    <span className="text-sm font-mono text-brand-secondary">
-                      {threshold > 0 ? threshold.toFixed(decPlaces) : '—'}
-                    </span>
-                  </div>
-                </div>
+
               </div>
             );
           })}
