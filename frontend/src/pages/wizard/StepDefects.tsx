@@ -8,6 +8,11 @@
  *   configured in Configuration Control > Quality Rules.
  * - No longer reads legacy flat config.aqlCategories or config.defectDefinitions.
  *
+ * FREE NAVIGATION REFACTOR:
+ * - Added `onUpdate` prop: fires whenever defect counts or qualitative states change,
+ *   immediately pushing defects, qualitative, and totalIssues up to WizardPage's `inspectionData`.
+ * - Local state for defectCounts and qualitativeStates is preserved for fast typing performance.
+ *
  * Two interaction models driven by category aql value:
  *  1. Quantitative (aql: '0.65'|'1.0'|'1.5'|'2.5'|'4.0'|'6.5'|'AND'):
  *     Rapid-tap counter cards (-/count/+).
@@ -22,7 +27,7 @@
  * - bg-canvas / bg-surface / bg-brand-primary/5 container hierarchy (§1.2).
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -43,6 +48,7 @@ export interface StepDefectsProps {
   inspectionData?: Record<string, any>;
   onNext: (data: any) => void;
   onBack: () => void;
+  onUpdate?: (partial: Record<string, any>) => void; // Auto-save callback
 }
 
 type QualitativeState = 'PASS' | 'FAIL' | 'NIL';
@@ -55,13 +61,13 @@ const IconMap: Record<string, React.ElementType> = {
   AlertTriangle,
   Info,
   CheckSquare,
-};
+} as const;
 
 /** Returns true when the category uses PASS/FAIL/NIL qualitative evaluation */
 const isQualitativeAql = (aql: string | undefined): boolean =>
   (aql ?? '').toUpperCase() === 'PASS/FAIL/NIL';
 
-export function StepDefects({ inspectionData, onNext, onBack }: StepDefectsProps) {
+export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDefectsProps) {
   const { config, isLoading, getResolvedProfile } = useConfig();
 
   // ── Resolve InspectionProfile from profileId passed through inspectionData ─
@@ -127,6 +133,17 @@ export function StepDefects({ inspectionData, onNext, onBack }: StepDefectsProps
     [qualitativeStates]
   );
   const totalIssues = totalQuantitativeDefects + totalQualitativeFails;
+
+  // ── Auto-save: Push defect data to WizardPage ─────────────────────────────
+  useEffect(() => {
+    onUpdate?.({
+      defects: defectCounts,
+      qualitative: qualitativeStates,
+      totalIssues,
+      profileId: inspectionData?.profileId ?? activeProfile?.id ?? '',
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defectCounts, qualitativeStates, totalIssues, activeProfile?.id]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

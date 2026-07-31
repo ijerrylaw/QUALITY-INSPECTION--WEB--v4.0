@@ -8,6 +8,13 @@
  * Total Carton, Sample Size, Glove Weight (auto-extracted from SKU prefix),
  * Full System Lot No (auto assembled).
  *
+ * FREE NAVIGATION REFACTOR:
+ * - Added `onUpdate` prop: fires on every field change, immediately pushing
+ *   partial data up to WizardPage's `inspectionData`. This ensures no data is
+ *   lost when the user jumps between wizard tabs freely.
+ * - Local state is preserved for complex computed values (shift, lot, timestamp).
+ * - `onNext` continues to fire on "Proceed" for step advancement.
+ *
  * PROFILE RE-ALIGNMENT (Turn 3):
  * - Profile is NOW user-selected via dropdown in Step 1 (product-agnostic).
  * - productProfileMap lookup has been removed.
@@ -23,7 +30,7 @@
  * - bg-canvas / bg-surface / bg-brand-primary token hierarchy per §1.1.
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useConfig } from '../../context/ConfigContext';
 import {
   Activity,
@@ -43,10 +50,11 @@ import { useToast } from '../../components/ui/ToastProvider';
 
 export interface StepMetadataProps {
   onNext: (data: any) => void;
+  onUpdate?: (partial: Record<string, any>) => void; // Auto-save: fires on every field change
   initialData?: Record<string, any>;
 }
 
-export function StepMetadata({ onNext, initialData }: StepMetadataProps) {
+export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProps) {
   const { config, isLoading, getResolvedProfile } = useConfig();
   const { addToast } = useToast();
 
@@ -69,9 +77,16 @@ export function StepMetadata({ onNext, initialData }: StepMetadataProps) {
   const [sampleSize, setSampleSize] = useState<string>(
     initialData?.sampleSize?.toString() || localStorage.getItem('wizard_sampleSize') || ''
   );
-  const [gloveWeight, setGloveWeight] = useState<string>(
-    initialData?.gloveWeight?.toString() || ''
-  );
+  const [gloveWeight, setGloveWeight] = useState<string>(() => {
+    if (initialData?.gloveWeight !== undefined && initialData?.gloveWeight !== null && initialData?.gloveWeight !== '') {
+      const num = parseFloat(initialData.gloveWeight.toString());
+      if (!isNaN(num)) {
+        const dec = config?.productMatrixConfig?.[initialData.productCode || '']?.weightDecimals ?? 0;
+        return num.toFixed(dec);
+      }
+    }
+    return '';
+  });
   const [timestamp, setTimestamp] = useState<Date>(
     initialData?.timestamp ? new Date(initialData.timestamp) : new Date()
   );
@@ -102,16 +117,37 @@ export function StepMetadata({ onNext, initialData }: StepMetadataProps) {
     if (defaultProfile) setProfileId(defaultProfile.id);
   }, [config]);
 
-  // ── ISO2859_MATH_ENGINE.md §3: Auto-extract Glove Weight from SKU prefix ───────
+  // ── Auto-populate Glove Weight from Product Engine size setup ────────────────
+  const lastPopulatedRef = useRef<{ productCode: string; size: string }>({ 
+    productCode: initialData?.gloveWeight ? (initialData.productCode ?? '') : '', 
+    size: initialData?.gloveWeight ? (initialData.size ?? '') : '' 
+  });
+
   useEffect(() => {
-    if (!productCode || productCode.length < 4 || initialData?.gloveWeight) return;
-    const weightStr = productCode.substring(1, 4);
-    const weightVal = parseFloat(weightStr) / 10;
-    if (!isNaN(weightVal)) {
-      const parts = weightVal.toFixed(2).split('.');
-      setGloveWeight(`${parts[0].padStart(2, '0')}.${parts[1]}`);
+    if (!productCode || !size) return;
+    
+    // If productCode and size match the last auto-populated (or mounted) values,
+    // do not overwrite. This preserves manual edits when jumping tabs.
+    if (lastPopulatedRef.current.productCode === productCode && lastPopulatedRef.current.size === size) {
+      return;
     }
-  }, [productCode]);
+    lastPopulatedRef.current = { productCode, size };
+
+    const matrixEntry = config?.productMatrixConfig?.[productCode];
+    const sizeEntry = matrixEntry?.sizes?.[size];
+    
+    if (sizeEntry?.weightTarget) {
+      const dec = matrixEntry.weightDecimals ?? 0;
+      const num = parseFloat(sizeEntry.weightTarget);
+      if (!isNaN(num)) {
+        setGloveWeight(num.toFixed(dec));
+      } else {
+        setGloveWeight(sizeEntry.weightTarget);
+      }
+    } else {
+      setGloveWeight(''); // clear if no target configured
+    }
+  }, [productCode, size, config]);
 
 
   // Enforce side validity when line changes
@@ -214,6 +250,33 @@ export function StepMetadata({ onNext, initialData }: StepMetadataProps) {
     };
   }, [timestamp, lineId, side, sequenceNo, config?.shifts]);
 
+  // ── Auto-save: Push all computed + local state up to parent on every change ─
+  // Fires whenever any field or computed lot value changes, so WizardPage always
+  // has current data even if the user jumps tabs without clicking "Proceed".
+  useEffect(() => {
+    onUpdate?.({
+      profileId,
+      productCode,
+      size,
+      lineId,
+      side,
+      sequenceNo,
+      totalCarton: totalCarton ? parseInt(totalCarton, 10) : '',
+      sampleSize: sampleSize ? parseInt(sampleSize, 10) : '',
+      gloveWeight: gloveWeight ? parseFloat(gloveWeight) : '',
+      effectiveDate: effectiveDate.toISOString(),
+      shift: activeShift,
+      lot4Digit,
+      fullSystemLotNo,
+      timestamp: timestamp.toISOString(),
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    profileId, productCode, size, lineId, side, sequenceNo,
+    totalCarton, sampleSize, gloveWeight, timestamp,
+    effectiveDate, activeShift, lot4Digit, fullSystemLotNo,
+  ]);
+
   // ── Loading Guard ─────────────────────────────────────────────────────────
   if (isLoading || !config) {
     return (
@@ -260,6 +323,8 @@ export function StepMetadata({ onNext, initialData }: StepMetadataProps) {
       timestamp: timestamp.toISOString(),
     });
   };
+  const weightDecimals = config?.productMatrixConfig?.[productCode]?.weightDecimals ?? 0;
+  const weightStep = weightDecimals === 0 ? '1' : (1 / Math.pow(10, weightDecimals)).toFixed(weightDecimals);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -450,33 +515,21 @@ export function StepMetadata({ onNext, initialData }: StepMetadataProps) {
                 GLOVE WEIGHT (g)
               </label>
               <input
-                type="text"
-                inputMode="decimal"
+                type="number"
+                step={weightStep}
                 value={gloveWeight}
-                onChange={(e) => {
-                  let val = e.target.value.replace(/[^0-9.]/g, '');
-                  const dotIndex = val.indexOf('.');
-                  if (dotIndex !== -1) {
-                    const beforeDot = val.slice(0, dotIndex).slice(0, 2);
-                    const afterDot = val.slice(dotIndex + 1).replace(/\./g, '').slice(0, 2);
-                    val = `${beforeDot}.${afterDot}`;
-                  } else {
-                    val = val.slice(0, 2);
-                  }
-                  setGloveWeight(val);
-                }}
+                onChange={(e) => setGloveWeight(e.target.value)}
                 onBlur={() => {
                   if (gloveWeight) {
                     const parsed = parseFloat(gloveWeight);
                     if (!isNaN(parsed)) {
-                      const parts = parsed.toFixed(2).split('.');
-                      setGloveWeight(`${parts[0].padStart(2, '0')}.${parts[1]}`);
+                      setGloveWeight(parsed.toFixed(weightDecimals));
                     } else {
                       setGloveWeight('');
                     }
                   }
                 }}
-                placeholder="00.00"
+                placeholder="0.00"
                 className="w-full h-12 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all"
               />
             </div>

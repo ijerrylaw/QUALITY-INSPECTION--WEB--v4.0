@@ -2,20 +2,22 @@
  * @file WizardPage.tsx
  * @description Parent Container Shell for the Smart Quality Inspection Wizard v4.0.
  *
- * REMAPPING (Turn 6):
- * - Full inspectionData state flows through all 4 wizard steps without loss.
- * - onSubmit handler dispatches complete Submission payload to POST /api/submissions
- *   per API_AND_INTEGRATION_SPEC.md §1.
- * - Retain Context logic preserves Step 1 fields (productCode, lineId, size, side,
- *   sampleSize) between lots when the user opts in.
+ * FREE NAVIGATION REFACTOR:
+ * - Step tabs are now fully clickable for free navigation between steps.
+ * - Step 1 (BATCH SETUP) is mandatory: attempting to jump to steps 2–4 before
+ *   completing Step 1 mandatory fields is blocked with an error toast.
+ * - All step components receive an `onUpdate` callback that merges partial data
+ *   into `inspectionData` on every keystroke (auto-save, no data loss on jump).
+ * - `handleNextStep` now only advances the step; data is already persisted live.
+ * - Retain Context logic preserves Step 1 fields between lots when the user opts in.
  * - Dual-mode switcher (Single Entry / Batch Entry Grid) resets wizard without
  *   corrupting retained context.
  *
  * Strict UI_DESIGN_SYSTEM.md compliance:
  * - Hero H1: text-3xl font-bold uppercase tracking-tight.
- * - Mode Switcher: bg-canvas p-1 rounded-lg border h-12.
- * - Active toggle: bg-brand-primary text-white.
- * - Step progress indicator: inline numbered steps at top of guided wizard.
+ * - Mode Switcher: bg-canvas p-1 rounded-lg border h-12. Active: bg-brand-primary.
+ * - Step Tabs: §2.1 — Active: bg-brand-primary text-white, h-10 px-6 rounded-t-lg.
+ * - Inactive tabs: bg-surface text-muted hover:text-primary hover:bg-surface-light.
  *
  * Level 1 Precedence: AI_RULES.md & UI_DESIGN_SYSTEM.md
  * API Contract: API_AND_INTEGRATION_SPEC.md §1 → POST /api/submissions
@@ -23,7 +25,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { Wand2, Table, CheckCircle2 } from 'lucide-react';
+import { Wand2, Table, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useConfig, API_BASE_URL } from '../context/ConfigContext';
 import { useToast } from '../components/ui/ToastProvider';
 
@@ -35,12 +37,22 @@ import { SpreadsheetGrid } from './wizard/SpreadsheetGrid';
 
 type EntryMode = 'GUIDED' | 'SPREADSHEET';
 
-// ── Step progress labels ──────────────────────────────────────────────────────
+// ── Step tab definitions ───────────────────────────────────────────────────────
 const WIZARD_STEPS = [
   { number: 1, label: 'BATCH SETUP' },
   { number: 2, label: 'DIMENSIONS' },
   { number: 3, label: 'DEFECTS' },
   { number: 4, label: 'REVIEW & SUBMIT' },
+];
+
+// ── Mandatory Step 1 fields that must be set before navigating forward ─────────
+const STEP1_REQUIRED_FIELDS: { key: string; label: string }[] = [
+  { key: 'profileId',   label: 'Inspection Profile' },
+  { key: 'productCode', label: 'Product Code' },
+  { key: 'lineId',      label: 'Line' },
+  { key: 'size',        label: 'Size' },
+  { key: 'sampleSize',  label: 'Sample Size' },
+  { key: 'totalCarton', label: 'Total Carton' },
 ];
 
 export function WizardPage() {
@@ -54,10 +66,45 @@ export function WizardPage() {
   const [currentStep, setCurrentStep] = useState(1);
   const [inspectionData, setInspectionData] = useState<Record<string, any>>({});
 
+  // ── Auto-save: partial merge into inspectionData on every change ──────────
+  // All step components call this instead of waiting for the "Next" button.
+  const handleUpdate = useCallback((partial: Record<string, any>) => {
+    setInspectionData((prev) => ({ ...prev, ...partial }));
+  }, []);
+
+  // ── Validate Step 1 before allowing forward navigation ────────────────────
+  const isStep1Valid = useCallback((data: Record<string, any>): boolean => {
+    return STEP1_REQUIRED_FIELDS.every(
+      (f) => data[f.key] !== undefined && data[f.key] !== '' && data[f.key] !== null
+    );
+  }, []);
+
+  // ── Tab Click Handler — free navigation with Step 1 guard ─────────────────
+  const handleTabClick = useCallback(
+    (stepNumber: number) => {
+      if (stepNumber === 1) {
+        setCurrentStep(1);
+        return;
+      }
+      if (!isStep1Valid(inspectionData)) {
+        const missing = STEP1_REQUIRED_FIELDS
+          .filter((f) => !inspectionData[f.key] || inspectionData[f.key] === '')
+          .map((f) => f.label)
+          .join(', ');
+        addToast('error', `Complete BATCH SETUP first. Missing: ${missing}.`);
+        setCurrentStep(1);
+        return;
+      }
+      setCurrentStep(stepNumber);
+    },
+    [inspectionData, isStep1Valid, addToast]
+  );
+
   // ── Step Handlers ─────────────────────────────────────────────────────────
-  const handleNextStep = useCallback((data: any) => {
-    setInspectionData((prev) => ({ ...prev, ...data }));
-    setCurrentStep((prev) => prev + 1);
+  // Data is already saved via onUpdate; these only handle step navigation.
+  const handleNextStep = useCallback((data?: any) => {
+    if (data) setInspectionData((prev) => ({ ...prev, ...data }));
+    setCurrentStep((prev) => Math.min(prev + 1, WIZARD_STEPS.length));
   }, []);
 
   const handleBackStep = useCallback(() => {
@@ -72,34 +119,34 @@ export function WizardPage() {
   const handleSubmit = useCallback(async (retainContext: boolean) => {
     // Build the Submission object per DATA_SCHEMAS_AND_TYPES.md
     const submission = {
-      productCode: inspectionData.productCode ?? '',
-      productionDate: inspectionData.effectiveDate ?? new Date().toISOString(),
-      samplingTime: inspectionData.timestamp ?? new Date().toISOString(),
-      submissionTimestamp: new Date().toISOString(), // millisecond precision per ISO2859_MATH_ENGINE.md §3
-      machineId: inspectionData.lineId ?? '',
-      shift: inspectionData.shift ?? '',
-      batchNumber: inspectionData.fullSystemLotNo ?? '',
-      size: inspectionData.size ?? '',
-      sampleSize: inspectionData.sampleSize ?? 0,
-      dimensions: inspectionData.dimensions ?? {},
-      dimensionMins: inspectionData.dimensionStats ?? {},
-      defects: inspectionData.defects ?? {},
-      verdict: (inspectionData.overallVerdict ?? 'PASS') as 'PASSED' | 'FAILED',
-      aadObjectId: '',       // populated by AuthContext in production
-      userPrincipalName: '', // populated by AuthContext in production
-      amendmentStatus: 'UNMODIFIED' as const,
-      totalCarton: inspectionData.totalCarton,
-      gloveWeight: inspectionData.gloveWeight,
-      amendmentLogs: [],
-      profileId: inspectionData.profileId ?? '',
+      productCode:          inspectionData.productCode ?? '',
+      productionDate:       inspectionData.effectiveDate ?? new Date().toISOString(),
+      samplingTime:         inspectionData.timestamp ?? new Date().toISOString(),
+      submissionTimestamp:  new Date().toISOString(), // millisecond precision per ISO2859_MATH_ENGINE.md §3
+      machineId:            inspectionData.lineId ?? '',
+      shift:                inspectionData.shift ?? '',
+      batchNumber:          inspectionData.fullSystemLotNo ?? '',
+      size:                 inspectionData.size ?? '',
+      sampleSize:           inspectionData.sampleSize ?? 0,
+      dimensions:           inspectionData.dimensions ?? {},
+      dimensionMins:        inspectionData.dimensionStats ?? {},
+      defects:              inspectionData.defects ?? {},
+      verdict:              (inspectionData.overallVerdict ?? 'PASS') as 'PASSED' | 'FAILED',
+      aadObjectId:          '',       // populated by AuthContext in production
+      userPrincipalName:    '',       // populated by AuthContext in production
+      amendmentStatus:      'UNMODIFIED' as const,
+      totalCarton:          inspectionData.totalCarton,
+      gloveWeight:          inspectionData.gloveWeight,
+      amendmentLogs:        [],
+      profileId:            inspectionData.profileId ?? '',
     };
 
     // POST /api/submissions per API_AND_INTEGRATION_SPEC.md §1
     try {
       const response = await fetch(`${API_BASE_URL}/api/submissions`, {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(submission),
+        body:    JSON.stringify(submission),
       });
 
       if (!response.ok) {
@@ -117,12 +164,12 @@ export function WizardPage() {
     // Reset wizard, optionally retaining Step 1 context fields
     if (retainContext) {
       const retained = {
-        profileId: inspectionData.profileId,
+        profileId:   inspectionData.profileId,
         productCode: inspectionData.productCode,
-        size: inspectionData.size,
-        lineId: inspectionData.lineId,
-        side: inspectionData.side,
-        sampleSize: inspectionData.sampleSize,
+        size:        inspectionData.size,
+        lineId:      inspectionData.lineId,
+        side:        inspectionData.side,
+        sampleSize:  inspectionData.sampleSize,
         gloveWeight: inspectionData.gloveWeight,
       };
       setInspectionData(retained);
@@ -131,6 +178,9 @@ export function WizardPage() {
     }
     setCurrentStep(1);
   }, [inspectionData, addToast]);
+
+  // ── Derived tab state ─────────────────────────────────────────────────────
+  const step1Done = isStep1Valid(inspectionData);
 
   return (
     <div className="p-8 space-y-6 max-w-7xl mx-auto min-h-screen bg-canvas text-primary">
@@ -177,76 +227,91 @@ export function WizardPage() {
       {/* ── Main Content ──────────────────────────────────────────────────── */}
       {entryMode === 'GUIDED' ? (
         <div>
-          {/* ── Step Progress Indicator ───────────────────────────────────── */}
-          <div className="flex items-center gap-2 mb-8 overflow-x-auto pb-2 scrollbar-hide">
+          {/* ── Clickable Step Tabs — UI_DESIGN_SYSTEM.md §2.1 ────────────── */}
+          <div className="flex items-center gap-0 mb-0 overflow-x-auto scrollbar-hide border-b border-gray-800">
             {WIZARD_STEPS.map((step, idx) => {
-              const isComplete = currentStep > step.number;
-              const isActive = currentStep === step.number;
+              const isComplete = currentStep > step.number && step1Done;
+              const isActive   = currentStep === step.number;
+              // Steps 2–4 are locked if Step 1 is not yet valid
+              const isLocked   = step.number > 1 && !step1Done;
 
               return (
-                <div key={step.number} className="flex items-center gap-2 shrink-0">
-                  <div className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${
-                    isActive
-                      ? 'bg-brand-primary/20 border-brand-primary/50 text-white'
-                      : isComplete
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                        : 'bg-canvas border-gray-800 text-muted'
-                  }`}>
+                <div key={step.number} className="flex items-center shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleTabClick(step.number)}
+                    disabled={false} // never truly disabled — guard is inside handleTabClick
+                    title={isLocked ? 'Complete BATCH SETUP first' : step.label}
+                    className={`
+                      h-10 px-6 gap-2 flex items-center justify-center rounded-t-lg
+                      text-xs font-bold tracking-wider uppercase transition-all outline-none
+                      ${isActive
+                        ? 'bg-brand-primary text-white shadow-md'
+                        : isComplete
+                          ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 hover:text-emerald-300'
+                          : isLocked
+                            ? 'bg-surface text-gray-600 cursor-not-allowed'
+                            : 'bg-surface text-muted hover:text-primary hover:bg-surface-light'
+                      }
+                    `}
+                  >
                     {isComplete ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400" strokeWidth={2} />
+                      <CheckCircle2 className="w-4 h-4" strokeWidth={2} />
+                    ) : isLocked ? (
+                      <AlertCircle className="w-4 h-4" strokeWidth={2} />
                     ) : (
-                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold font-mono border ${
-                        isActive ? 'border-brand-secondary text-brand-secondary' : 'border-gray-700 text-muted'
-                      }`}>
+                      <span className={`
+                        w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold font-mono border
+                        ${isActive ? 'border-brand-secondary text-brand-secondary' : 'border-gray-700 text-muted'}
+                      `}>
                         {step.number}
                       </span>
                     )}
-                    <span className={`text-xs font-bold uppercase tracking-wider whitespace-nowrap ${
-                      isActive ? 'text-white' : isComplete ? 'text-emerald-400' : 'text-muted'
-                    }`}>
-                      {step.label}
-                    </span>
-                  </div>
+                    <span className="whitespace-nowrap">{step.label}</span>
+                  </button>
 
-                  {/* Connector line */}
+                  {/* Connector — subtle separator between tabs */}
                   {idx < WIZARD_STEPS.length - 1 && (
-                    <div className={`h-px w-8 shrink-0 transition-all ${
-                      isComplete ? 'bg-emerald-500/40' : 'bg-gray-800'
-                    }`} />
+                    <div className="w-px h-5 bg-gray-800 shrink-0" />
                   )}
                 </div>
               );
             })}
           </div>
 
-          {/* ── Step Components ─────────────────────────────────────────────── */}
-          {currentStep === 1 && (
-            <StepMetadata
-              onNext={handleNextStep}
-              initialData={inspectionData}
-            />
-          )}
-          {currentStep === 2 && (
-            <StepDimensions
-              onNext={handleNextStep}
-              onBack={handleBackStep}
-              initialData={inspectionData}
-            />
-          )}
-          {currentStep === 3 && (
-            <StepDefects
-              onNext={handleNextStep}
-              onBack={handleBackStep}
-              inspectionData={inspectionData}
-            />
-          )}
-          {currentStep === 4 && (
-            <StepReviewSubmit
-              onBack={handleBackStep}
-              inspectionData={inspectionData}
-              onSubmit={handleSubmit}
-            />
-          )}
+          {/* ── Step Content Area ────────────────────────────────────────────── */}
+          <div className="pt-6">
+            {currentStep === 1 && (
+              <StepMetadata
+                onNext={handleNextStep}
+                onUpdate={handleUpdate}
+                initialData={inspectionData}
+              />
+            )}
+            {currentStep === 2 && (
+              <StepDimensions
+                onNext={handleNextStep}
+                onBack={handleBackStep}
+                onUpdate={handleUpdate}
+                initialData={inspectionData}
+              />
+            )}
+            {currentStep === 3 && (
+              <StepDefects
+                onNext={handleNextStep}
+                onBack={handleBackStep}
+                onUpdate={handleUpdate}
+                inspectionData={inspectionData}
+              />
+            )}
+            {currentStep === 4 && (
+              <StepReviewSubmit
+                onBack={handleBackStep}
+                inspectionData={inspectionData}
+                onSubmit={handleSubmit}
+              />
+            )}
+          </div>
         </div>
       ) : (
         <div className="w-full">

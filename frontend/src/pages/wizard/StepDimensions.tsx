@@ -10,6 +10,17 @@
  * - Slot count driven by configured dimensionDefs (not hardcoded to 5).
  * - Falls back gracefully when no product matrix is configured yet.
  *
+ * FIXED-ROW DIMENSIONS (Glove Length & Palm Width):
+ * - GLOVE LENGTH and PALM WIDTH are always shown as fixed leading cards.
+ * - Their specs are read from sizeEntry.lengthTarget/lengthTolerance and
+ *   sizeEntry.palmWidthTarget/palmWidthTolerance (set up in ProductConfigAccordion).
+ * - GLOVE WEIGHT is excluded from Physical Dimensions (handled in BATCH SETUP step).
+ *
+ * FREE NAVIGATION REFACTOR:
+ * - Added `onUpdate` prop: fires whenever measurements change, immediately pushing
+ *   dimensions, stats, and dirtySlots up to WizardPage's `inspectionData`.
+ * - Local state for measurements is preserved for fast typing performance.
+ *
  * UI_DESIGN_SYSTEM.md compliance:
  * - 48px touch targets (h-12) for numerical inputs (§1.2, §3.4).
  * - JetBrains Mono (font-mono) for all measurement values and delta labels (§1.3).
@@ -18,7 +29,7 @@
  * - bg-canvas / bg-surface tier hierarchy (§1.2).
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Ruler, ArrowRight, ArrowLeft, CheckCircle2, AlertTriangle, AlertCircle, Info } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastProvider';
 import { useConfig } from '../../context/ConfigContext';
@@ -27,69 +38,123 @@ import type { ProductDimensionDef } from '../../context/ConfigContext';
 export interface StepDimensionsProps {
   onNext: (data: any) => void;
   onBack: () => void;
+  onUpdate?: (partial: Record<string, any>) => void; // Auto-save callback
   initialData?: Record<string, any>;
 }
 
 /** 5 measurement slots per dimension */
 const SLOTS_PER_DIM = 5;
 
-export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsProps) {
+/** Sentinel IDs for the two always-visible fixed-row dimensions */
+const FIXED_DIM_LENGTH   = '__fixed_length__';
+const FIXED_DIM_PALM     = '__fixed_palm__';
+
+export function StepDimensions({ onNext, onBack, onUpdate, initialData }: StepDimensionsProps) {
   const { addToast } = useToast();
   const { config } = useConfig();
 
   const productCode: string = initialData?.productCode ?? '';
   const size: string = initialData?.size ?? '';
 
-  // ── Dimension Definitions from Product Engine config ─────────────────────
-  // Primary source: productMatrixConfig[productCode].dimensionDefs
-  // Fallback: legacy config.dimensions flat array
-  // Last resort: hardcoded defaults (graceful degradation)
-  const activeDimensions = useMemo((): ProductDimensionDef[] => {
-    const matrixEntry = config?.productMatrixConfig?.[productCode];
+  // ── Per-size entry from Product Engine ────────────────────────────────────
+  const sizeEntry = useMemo(() => {
+    return config?.productMatrixConfig?.[productCode]?.sizes?.[size] ?? null;
+  }, [config, productCode, size]);
+
+  const matrixEntry = useMemo(() => {
+    return config?.productMatrixConfig?.[productCode] ?? null;
+  }, [config, productCode]);
+
+  // ── Fixed-row virtual dimension defs (always prepended) ───────────────────
+  // GLOVE WEIGHT is excluded — handled in BATCH SETUP.
+  const fixedDimensions = useMemo((): ProductDimensionDef[] => {
+    return [
+      {
+        id:       FIXED_DIM_LENGTH,
+        name:     'GLOVE LENGTH',
+        unit:     'mm',
+        isMin:    false,
+        decimals: matrixEntry?.lengthDecimals ?? 0,
+      },
+      {
+        id:       FIXED_DIM_PALM,
+        name:     'PALM WIDTH',
+        unit:     'mm',
+        isMin:    false,
+        decimals: matrixEntry?.palmWidthDecimals ?? 0,
+      },
+    ];
+  }, [matrixEntry]);
+
+  // ── Dynamic dimension definitions from Product Engine ─────────────────────
+  const dynamicDimensions = useMemo((): ProductDimensionDef[] => {
     if (matrixEntry?.dimensionDefs && matrixEntry.dimensionDefs.length > 0) {
       return matrixEntry.dimensionDefs;
     }
     if (config?.dimensions && config.dimensions.length > 0) {
       return config.dimensions;
     }
-    // Graceful fallback — shown with a setup warning
     return [];
-  }, [config, productCode]);
+  }, [config, matrixEntry]);
 
-  // ── Per-Size Spec Lookup from Product Engine ──────────────────────────────
-  // config.productMatrixConfig[productCode].sizes[size].dimensions[dimId]
-  // returns { minSpec: string, tolerance: string }
-  const getDimSpec = (dimId: string): { minSpec: number; tolerance: number } => {
-    const matrixEntry = config?.productMatrixConfig?.[productCode];
-    const sizeEntry = matrixEntry?.sizes?.[size];
+  // ── All dimensions: fixed first, then dynamic ─────────────────────────────
+  const activeDimensions = useMemo(
+    () => [...fixedDimensions, ...dynamicDimensions],
+    [fixedDimensions, dynamicDimensions]
+  );
+
+  // ── Per-Size Spec Lookup ──────────────────────────────────────────────────
+  const getDimSpec = (dimId: string): { minSpec: number; tolerance: number; isMin: boolean } => {
+    // Fixed rows — read from flat SizeConfig fields
+    if (dimId === FIXED_DIM_LENGTH) {
+      const target = parseFloat(sizeEntry?.lengthTarget ?? '0') || 0;
+      const tolRaw = sizeEntry?.lengthTolerance ?? '0';
+      const isMin  = tolRaw.toUpperCase() === 'MIN';
+      return { minSpec: target, tolerance: isMin ? 0 : (parseFloat(tolRaw) || 0), isMin };
+    }
+    if (dimId === FIXED_DIM_PALM) {
+      const target = parseFloat(sizeEntry?.palmWidthTarget ?? '0') || 0;
+      const tolRaw = sizeEntry?.palmWidthTolerance ?? '0';
+      const isMin  = tolRaw.toUpperCase() === 'MIN';
+      return { minSpec: target, tolerance: isMin ? 0 : (parseFloat(tolRaw) || 0), isMin };
+    }
+
+    // Dynamic rows — read from sizes[size].dimensions[dimId]
     const dimValue = sizeEntry?.dimensions?.[dimId];
-
     if (dimValue) {
+      const tolRaw = dimValue.tolerance ?? '0';
+      const isMin  = tolRaw.toUpperCase() === 'MIN';
       return {
-        minSpec: parseFloat(dimValue.minSpec) || 0,
-        tolerance: parseFloat(dimValue.tolerance) || 0,
+        minSpec:   parseFloat(dimValue.minSpec) || 0,
+        tolerance: isMin ? 0 : (parseFloat(tolRaw) || 0),
+        isMin,
       };
     }
 
     // Fallback: read from the dimension def itself (legacy flat format)
-    const dimDef = activeDimensions.find((d) => d.id === dimId) as any;
+    const dimDef = dynamicDimensions.find((d) => d.id === dimId) as any;
     return {
-      minSpec: parseFloat(dimDef?.minSpec ?? '0') || 0,
+      minSpec:   parseFloat(dimDef?.minSpec ?? '0') || 0,
       tolerance: parseFloat(dimDef?.tolerance ?? '0') || 0,
+      isMin:     false,
     };
   };
 
-  // ── Decimal precision helper — driven by the format control set in Product Config ──
+  // ── Decimal precision helper ───────────────────────────────────────────────
   const getDecimalPlaces = (dim: ProductDimensionDef): number => {
-    // Prefer explicit decimals set via the format dropdown in ProductConfigAccordion
+    // Fixed rows — use per-product config decimal settings
+    if (dim.id === FIXED_DIM_LENGTH)  return matrixEntry?.lengthDecimals   ?? 0;
+    if (dim.id === FIXED_DIM_PALM)    return matrixEntry?.palmWidthDecimals ?? 0;
+
+    // Dynamic rows — prefer explicit decimals from format dropdown
     if (typeof dim.decimals === 'number') return dim.decimals;
-    // Legacy fallback: infer from the productMatrixConfig values
-    const matrixEntry = config?.productMatrixConfig?.[productCode];
+
+    // Legacy fallback: infer from value strings in productMatrixConfig
     if (matrixEntry?.sizes) {
       let maxDec = 0;
-      Object.values(matrixEntry.sizes).forEach((sizeConfig) => {
-        const dimVal = sizeConfig.dimensions?.[dim.id];
-        if (dimVal?.minSpec?.includes('.')) maxDec = Math.max(maxDec, dimVal.minSpec.split('.')[1].length);
+      Object.values(matrixEntry.sizes).forEach((sc) => {
+        const dimVal = sc.dimensions?.[dim.id];
+        if (dimVal?.minSpec?.includes('.'))  maxDec = Math.max(maxDec, dimVal.minSpec.split('.')[1].length);
         if (dimVal?.tolerance?.includes('.')) maxDec = Math.max(maxDec, dimVal.tolerance.split('.')[1].length);
       });
       if (maxDec > 0) return maxDec;
@@ -111,6 +176,7 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
 
   // Track which slots have been actively edited by the user
   const [dirtySlots, setDirtySlots] = useState<Record<string, boolean[]>>(() => {
+    if (initialData?.dimensionDirtySlots && Object.keys(initialData.dimensionDirtySlots).length > 0) return initialData.dimensionDirtySlots;
     const init: Record<string, boolean[]> = {};
     const hasInitial = !!(initialData?.dimensions && Object.keys(initialData.dimensions).length > 0);
     activeDimensions.forEach((d) => {
@@ -137,18 +203,18 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
     let filled = 0;
     let passed = 0;
     let failed = 0;
-    const calcStats: Record<string, { min: number; max: number; avg: number; fails: boolean[]; threshold: number; maxThreshold: number }> = {};
+    const calcStats: Record<string, { min: number; max: number; avg: number; fails: boolean[]; threshold: number; maxThreshold: number; isMin: boolean }> = {};
 
     activeDimensions.forEach((dim) => {
-      const { minSpec, tolerance } = getDimSpec(dim.id);
-      const threshold = minSpec > 0 ? minSpec - tolerance : 0;
-      const maxThreshold = minSpec > 0 && tolerance > 0 ? minSpec + tolerance : Infinity;
+      const { minSpec, tolerance, isMin } = getDimSpec(dim.id);
+      const threshold    = minSpec > 0 ? minSpec - tolerance : 0;
+      const maxThreshold = minSpec > 0 && tolerance > 0 && !isMin ? minSpec + tolerance : Infinity;
       const vals = measurements[dim.id] ?? Array(SLOTS_PER_DIM).fill('');
 
       const fails = vals.map((v) => {
         const num = parseFloat(v);
         if (isNaN(num)) return false;
-        return num < threshold || (tolerance > 0 && num > maxThreshold);
+        return num < threshold || (!isMin && tolerance > 0 && num > maxThreshold);
       });
 
       vals.forEach((v, i) => {
@@ -164,28 +230,33 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
       const max = numVals.length > 0 ? Math.max(...numVals) : 0;
       const avg = numVals.length > 0 ? numVals.reduce((a, b) => a + b, 0) / numVals.length : 0;
 
-      calcStats[dim.id] = { min, max, avg, fails, threshold, maxThreshold };
+      calcStats[dim.id] = { min, max, avg, fails, threshold, maxThreshold, isMin };
     });
 
     const tSlots = activeDimensions.length * SLOTS_PER_DIM;
     return { totalSlots: tSlots, filledSlots: filled, passedSlots: passed, failedSlots: failed, stats: calcStats };
-  }, [measurements, activeDimensions, config, productCode, size]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [measurements, activeDimensions, sizeEntry, matrixEntry]);
+
+  // ── Auto-save: Push measurements to WizardPage ────────────────────────────
+  useEffect(() => {
+    onUpdate?.({
+      dimensions: measurements,
+      dimensionDirtySlots: dirtySlots,
+      dimensionStats: stats,
+      totalSlots,
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [measurements, dirtySlots, stats, totalSlots]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (activeDimensions.length === 0) {
-      // Allow proceeding with a warning if no dimensions are configured
-      addToast('info', 'No dimensions configured — proceeding without dimension data.');
-      onNext({ dimensions: {}, dimensionStats: {}, totalSlots: 0 });
-      return;
-    }
     if (filledSlots < totalSlots) {
       addToast('error', `Please complete all ${totalSlots} measurement slots before proceeding.`);
       return;
     }
     onNext({ dimensions: measurements, dimensionStats: stats, totalSlots });
   };
-
 
   const getStep = (dim: ProductDimensionDef): string => {
     const dec = getDecimalPlaces(dim);
@@ -234,38 +305,30 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
             <span className="text-sm font-mono font-bold text-white tracking-tight">
               {passedSlots}/{totalSlots} SLOTS PASSED
             </span>
-            {failedSlots > 0 && (
-              <span className="text-[10px] font-bold uppercase text-rose-400 mt-0.5 tracking-wider">
-                {failedSlots} OUT OF SPEC
-              </span>
-            )}
+            <span className={`text-[10px] font-bold uppercase mt-0.5 tracking-wider ${
+              failedSlots > 0
+                ? 'text-rose-400'
+                : filledSlots === totalSlots && totalSlots > 0
+                  ? 'text-emerald-400/80'
+                  : 'text-amber-400/80'
+            }`}>
+              {failedSlots > 0 ? `${failedSlots} OUT OF SPEC` : '0 OUT OF SPEC'}
+            </span>
           </div>
         </div>
       </div>
-
-      {/* ── No Dimensions Configured Warning ──────────────────────────────── */}
-      {activeDimensions.length === 0 && (
-        <div className="p-4 rounded-lg border border-l-4 border-amber-500/20 border-l-amber-500 bg-amber-500/5 flex gap-3 text-sm">
-          <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" strokeWidth={2} />
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-amber-400">NO DIMENSIONS CONFIGURED</p>
-            <p className="text-xs text-muted mt-1">
-              No dimension definitions found for product <span className="font-mono text-primary">{productCode || '—'}</span>.
-              Go to <strong>Configuration Control → Product Engine</strong> to add dimension definitions and size specifications.
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* ── Dimension Cards Grid ───────────────────────────────────────────── */}
       {activeDimensions.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {activeDimensions.map((dim) => {
-            const dimStats = stats[dim.id] ?? { min: 0, max: 0, avg: 0, fails: [], threshold: 0, maxThreshold: Infinity };
-            const { minSpec, tolerance } = getDimSpec(dim.id);
-            const threshold = dimStats.threshold;
+            const dimStats = stats[dim.id] ?? { min: 0, max: 0, avg: 0, fails: [], threshold: 0, maxThreshold: Infinity, isMin: false };
+            const { minSpec, tolerance, isMin: dimIsMin } = getDimSpec(dim.id);
+            // Merge isMin from spec lookup (covers 'MIN' tolerance) and the def flag
+            const effectiveIsMin = dimIsMin || !!dim.isMin;
+            const threshold    = dimStats.threshold;
             const maxThreshold = dimStats.maxThreshold;
-            const decPlaces = getDecimalPlaces(dim);
+            const decPlaces    = getDecimalPlaces(dim);
 
             return (
               <div key={dim.id} className="bg-surface border border-gray-800 rounded-xl p-5 shadow-sm hover:border-gray-700 transition-colors">
@@ -273,11 +336,13 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
                 {/* Card Header */}
                 <div className="flex items-center justify-between border-b border-gray-800/80 pb-3 mb-4">
                   {/* Title + inline spec */}
-                  <span className="text-sm font-bold uppercase tracking-wider text-primary flex items-baseline gap-2">
+                  <span className={`text-sm font-bold uppercase tracking-wider flex items-baseline gap-2 ${
+                    dim.id === FIXED_DIM_LENGTH || dim.id === FIXED_DIM_PALM ? 'text-brand-secondary' : 'text-primary'
+                  }`}>
                     {dim.name}
                     {minSpec > 0 && (
                       <span className="text-xs font-mono font-normal normal-case text-muted">
-                        {dim.isMin
+                        TARGET: {effectiveIsMin
                           ? `\u2265${minSpec.toFixed(decPlaces)}${dim.unit}`
                           : `${minSpec.toFixed(decPlaces)}${tolerance > 0 ? '\u00b1' + tolerance.toFixed(decPlaces) : ''}${dim.unit}`
                         }
@@ -294,7 +359,7 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
                     }`}>
                       MIN: {dimStats.min > 0 ? `${dimStats.min.toFixed(decPlaces)}${dim.unit}` : '\u2014'}
                     </span>
-                    {!dim.isMin && (
+                    {!effectiveIsMin && (
                       <span className={`font-mono text-[10px] uppercase px-2 py-1 rounded-md border ${
                         tolerance > 0 && dimStats.max > 0 && dimStats.max > maxThreshold
                           ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 font-bold'
@@ -306,18 +371,16 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
                   </div>
                 </div>
 
-
                 {/* 5-Slot Input Grid — 48px touch targets per UI_DESIGN_SYSTEM.md §3.4 */}
                 <div className="grid grid-cols-5 gap-2">
                   {(measurements[dim.id] ?? Array(SLOTS_PER_DIM).fill('')).map((val, idx) => {
-                    const isFail = dimStats.fails[idx] ?? false;
-                    const numVal = parseFloat(val);
-                    // Compute delta: negative means under-spec, positive means over-spec
+                    const isFail  = dimStats.fails[idx] ?? false;
+                    const numVal  = parseFloat(val);
                     let delta: string | null = null;
                     if (!isNaN(numVal) && isFail) {
                       if (numVal < threshold) {
                         delta = (numVal - threshold).toFixed(decPlaces);
-                      } else if (tolerance > 0 && numVal > maxThreshold) {
+                      } else if (!effectiveIsMin && tolerance > 0 && numVal > maxThreshold) {
                         delta = '+' + (numVal - maxThreshold).toFixed(decPlaces);
                       }
                     }
@@ -339,7 +402,7 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
                             }
                           }}
                           placeholder={(idx + 1).toString()}
-                          className={`w-full h-12 rounded-lg bg-canvas text-center font-mono text-sm shadow-inner transition-all outline-none border focus:ring-1 
+                          className={`w-full h-12 rounded-lg bg-canvas text-center font-mono text-sm shadow-inner transition-all outline-none border focus:ring-1
                             ${isFail
                               ? 'border-rose-500/50 text-rose-400 bg-rose-500/5 focus:ring-rose-500/30'
                               : dirtySlots[dim.id]?.[idx]
@@ -348,16 +411,13 @@ export function StepDimensions({ onNext, onBack, initialData }: StepDimensionsPr
                             }`}
                         />
                         {/* Slot-level delta — UI_DESIGN_SYSTEM.md §5.2 */}
-                        {isFail && delta !== null && (
-                          <div className="mt-0.5 text-[9px] font-mono font-bold tracking-tighter text-rose-500 text-center leading-none">
-                            {delta}{dim.unit}
-                          </div>
-                        )}
+                        <div className={`mt-0.5 text-[9px] font-mono font-bold tracking-tighter text-rose-500 text-center leading-none ${isFail && delta !== null ? '' : 'invisible'}`}>
+                          {isFail && delta !== null ? `${delta}${dim.unit}` : `0.0${dim.unit}`}
+                        </div>
                       </div>
                     );
                   })}
                 </div>
-
 
               </div>
             );
