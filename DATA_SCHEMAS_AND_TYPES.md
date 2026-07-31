@@ -33,7 +33,7 @@ export interface Submission {
   gloveWeight?: number;
   operatorToken?: string;
   amendmentLogs: AmendmentLog[];
-  profileId?: string;
+  profileId: string; // REQUIRED — every submission must reference an InspectionProfile
 }
 
 export interface AmendmentLog {
@@ -46,45 +46,47 @@ export interface AmendmentLog {
   newValues: Partial<Submission>;
   reason: string;
 }
+```
 
 ## 2. CONFIGURATION & RULES SCHEMAS
 
+```typescript
 export type EvaluationMode = 'CUMULATIVE' | 'GRANULAR' | 'N/A' | '';
 
 export interface AQLCategory {
   id: string;
   name: string;
-  aqlLevel: string; // e.g., '0.65', '1.0', '1.5', '2.5', '4.0', '6.5', 'AND'
+  aqlLevel: string; // e.g., '0.65', '1.0', '1.5', '2.5', '4.0', '6.5', 'AND', 'PASS/FAIL/NIL'
   evaluationMode: EvaluationMode;
 }
 
 export interface DefectDefinition {
   id: string;
   name: string;
+  categoryId: string;   // links this defect to its parent AQLCategory within a profile
   defaultClass: string;
   currentClass: string;
 }
 
 export interface InspectionProfile {
-  id: string;               
-  name: string;             
+  id: string;
+  name: string;
   isDefault: boolean;
-  aqlCategories: AQLCategory[]; 
-  defectDefinitions: DefectDefinition[]; 
+  aqlCategories: AQLCategory[];          // all defect categories for this profile
+  defectDefinitions: DefectDefinition[];  // all defects nested under this profile
 }
+```
 
 ## 3. PRODUCT & SKU ENGINE SCHEMAS
 
+```typescript
 export interface AppConfig {
   productCodes: string[];
-  defectDefinitions: DefectDefinition[];
   lines: { id: string; name: string }[];
   shifts: { id: string; name: string }[];
   sizes: string[];
-  sampleSizes: number[];
-  aqlCategories?: AQLCategory[];
-  inspectionProfiles?: InspectionProfile[];
-  productProfileMap?: Record<string, string[]>;
+  sampleSizes: number[];               // ISO 2859-1 global bracket sizes — stored at AppConfig root level
+  inspectionProfiles?: InspectionProfile[]; // all profiles; categories & defects live here, NOT at root
   productMatrixConfig?: Record<string, ProductConfig>;
   skuMaterials?: SkuOption[];
   skuWeights?: SkuOption[];
@@ -113,3 +115,4 @@ export interface SizeConfig {
   weightTolerance: string;
   dimensions: Record<string, { minSpec: string; tolerance: string }>;
 }
+```

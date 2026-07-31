@@ -8,8 +8,20 @@
  * Also exposes a `refreshConfig()` function that any component can call after a
  * successful PATCH /api/config to re-hydrate the global cache without a page reload.
  *
+ * KEY ADDITIONS (Wizard Remapping):
+ * - Strongly typed InspectionProfile, AQLCategory, DefectDefinition interfaces
+ *   matching DATA_SCHEMAS_AND_TYPES.md exactly.
+ * - `getResolvedProfile(profileId?)` — finds the active profile by id, falling
+ *   back to the isDefault profile, then the first profile in the list.
+ * - `resolvedAqlCategories` / `resolvedDefectDefinitions` — always-available
+ *   computed arrays derived from the default profile so wizard steps can safely
+ *   read category and defect data without nested lookups.
+ *
+ * PROFILE DESIGN: InspectionProfiles are PRODUCT-AGNOSTIC. They are selected
+ * by the user in Step 1 of the wizard. productProfileMap has been removed.
+ *
  * Level 1 System Precedence: AI_RULES.md & UI_DESIGN_SYSTEM.md
- * Level 2 Feature Spec: v4_optimized_blueprint.md & implementation_plan.md
+ * Data Contracts: DATA_SCHEMAS_AND_TYPES.md
  */
 
 import {
@@ -18,11 +30,12 @@ import {
   useState,
   useEffect,
   useCallback,
+  useMemo,
 } from 'react';
 import type { ReactNode } from 'react';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TYPES — mirrors the response shape of GET /api/config (config.routes.ts)
+// PRIMITIVE OPTION TYPES
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface LineOption {
@@ -47,6 +60,10 @@ export interface SKUOption {
   value: string;
   label: string;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRODUCT MATRIX TYPES  (DATA_SCHEMAS_AND_TYPES.md §3)
+// ─────────────────────────────────────────────────────────────────────────────
 
 export interface ProductDimensionDef {
   id: string;
@@ -73,9 +90,59 @@ export interface SizeConfig {
 export interface ProductConfig {
   dimensionDefs: ProductDimensionDef[];
   sizes: Record<string, SizeConfig>;
-  lastAmended?: string; // ISO date string tracking the last time this config was successfully saved
+  lastAmended?: string;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// INSPECTION PROFILE TYPES  (DATA_SCHEMAS_AND_TYPES.md §2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** EvaluationMode — ISO2859_MATH_ENGINE.md §2 */
+export type EvaluationMode = 'CUMULATIVE' | 'GRANULAR' | 'N/A' | '';
+
+/**
+ * AQLCategory — a severity tier within an inspection profile.
+ * aqlLevel values: '0.65' | '1.0' | '1.5' | '2.5' | '4.0' | '6.5' | 'AND' | 'PASS/FAIL/NIL'
+ */
+export interface AQLCategory {
+  id: string;
+  name: string;
+  /** Legacy field alias for aqlLevel — used by QualityRules component */
+  aql?: string;
+  /** Canonical field per DATA_SCHEMAS_AND_TYPES.md */
+  aqlLevel?: string;
+  evaluationMode?: EvaluationMode;
+  /** Legacy alias used by QualityRules */
+  evalMode?: EvaluationMode | string;
+  // UI decoration fields (optional — used by Kanban in QualityRules)
+  iconName?: string;
+  color?: string;
+  bg?: string;
+  border?: string;
+}
+
+/** DefectDefinition — an individual defect item belonging to a category */
+export interface DefectDefinition {
+  id: string;
+  name: string;
+  /** Links this defect to an AQLCategory.id within the same profile */
+  categoryId: string;
+  defaultClass?: string;
+  currentClass?: string;
+}
+
+/** InspectionProfile — a named set of AQL categories and defect definitions */
+export interface InspectionProfile {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  aqlCategories: AQLCategory[];
+  defectDefinitions: DefectDefinition[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// APP CONFIG  (DATA_SCHEMAS_AND_TYPES.md §3)
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Parsed AppConfig — all JSON string fields from the backend are already
@@ -92,8 +159,8 @@ export interface AppConfig {
   shifts: ShiftOption[];
   sides: SideOption[];
   sizes: string[];
+  /** ISO 2859-1 global bracket sizes — stored at AppConfig root level */
   sampleSizes: number[];
-  productProfileMap: Record<string, string[]>;
   productMatrixConfig: Record<string, ProductConfig>;
   skuMaterials: SKUOption[];
   skuWeights: SKUOption[];
@@ -101,17 +168,20 @@ export interface AppConfig {
   skuTreatments: SKUOption[];
   skuLengths: SKUOption[];
   skuTextures: SKUOption[];
-  dimensions: any[];
+  dimensions: ProductDimensionDef[];
   targetWeight: { target: number; tolerance: number };
-  aqlCategories?: any[];
-  defectDefinitions?: any[];
-  inspectionProfiles?: any[];
+  /**
+   * All inspection profiles. AQL categories and defect definitions live
+   * NESTED inside each profile — NOT at the AppConfig root level.
+   * Profile selection is user-driven in Wizard Step 1 (product-agnostic).
+   */
+  inspectionProfiles?: InspectionProfile[];
   createdAt: string;
   updatedAt: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CONTEXT
+// CONTEXT TYPE
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface ConfigContextType {
@@ -126,16 +196,41 @@ interface ConfigContextType {
    * Call this after a successful PATCH /api/config to reflect changes instantly.
    */
   refreshConfig: () => Promise<void>;
-  /** 
-   * Updates the global config state in memory (Prototype only). 
+  /**
+   * Updates the global config state in memory (Prototype only).
    */
   updateLocalConfig: (partial: Partial<AppConfig>) => void;
+
+  // ── WIZARD HELPERS ────────────────────────────────────────────────────────
+
+  /**
+   * Returns the InspectionProfile matching the given profileId.
+   * Falls back to the profile flagged `isDefault: true`, then to the first
+   * profile in the list. Returns null if no profiles are configured.
+   *
+   * Profiles are PRODUCT-AGNOSTIC — selected by the user in Wizard Step 1.
+   * Used by StepDefects and StepReviewSubmit to source live AQL categories
+   * and defect definitions configured in Configuration Control > Quality Rules.
+   */
+  getResolvedProfile: (profileId?: string) => InspectionProfile | null;
+
+  /**
+   * AQL categories from the default inspection profile.
+   * Safe fallback for wizard steps before a profileId is selected.
+   */
+  resolvedAqlCategories: AQLCategory[];
+
+  /**
+   * Defect definitions from the default inspection profile.
+   * Safe fallback for wizard steps before a profileId is selected.
+   */
+  resolvedDefectDefinitions: DefectDefinition[];
 }
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PROVIDER
+// API BASE URL
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -144,6 +239,10 @@ const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
  * In production: set VITE_API_URL in the frontend build environment.
  */
 export const API_BASE_URL = (import.meta.env['VITE_API_URL'] as string | undefined) ?? 'http://localhost:4009';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROVIDER
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function ConfigProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<AppConfig | null>(null);
@@ -173,10 +272,74 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     setConfig(prev => prev ? { ...prev, ...partial } : null);
   }, []);
 
-  // Fetch once on application mount (Global Context Hydration per v4_optimized_blueprint.md § 3)
+  // Fetch once on application mount
   useEffect(() => {
     void fetchConfig();
   }, [fetchConfig]);
+
+  // ── Profile Resolution Logic ─────────────────────────────────────────────
+  //
+  // InspectionProfiles are PRODUCT-AGNOSTIC. The user selects a profile
+  // in Wizard Step 1 via a dropdown. Configuration Control > Quality Rules
+  // saves AQL categories and defect definitions NESTED inside each profile.
+  //
+  // Wizard steps resolve profile data from inspectionProfiles[n] — never
+  // from the legacy top-level flat fields (removed from schema in Turn 1).
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Finds the InspectionProfile matching profileId.
+   * Falls back to isDefault:true, then first in list.
+   * Normalises the `aql` / `aqlLevel` and `evalMode` / `evaluationMode`
+   * field aliases so downstream components can read either form.
+   */
+  const getResolvedProfile = useCallback((profileId?: string): InspectionProfile | null => {
+    const profiles = config?.inspectionProfiles;
+    if (!profiles || profiles.length === 0) return null;
+
+    let profile: InspectionProfile | undefined;
+
+    if (profileId) {
+      profile = profiles.find(p => p.id === profileId);
+    }
+    if (!profile) {
+      profile = profiles.find(p => p.isDefault) ?? profiles[0];
+    }
+
+    if (!profile) return null;
+
+    // Normalise AQLCategory aliases so both `aql` and `aqlLevel` are always set
+    const normalisedCategories: AQLCategory[] = (profile.aqlCategories ?? []).map(cat => ({
+      ...cat,
+      aql: cat.aql ?? cat.aqlLevel ?? '',
+      aqlLevel: cat.aqlLevel ?? cat.aql ?? '',
+      evalMode: cat.evalMode ?? cat.evaluationMode ?? 'CUMULATIVE',
+      evaluationMode: (cat.evaluationMode ?? cat.evalMode ?? 'CUMULATIVE') as EvaluationMode,
+    }));
+
+    return {
+      ...profile,
+      aqlCategories: normalisedCategories,
+    };
+  }, [config]);
+
+  /**
+   * Always-available AQL categories from the default profile.
+   * Wizard step components use this as a safe starting point before the
+   * user's profileId selection flows through from Step 1.
+   */
+  const resolvedAqlCategories = useMemo<AQLCategory[]>(() => {
+    const profile = getResolvedProfile();
+    return profile?.aqlCategories ?? [];
+  }, [getResolvedProfile]);
+
+  /**
+   * Always-available defect definitions from the default profile.
+   */
+  const resolvedDefectDefinitions = useMemo<DefectDefinition[]>(() => {
+    const profile = getResolvedProfile();
+    return profile?.defectDefinitions ?? [];
+  }, [getResolvedProfile]);
 
   return (
     <ConfigContext.Provider
@@ -186,6 +349,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         error,
         refreshConfig: fetchConfig,
         updateLocalConfig,
+        getResolvedProfile,
+        resolvedAqlCategories,
+        resolvedDefectDefinitions,
       }}
     >
       {children}

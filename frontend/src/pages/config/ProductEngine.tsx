@@ -368,8 +368,8 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                       </span>
                     ) : null}
                   </div>
-                  <div className={`flex items-center gap-1 transition-opacity ${expandedProductDraft ? 'opacity-100' : 'opacity-0 group-hover/prod:opacity-100'}`} onClick={e => e.stopPropagation()}>
-                    {expandedProductDraft ? (
+                  <div className={`flex items-center gap-1 transition-opacity ${(expandedProductDraft && isExpanded) ? 'opacity-100' : 'opacity-0 group-hover/prod:opacity-100'}`} onClick={e => e.stopPropagation()}>
+                    {(expandedProductDraft && isExpanded) ? (
                       <>
                         <button onClick={() => handleSaveProductConfig(code)} className="w-7 h-7 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-500/20 outline-none" title="Save">
                           <Check className="w-4 h-4" />
@@ -380,10 +380,20 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                       </>
                     ) : (
                       <>
-                        <button onClick={() => handleStartEditProduct(code)} className="p-2 rounded-md text-muted hover:text-white hover:bg-gray-800 transition-colors outline-none" title="Edit Config">
+                        <button 
+                          onClick={() => handleStartEditProduct(code)} 
+                          disabled={!!expandedProductDraft}
+                          className={`p-2 rounded-md transition-colors outline-none ${expandedProductDraft ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`} 
+                          title={expandedProductDraft ? 'Save active edits first' : 'Edit Config'}
+                        >
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button onClick={() => handleRemoveProduct(code)} className="p-2 rounded-md text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-colors outline-none" title="Remove">
+                        <button 
+                          onClick={() => handleRemoveProduct(code)} 
+                          disabled={!!expandedProductDraft}
+                          className={`p-2 rounded-md transition-colors outline-none ${expandedProductDraft ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-rose-400 hover:bg-rose-500/10'}`} 
+                          title={expandedProductDraft ? 'Save active edits first' : 'Remove'}
+                        >
                           <Trash className="w-4 h-4" />
                         </button>
                       </>

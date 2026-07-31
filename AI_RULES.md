@@ -35,8 +35,9 @@ Evaluate task complexity and select the appropriate model tier from the IDE drop
 ---
 
 ## 4. INCREMENTAL EXECUTION PROTOCOL (Micro-Step Rule)
-* **One Complete File per Turn:** Edit or write strictly **one complete file per execution turn**, then stop and await user verification.
+* **One Complete File per Turn:** Edit or write strictly **one complete file per execution turn**.
 * **No Incomplete Code Snippets:** Deliver fully functional, standalone file modules. Do not output truncated code blocks or placeholders (e.g., `// ... rest of code`).
+* **Mandatory Build Verification & User Approval:** After completing each file edit, the AI MUST run a build or typecheck validation (`npm run build` or `tsc`), present a concise summary of changes and verification results, and explicitly request user approval before proceeding to the next turn or file.
 
 ---
 
