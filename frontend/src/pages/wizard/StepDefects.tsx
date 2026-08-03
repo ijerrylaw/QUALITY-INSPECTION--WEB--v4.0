@@ -158,12 +158,11 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
   // ── Loading guard ─────────────────────────────────────────────────────────
   if (isLoading || !config) return null;
 
-  const ActiveIcon = activeCategory?.iconName ? (IconMap[activeCategory.iconName] ?? ShieldAlert) : ShieldAlert;
   const activeCategoryAql = activeCategory?.aql ?? activeCategory?.aqlLevel ?? '—';
   const isQual = isQualitativeAql(activeCategoryAql);
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <form id="wizard-step-form" onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="bg-surface border border-gray-800 rounded-xl p-6 space-y-6 shadow-sm">
 
         {/* ── Header ────────────────────────────────────────────────────────── */}
@@ -203,7 +202,7 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
           <>
             <div className="flex overflow-x-auto gap-2 pb-2 scrollbar-hide">
               {aqlCategories.map((cat) => {
-                const Icon = cat.iconName ? (IconMap[cat.iconName] ?? ShieldAlert) : ShieldAlert;
+
                 const isActive = (activeCategoryId || aqlCategories[0]?.id) === cat.id;
                 const catAql = cat.aql ?? cat.aqlLevel ?? '—';
 
@@ -218,13 +217,13 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
                     key={cat.id}
                     type="button"
                     onClick={() => setActiveCategoryId(cat.id)}
-                    className={`h-12 px-5 whitespace-nowrap rounded-lg font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all outline-none border cursor-pointer shrink-0 ${
+                    className={`h-10 px-5 whitespace-nowrap rounded-lg font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all outline-none border cursor-pointer shrink-0 ${
                       isActive
                         ? 'bg-brand-primary text-white border-brand-secondary shadow-lg shadow-brand-primary/20'
                         : 'bg-canvas text-muted hover:text-primary hover:bg-surface border-gray-800 shadow-inner'
                     }`}
                   >
-                    <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-brand-secondary'}`} strokeWidth={2} />
+
                     <span>{cat.name}</span>
                     {catCount > 0 && (
                       <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md ${
@@ -242,7 +241,7 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
             <div className="p-6 rounded-xl bg-canvas border border-gray-800/80 space-y-6 shadow-inner">
               <div className="flex items-center justify-between border-b border-gray-800/60 pb-4">
                 <h3 className="text-lg font-semibold uppercase tracking-wide text-primary flex items-center gap-2">
-                  <ActiveIcon className="w-5 h-5 text-brand-secondary" strokeWidth={2} />
+
                   {activeCategory?.name ?? '—'} CLASSIFICATION
                 </h3>
                 <div className="flex items-center gap-2">
@@ -262,26 +261,26 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
               </div>
 
               {/* Defect Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {activeCategoryDefects.map((defect) => {
                   if (isQual) {
                     // ── QUALITATIVE: PASS / FAIL / NIL Toggle ─────────────
                     const state: QualitativeState = qualitativeStates[defect.id] ?? 'NIL';
 
                     return (
-                      <div key={defect.id} className="bg-surface border border-gray-800 rounded-xl p-5 flex flex-col justify-between shadow-sm">
-                        <div className="mb-4">
-                          <span className="text-sm font-semibold text-primary tracking-wide block truncate">{defect.name}</span>
-                          <span className="text-[10px] text-muted uppercase font-mono tracking-widest mt-1 block">ID: {defect.id}</span>
+                      <div key={defect.id} className="bg-surface border border-gray-800 rounded-xl p-3 flex flex-col justify-between shadow-sm">
+                        <div className="mb-3">
+                          <span className="font-mono text-sm font-bold text-primary tracking-wide block truncate">{defect.name}</span>
+                          <span className="font-mono text-[10px] text-muted uppercase tracking-widest mt-1 block">ID: {defect.id}</span>
                         </div>
 
                         {/* 3-State Segmented Toggle */}
-                        <div className="inline-flex bg-canvas p-1 rounded-lg border border-gray-800 h-12 items-center gap-1 w-full justify-between shadow-inner">
+                        <div className="inline-flex bg-canvas p-1 rounded-lg border border-gray-800 items-center gap-1 w-full justify-between shadow-inner">
                           {/* PASS */}
                           <button
                             type="button"
                             onClick={() => setQualState(defect.id, 'PASS')}
-                            className={`flex-1 h-10 px-2 flex items-center justify-center rounded-md text-xs font-bold uppercase tracking-wider transition-all cursor-pointer select-none outline-none ${
+                            className={`flex-1 h-8 px-2 flex items-center justify-center rounded-md text-xs font-bold uppercase tracking-wider transition-all cursor-pointer select-none outline-none ${
                               state === 'PASS'
                                 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 shadow-sm'
                                 : 'text-muted hover:text-primary hover:bg-surface/50 border border-transparent'
@@ -293,7 +292,7 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
                           <button
                             type="button"
                             onClick={() => setQualState(defect.id, 'FAIL')}
-                            className={`flex-1 h-10 px-2 flex items-center justify-center rounded-md text-xs font-bold uppercase tracking-wider transition-all cursor-pointer select-none outline-none ${
+                            className={`flex-1 h-8 px-2 flex items-center justify-center rounded-md text-xs font-bold uppercase tracking-wider transition-all cursor-pointer select-none outline-none ${
                               state === 'FAIL'
                                 ? 'bg-rose-500/20 text-rose-400 border border-rose-500/50 shadow-sm'
                                 : 'text-muted hover:text-primary hover:bg-surface/50 border border-transparent'
@@ -305,7 +304,7 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
                           <button
                             type="button"
                             onClick={() => setQualState(defect.id, 'NIL')}
-                            className={`flex-1 h-10 px-2 flex items-center justify-center rounded-md text-xs font-bold uppercase tracking-wider transition-all cursor-pointer select-none outline-none ${
+                            className={`flex-1 h-8 px-2 flex items-center justify-center rounded-md text-xs font-bold uppercase tracking-wider transition-all cursor-pointer select-none outline-none ${
                               state === 'NIL'
                                 ? 'bg-gray-700/40 text-gray-300 border border-gray-600 shadow-sm'
                                 : 'text-muted hover:text-primary hover:bg-surface/50 border border-transparent'
@@ -321,27 +320,27 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
                   // ── QUANTITATIVE: -/count/+ Counter Card ─────────────────
                   const count = defectCounts[defect.id] ?? 0;
                   return (
-                    <div key={defect.id} className="bg-surface border border-gray-800 rounded-xl p-5 flex flex-col justify-between shadow-sm hover:border-gray-700 transition-colors">
-                      <div className="mb-4">
-                        <span className="text-sm font-semibold text-primary tracking-wide block truncate">{defect.name}</span>
-                        <span className="text-[10px] text-muted uppercase font-mono tracking-widest mt-1 block">ID: {defect.id}</span>
+                    <div key={defect.id} className="bg-surface border border-gray-800 rounded-xl p-3 flex flex-col justify-between shadow-sm hover:border-gray-700 transition-colors">
+                      <div className="mb-3">
+                        <span className="font-mono text-sm font-bold text-primary tracking-wide block truncate">{defect.name}</span>
+                        <span className="font-mono text-[10px] text-muted uppercase tracking-widest mt-1 block">ID: {defect.id}</span>
                       </div>
 
-                      <div className="flex items-center justify-between bg-canvas rounded-lg p-2 border border-gray-800 shadow-inner">
+                      <div className="flex items-center justify-between bg-canvas rounded-lg p-1 border border-gray-800 shadow-inner">
                         {/* Decrement */}
                         <motion.button
                           type="button"
                           whileTap={{ scale: 0.92 }}
                           onClick={() => handleDecrement(defect.id)}
                           disabled={count === 0}
-                          className="w-12 h-12 shrink-0 flex items-center justify-center bg-surface border border-gray-700 rounded-md text-muted hover:text-rose-400 hover:border-rose-500/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors outline-none"
+                          className="w-8 h-8 shrink-0 flex items-center justify-center bg-surface border border-gray-700 rounded-md text-muted hover:text-rose-400 hover:border-rose-500/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors outline-none"
                         >
-                          <Minus className="w-5 h-5" strokeWidth={2.5} />
+                          <Minus className="w-4 h-4" strokeWidth={2.5} />
                         </motion.button>
 
                         {/* Count Display — JetBrains Mono per UI_DESIGN_SYSTEM.md §1.3 */}
                         <div className="flex-1 flex justify-center">
-                          <span className={`text-3xl font-mono font-bold ${count > 0 ? 'text-brand-secondary' : 'text-gray-500'}`}>
+                          <span className={`text-2xl font-mono font-bold ${count > 0 ? 'text-brand-secondary' : 'text-gray-500'}`}>
                             {count.toString().padStart(2, '0')}
                           </span>
                         </div>
@@ -351,9 +350,9 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
                           type="button"
                           whileTap={{ scale: 0.92 }}
                           onClick={() => handleIncrement(defect.id)}
-                          className="w-12 h-12 shrink-0 flex items-center justify-center bg-surface border border-gray-700 rounded-md text-brand-secondary hover:bg-brand-primary/20 hover:border-brand-secondary transition-colors outline-none shadow-[0_0_10px_rgba(8,200,205,0.1)]"
+                          className="w-8 h-8 shrink-0 flex items-center justify-center bg-surface border border-gray-700 rounded-md text-brand-secondary hover:bg-brand-primary/20 hover:border-brand-secondary transition-colors outline-none shadow-[0_0_10px_rgba(8,200,205,0.1)]"
                         >
-                          <Plus className="w-5 h-5" strokeWidth={2.5} />
+                          <Plus className="w-4 h-4" strokeWidth={2.5} />
                         </motion.button>
                       </div>
                     </div>
@@ -390,25 +389,8 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
         </div>
       </div>
 
-      {/* ── Bottom Action Navigation Bar ──────────────────────────────────── */}
-      <div className="flex items-center justify-between pt-4 border-t border-gray-800">
-        <button
-          type="button"
-          onClick={onBack}
-          className="h-12 px-6 rounded-lg bg-surface text-muted hover:text-primary border border-gray-800 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none"
-        >
-          <ArrowLeft className="w-4 h-4" strokeWidth={2} />
-          <span>BACK TO DIMENSIONS</span>
-        </button>
-
-        <button
-          type="submit"
-          className="h-12 px-8 rounded-lg bg-accent-gradient text-white font-bold text-xs tracking-wider uppercase shadow-lg shadow-brand-primary/20 flex items-center gap-2 hover:brightness-110 transition-all outline-none"
-        >
-          <span>PROCEED TO REVIEW</span>
-          <ArrowRight className="w-4 h-4" strokeWidth={2} />
-        </button>
-      </div>
     </form>
   );
 }
+
+

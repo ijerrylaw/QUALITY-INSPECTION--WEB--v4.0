@@ -290,7 +290,7 @@ export function StepReviewSubmit({ inspectionData, onSubmit, onBack }: StepRevie
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <form id="wizard-step-form" onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
       {/* ── Hero Verdict Banner — UI_DESIGN_SYSTEM.md §5.1 ──────────────────── */}
       <div className={`p-6 rounded-xl border flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm ${
@@ -300,9 +300,9 @@ export function StepReviewSubmit({ inspectionData, onSubmit, onBack }: StepRevie
       }`}>
         <div className="flex items-center gap-4">
           {overallVerdict === 'PASS' ? (
-            <CheckCircle2 className="w-12 h-12 text-emerald-400 shrink-0" strokeWidth={2} />
+            <CheckCircle2 className="w-10 h-10 text-emerald-400 shrink-0" strokeWidth={2} />
           ) : (
-            <XCircle className="w-12 h-12 text-rose-400 shrink-0" strokeWidth={2} />
+            <XCircle className="w-10 h-10 text-rose-400 shrink-0" strokeWidth={2} />
           )}
           <div>
             <h2 className={`text-2xl font-bold uppercase tracking-wide ${
@@ -433,48 +433,27 @@ export function StepReviewSubmit({ inspectionData, onSubmit, onBack }: StepRevie
         </div>
       )}
 
-      {/* ── Bottom Action Navigation & Retain Context Toggle ──────────────── */}
-      <div className="flex flex-col md:flex-row items-center justify-between pt-6 border-t border-gray-800 gap-4">
-
-        <button
-          type="button"
-          onClick={onBack}
-          className="h-12 w-full md:w-auto px-6 rounded-lg bg-surface text-muted hover:text-primary border border-gray-800 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all outline-none"
+      {/* ── Retain Context Toggle ──────────────── */}
+      <div className="flex justify-end pt-6 border-t border-gray-800">
+        <label
+          className="h-10 w-full md:w-auto px-4 rounded-lg bg-surface border border-gray-800 flex items-center justify-center gap-3 cursor-pointer select-none hover:bg-surface-light transition-all"
+          title="When enabled, Line, Shift, and Product Code are preserved for the next batch."
         >
-          <ArrowLeft className="w-4 h-4" strokeWidth={2} />
-          <span>BACK TO DEFECTS</span>
-        </button>
-
-        <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
-          {/* Retain Context Toggle */}
-          <label
-            className="h-12 w-full md:w-auto px-4 rounded-lg bg-surface border border-gray-800 flex items-center justify-center gap-3 cursor-pointer select-none hover:bg-surface-light transition-all"
-            title="When enabled, Line, Shift, and Product Code are preserved for the next batch."
-          >
-            <input
-              type="checkbox"
-              checked={retainContext}
-              onChange={(e) => setRetainContext(e.target.checked)}
-              className="w-4 h-4 rounded border-gray-700 bg-canvas text-brand-primary focus:ring-brand-secondary focus:ring-offset-canvas"
-            />
-            <div className="flex items-center gap-2">
-              <BookmarkCheck className={`w-4 h-4 ${retainContext ? 'text-emerald-400' : 'text-muted'}`} strokeWidth={2} />
-              <span className={`text-xs font-bold uppercase tracking-wider whitespace-nowrap ${retainContext ? 'text-primary' : 'text-muted'}`}>
-                RETAIN CONTEXT FOR NEXT BATCH
-              </span>
-            </div>
-          </label>
-
-          <button
-            type="submit"
-            className="h-12 w-full md:w-auto px-8 rounded-lg bg-accent-gradient text-white font-bold text-xs tracking-wider uppercase shadow-lg shadow-brand-primary/20 flex items-center justify-center gap-2 hover:brightness-110 transition-all outline-none"
-          >
-            <ClipboardCheck className="w-5 h-5" strokeWidth={2} />
-            <span>SUBMIT & NEXT LOT</span>
-            <ArrowRight className="w-4 h-4" strokeWidth={2} />
-          </button>
-        </div>
+          <input
+            type="checkbox"
+            checked={retainContext}
+            onChange={(e) => setRetainContext(e.target.checked)}
+            className="w-4 h-4 rounded border-gray-700 bg-canvas text-brand-primary focus:ring-brand-secondary focus:ring-offset-canvas"
+          />
+          <div className="flex items-center gap-2">
+            <BookmarkCheck className={`w-4 h-4 ${retainContext ? 'text-emerald-400' : 'text-muted'}`} strokeWidth={2} />
+            <span className={`text-xs font-bold uppercase tracking-wider whitespace-nowrap ${retainContext ? 'text-primary' : 'text-muted'}`}>
+              RETAIN CONTEXT FOR NEXT BATCH
+            </span>
+          </div>
+        </label>
       </div>
     </form>
   );
 }
+

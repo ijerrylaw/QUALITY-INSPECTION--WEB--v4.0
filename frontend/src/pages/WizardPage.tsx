@@ -25,7 +25,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { Wand2, Table, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Wand2, Table, CheckCircle2, AlertCircle, ArrowLeft, ArrowRight, ClipboardCheck } from 'lucide-react';
 import { useConfig, API_BASE_URL } from '../context/ConfigContext';
 import { useToast } from '../components/ui/ToastProvider';
 
@@ -227,56 +227,93 @@ export function WizardPage() {
       {/* ── Main Content ──────────────────────────────────────────────────── */}
       {entryMode === 'GUIDED' ? (
         <div>
-          {/* ── Clickable Step Tabs — UI_DESIGN_SYSTEM.md §2.1 ────────────── */}
-          <div className="flex items-center gap-0 mb-0 overflow-x-auto scrollbar-hide border-b border-gray-800">
-            {WIZARD_STEPS.map((step, idx) => {
-              const isComplete = currentStep > step.number && step1Done;
-              const isActive   = currentStep === step.number;
-              // Steps 2–4 are locked if Step 1 is not yet valid
-              const isLocked   = step.number > 1 && !step1Done;
+          {/* ── Top-Docked Command Header ───────────────────────────────────── */}
+          <div className="flex flex-col md:flex-row items-center justify-between border-b border-gray-800 gap-4 md:gap-0 pb-2 md:pb-0">
+            {/* Left: Step Tabs */}
+            <div className="flex items-center gap-0 overflow-x-auto scrollbar-hide w-full md:w-auto">
+              {WIZARD_STEPS.map((step, idx) => {
+                const isComplete = currentStep > step.number && step1Done;
+                const isActive   = currentStep === step.number;
+                // Steps 2–4 are locked if Step 1 is not yet valid
+                const isLocked   = step.number > 1 && !step1Done;
 
-              return (
-                <div key={step.number} className="flex items-center shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => handleTabClick(step.number)}
-                    disabled={false} // never truly disabled — guard is inside handleTabClick
-                    title={isLocked ? 'Complete BATCH SETUP first' : step.label}
-                    className={`
-                      h-10 px-6 gap-2 flex items-center justify-center rounded-t-lg
-                      text-xs font-bold tracking-wider uppercase transition-all outline-none
-                      ${isActive
-                        ? 'bg-brand-primary text-white shadow-md'
-                        : isComplete
-                          ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 hover:text-emerald-300'
-                          : isLocked
-                            ? 'bg-surface text-gray-600 cursor-not-allowed'
-                            : 'bg-surface text-muted hover:text-primary hover:bg-surface-light'
-                      }
-                    `}
-                  >
-                    {isComplete ? (
-                      <CheckCircle2 className="w-4 h-4" strokeWidth={2} />
-                    ) : isLocked ? (
-                      <AlertCircle className="w-4 h-4" strokeWidth={2} />
-                    ) : (
-                      <span className={`
-                        w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold font-mono border
-                        ${isActive ? 'border-brand-secondary text-brand-secondary' : 'border-gray-700 text-muted'}
-                      `}>
-                        {step.number}
-                      </span>
+                return (
+                  <div key={step.number} className="flex items-center shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleTabClick(step.number)}
+                      disabled={false}
+                      title={isLocked ? 'Complete BATCH SETUP first' : step.label}
+                      className={`
+                        h-10 px-6 gap-2 flex items-center justify-center rounded-t-lg
+                        text-xs font-bold tracking-wider uppercase transition-all outline-none
+                        ${isActive
+                          ? 'bg-brand-primary text-white shadow-md'
+                          : isComplete
+                            ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 hover:text-emerald-300'
+                            : isLocked
+                              ? 'bg-surface text-gray-600 cursor-not-allowed'
+                              : 'bg-surface text-muted hover:text-primary hover:bg-surface-light'
+                        }
+                      `}
+                    >
+                      {isComplete ? (
+                        <CheckCircle2 className="w-4 h-4" strokeWidth={2} />
+                      ) : isLocked ? (
+                        <AlertCircle className="w-4 h-4" strokeWidth={2} />
+                      ) : (
+                        <span className={`
+                          w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold font-mono border
+                          ${isActive ? 'border-brand-secondary text-brand-secondary' : 'border-gray-700 text-muted'}
+                        `}>
+                          {step.number}
+                        </span>
+                      )}
+                      <span className="whitespace-nowrap">{step.label}</span>
+                    </button>
+
+                    {/* Connector */}
+                    {idx < WIZARD_STEPS.length - 1 && (
+                      <div className="w-px h-5 bg-gray-800 shrink-0" />
                     )}
-                    <span className="whitespace-nowrap">{step.label}</span>
-                  </button>
+                  </div>
+                );
+              })}
+            </div>
 
-                  {/* Connector — subtle separator between tabs */}
-                  {idx < WIZARD_STEPS.length - 1 && (
-                    <div className="w-px h-5 bg-gray-800 shrink-0" />
-                  )}
-                </div>
-              );
-            })}
+            {/* Right: Command Header Action Buttons */}
+            <div className="flex items-center gap-2 w-full md:w-auto justify-end shrink-0">
+              {currentStep > 1 && (
+                <button
+                  type="button"
+                  onClick={handleBackStep}
+                  className="h-10 px-4 rounded-lg bg-surface text-muted hover:text-primary border border-gray-700 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all outline-none"
+                >
+                  <ArrowLeft className="w-4 h-4" strokeWidth={2} />
+                  <span className="hidden sm:inline">BACK</span>
+                </button>
+              )}
+
+              {currentStep < 4 ? (
+                <button
+                  type="submit"
+                  form="wizard-step-form"
+                  className="h-10 px-6 rounded-lg bg-brand-primary text-white font-bold text-xs tracking-wider uppercase shadow-md shadow-brand-primary/20 flex items-center justify-center gap-2 hover:brightness-110 transition-all outline-none"
+                >
+                  <span>{currentStep === 1 ? 'START INSPECTION' : 'NEXT'}</span>
+                  <ArrowRight className="w-4 h-4" strokeWidth={2} />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  form="wizard-step-form"
+                  className="h-10 px-8 rounded-lg bg-accent-gradient text-white font-bold text-xs tracking-wider uppercase shadow-lg shadow-brand-primary/20 flex items-center justify-center gap-2 hover:brightness-110 transition-all outline-none"
+                >
+                  <ClipboardCheck className="w-4 h-4" strokeWidth={2} />
+                  <span>SUBMIT LOT</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {/* ── Step Content Area ────────────────────────────────────────────── */}

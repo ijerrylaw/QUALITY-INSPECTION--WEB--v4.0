@@ -40,7 +40,7 @@ const sidebarItems: SidebarItem[] = [
   { to: '/approvals', label: 'APPROVALS QUEUE', icon: ShieldAlert, roles: ['SUPERVISOR', 'MANAGER', 'ADMIN'] },
   { to: '/analytics', label: 'QUALITY ANALYTICS', icon: BarChart3, roles: ['SUPERVISOR', 'MANAGER', 'ADMIN'] },
   { to: '/config', label: 'CONFIGURATION CONTROL', icon: Sliders, roles: ['MANAGER', 'ADMIN'] },
-  { to: '/system', label: 'SYSTEM & TENANT ADMIN', icon: Settings, roles: ['ADMIN'] },
+  { to: '/system', label: 'SYSTEM ADMIN', icon: Settings, roles: ['ADMIN'] },
 ];
 
 export function Sidebar() {

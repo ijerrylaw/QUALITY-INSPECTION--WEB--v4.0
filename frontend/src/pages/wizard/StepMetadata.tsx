@@ -327,7 +327,7 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
   const weightStep = weightDecimals === 0 ? '1' : (1 / Math.pow(10, weightDecimals)).toFixed(weightDecimals);
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <form id="wizard-step-form" onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
         {/* ── LEFT COLUMN: Manual Inputs ──────────────────────────────────── */}
@@ -347,7 +347,7 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
               <select
                 value={profileId}
                 onChange={(e) => setProfileId(e.target.value)}
-                className="w-full h-12 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
+                className="w-full h-9 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
               >
                 <option value="" disabled>Select Inspection Profile...</option>
                 {(config.inspectionProfiles || []).map((p: any) => (
@@ -372,7 +372,7 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                 <select
                   value={productCode}
                   onChange={(e) => setProductCode(e.target.value)}
-                  className="w-full h-12 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
+                  className="w-full h-9 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
                 >
                   <option value="" disabled>Select Product Code...</option>
                   {(config.productCodes || []).map((code) => (
@@ -393,7 +393,7 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                 <select
                   value={size}
                   onChange={(e) => setSize(e.target.value)}
-                  className="w-full h-12 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
+                  className="w-full h-9 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
                 >
                   <option value="" disabled>Select Size...</option>
                   {(config.sizes || []).map((s) => (
@@ -414,7 +414,7 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                 <select
                   value={lineId}
                   onChange={(e) => setLineId(e.target.value)}
-                  className="w-full h-12 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
+                  className="w-full h-9 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
                 >
                   <option value="" disabled>Select Line...</option>
                   {availableLines.map((l: any) => (
@@ -435,7 +435,7 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                 <select
                   value={side}
                   onChange={(e) => setSide(e.target.value)}
-                  className="w-full h-12 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
+                  className="w-full h-9 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
                 >
                   {(config?.sides || []).map((s: any) => (
                     <option key={s.id} value={s.id} className="bg-surface text-primary">{s.id} ({s.name})</option>
@@ -462,7 +462,7 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                   if (sequenceNo) setSequenceNo(sequenceNo.padStart(3, '0'));
                 }}
                 placeholder="001"
-                className="w-full h-12 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all"
+                className="w-full h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all"
               />
             </div>
 
@@ -483,7 +483,7 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                   if (totalCarton) setTotalCarton(totalCarton.padStart(2, '0'));
                 }}
                 placeholder="01"
-                className="w-full h-12 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all"
+                className="w-full h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all"
               />
             </div>
 
@@ -497,7 +497,7 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                 <select
                   value={sampleSize}
                   onChange={(e) => setSampleSize(e.target.value)}
-                  className="w-full h-12 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
+                  className="w-full h-9 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
                 >
                   <option value="" disabled>Select Sample Size...</option>
                   {(config.sampleSizes || []).map((ss) => (
@@ -530,7 +530,7 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                   }
                 }}
                 placeholder="0.00"
-                className="w-full h-12 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all"
+                className="w-full h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all"
               />
             </div>
 
@@ -557,7 +557,7 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                 type="datetime-local"
                 value={new Date(timestamp.getTime() - timestamp.getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
                 onChange={handleDateChange}
-                className="w-full h-10 bg-surface border border-gray-700 rounded text-sm text-primary font-mono px-3 outline-none focus:border-brand-secondary [color-scheme:dark] transition-opacity"
+                className="w-full h-9 bg-surface border border-gray-700 rounded text-sm text-primary font-mono px-3 outline-none focus:border-brand-secondary [color-scheme:dark] transition-opacity"
               />
             </div>
 
@@ -592,16 +592,7 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
         </div>
       </div>
 
-      {/* ── Bottom Action Bar ────────────────────────────────────────────── */}
-      <div className="flex justify-end pt-4 border-t border-gray-800 mt-6">
-        <button
-          type="submit"
-          className="h-12 w-full md:w-auto px-10 rounded-lg bg-accent-gradient text-white font-bold text-xs tracking-wider uppercase shadow-lg shadow-brand-primary/20 flex items-center justify-center gap-2 hover:brightness-110 transition-all outline-none"
-        >
-          <span>PROCEED TO PHYSICAL DIMENSIONS</span>
-          <ArrowRight className="w-4 h-4" strokeWidth={2} />
-        </button>
-      </div>
     </form>
   );
 }
+

@@ -111,7 +111,7 @@ export function QuickDefectPopover({ isOpen, onClose, rowId, sequenceNo, initial
                 return (
                   <div key={defect.id} className="bg-canvas border border-gray-800 rounded-xl p-4 shadow-sm">
                     <span className="text-sm font-bold text-primary block mb-3">{defect.name}</span>
-                    <div className="inline-flex bg-surface p-1 rounded-lg border border-gray-800 h-12 items-center gap-1 w-full justify-between">
+                    <div className="inline-flex bg-surface p-1 rounded-lg border border-gray-800 h-10 items-center gap-1 w-full justify-between">
                       <button onClick={() => setQualState(defect.id, 'PASS')} className={`flex-1 h-10 flex items-center justify-center rounded-md text-xs font-semibold uppercase tracking-wider transition-all outline-none ${state === 'PASS' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50' : 'text-muted hover:text-primary'}`}>PASS</button>
                       <button onClick={() => setQualState(defect.id, 'FAIL')} className={`flex-1 h-10 flex items-center justify-center rounded-md text-xs font-semibold uppercase tracking-wider transition-all outline-none ${state === 'FAIL' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/50' : 'text-muted hover:text-primary'}`}>FAIL</button>
                       <button onClick={() => setQualState(defect.id, 'NIL')} className={`flex-1 h-10 flex items-center justify-center rounded-md text-xs font-semibold uppercase tracking-wider transition-all outline-none ${state === 'NIL' ? 'bg-gray-700/40 text-gray-300 border border-gray-600' : 'text-muted hover:text-primary'}`}>NIL</button>
@@ -125,11 +125,11 @@ export function QuickDefectPopover({ isOpen, onClose, rowId, sequenceNo, initial
                 <div key={defect.id} className="bg-canvas border border-gray-800 rounded-xl p-4 shadow-sm flex flex-col justify-between">
                   <span className="text-sm font-bold text-primary block mb-3">{defect.name}</span>
                   <div className="flex items-center justify-between bg-surface rounded-lg p-1.5 border border-gray-800">
-                    <motion.button whileTap={{ scale: 0.95 }} onClick={() => handleDecrement(defect.id)} disabled={count === 0} className="w-12 h-12 flex items-center justify-center bg-canvas border border-gray-700 rounded-md text-muted hover:text-rose-400 hover:border-rose-500/50 disabled:opacity-50 outline-none">
+                    <motion.button whileTap={{ scale: 0.95 }} onClick={() => handleDecrement(defect.id)} disabled={count === 0} className="w-10 h-10 flex items-center justify-center bg-canvas border border-gray-700 rounded-md text-muted hover:text-rose-400 hover:border-rose-500/50 disabled:opacity-50 outline-none">
                       <Minus className="w-6 h-6" strokeWidth={2.5} />
                     </motion.button>
                     <span className={`text-2xl font-mono font-bold ${count > 0 ? 'text-brand-secondary' : 'text-gray-500'}`}>{count.toString().padStart(2, '0')}</span>
-                    <motion.button whileTap={{ scale: 0.95 }} onClick={() => handleIncrement(defect.id)} className="w-12 h-12 flex items-center justify-center bg-canvas border border-gray-700 rounded-md text-brand-secondary hover:bg-brand-primary/20 hover:border-brand-secondary outline-none">
+                    <motion.button whileTap={{ scale: 0.95 }} onClick={() => handleIncrement(defect.id)} className="w-10 h-10 flex items-center justify-center bg-canvas border border-gray-700 rounded-md text-brand-secondary hover:bg-brand-primary/20 hover:border-brand-secondary outline-none">
                       <Plus className="w-6 h-6" strokeWidth={2.5} />
                     </motion.button>
                   </div>
@@ -150,3 +150,4 @@ export function QuickDefectPopover({ isOpen, onClose, rowId, sequenceNo, initial
     </div>
   );
 }
+

@@ -160,15 +160,15 @@ export function ConfigPage() {
   };
 
   return (
-    <div className="p-6 space-y-4 max-w-7xl mx-auto min-h-screen bg-canvas text-primary relative">
+    <div className="p-8 space-y-6 max-w-7xl mx-auto min-h-screen bg-canvas text-primary relative">
       
       {/* ── Page Header ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-800/80 pb-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-800/80 pb-6">
         <div>
           <h1 className="text-3xl font-bold uppercase tracking-tight text-primary">
             CONFIGURATION CONTROL
           </h1>
-          <p className="text-sm font-normal text-muted mt-1">
+          <p className="text-xs font-normal text-muted mt-1">
             Master settings for Factory Infrastructure, Product Catalog, and ISO 2859-1 Rules.
           </p>
         </div>

@@ -142,8 +142,9 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
 * **KPI Display Blocks**: Large, centered aggregate numbers (e.g., Total Slots Measured). The number MUST be `font-mono text-4xl text-primary font-bold`, with the label stacked underneath as `text-[10px] uppercase text-muted`.
 
 ### 4.5 The Wizard-Facing Identity Protocol
-* **Purpose**: To provide System Administrators with an immediate visual bridge between Configuration Control and the factory floor. Any data entity that acts as a primary, selectable identity in the Quality Entry Wizard (e.g., Line IDs, Shift Names, Defect Categories, SKUs) MUST be visually highlighted so admins know exactly what the operator will see and interact with.
-* **Selectable Wizard Identities**: MUST use `font-mono text-brand-secondary font-bold` (Cyan + Bold). This includes SKUs, Line Codes, Shift Names, and Defect Categories/Names.
+* **Purpose**: To provide System Administrators with an immediate visual bridge between Configuration Control and the factory floor. Any data entity that acts as a primary, selectable identity in the Quality Entry Wizard (e.g., Line IDs, Shift Names, Defect Categories, SKUs) MUST be visually highlighted in the Configuration screens so admins know exactly what the operator will see.
+* **Selectable Wizard Identities (Configuration Only)**: In the **Configuration Control** module, these identities MUST use `font-mono text-brand-secondary font-bold` (Cyan + Bold). 
+* **Selectable Wizard Identities (Entry Wizard)**: Inside the actual **Quality Entry Wizard** (factory floor execution screens), these identities MUST remain standard White text (`text-primary font-mono font-bold`). Do not carry the Cyan highlight into the wizard itself, as it causes colorful distractions for operators.
 * **Secondary Context & Descriptive Names**: Standard readable names paired with identities MUST use `font-mono text-primary font-normal` (White + Normal) to provide context without competing for attention.
 * **Exemption for Data Matrices**: Numeric targets, tolerances, and data matrices (e.g., Spec limits in ProductEngine) MUST remain plain `font-mono text-primary` (White + Normal). Do NOT apply Cyan to dense numeric grids, as this will overwhelm the matrix and destroy readability. Color is reserved strictly for primary identities.
 

@@ -265,7 +265,7 @@ export function StepDimensions({ onNext, onBack, onUpdate, initialData }: StepDi
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <form id="wizard-step-form" onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
       {/* ── Top Summary & Compliance Tracker ──────────────────────────────── */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-surface border border-gray-800 rounded-xl p-6 shadow-sm">
@@ -402,7 +402,7 @@ export function StepDimensions({ onNext, onBack, onUpdate, initialData }: StepDi
                             }
                           }}
                           placeholder={(idx + 1).toString()}
-                          className={`w-full h-12 rounded-lg bg-canvas text-center font-mono text-sm shadow-inner transition-all outline-none border focus:ring-1
+                          className={`w-full h-9 rounded-lg bg-canvas text-center font-mono text-sm shadow-inner transition-all outline-none border focus:ring-1
                             ${isFail
                               ? 'border-rose-500/50 text-rose-400 bg-rose-500/5 focus:ring-rose-500/30'
                               : dirtySlots[dim.id]?.[idx]
@@ -436,25 +436,7 @@ export function StepDimensions({ onNext, onBack, onUpdate, initialData }: StepDi
         </div>
       )}
 
-      {/* ── Bottom Action Bar ─────────────────────────────────────────────── */}
-      <div className="flex justify-between pt-4 border-t border-gray-800 mt-6">
-        <button
-          type="button"
-          onClick={onBack}
-          className="h-12 px-6 rounded-lg bg-surface border border-gray-700 text-primary font-bold text-xs tracking-wider uppercase flex items-center justify-center gap-2 hover:bg-surface-light transition-all outline-none"
-        >
-          <ArrowLeft className="w-4 h-4" strokeWidth={2} />
-          <span>BACK</span>
-        </button>
-
-        <button
-          type="submit"
-          className="h-12 px-10 rounded-lg bg-accent-gradient text-white font-bold text-xs tracking-wider uppercase shadow-lg shadow-brand-primary/20 flex items-center justify-center gap-2 hover:brightness-110 transition-all outline-none"
-        >
-          <span>PROCEED TO DEFECTS</span>
-          <ArrowRight className="w-4 h-4" strokeWidth={2} />
-        </button>
-      </div>
     </form>
   );
 }
+
