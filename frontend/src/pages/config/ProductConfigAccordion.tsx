@@ -188,20 +188,20 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
   };
 
   return (
-    <div className="bg-canvas border-t border-gray-800 p-6 animate-in slide-in-from-top-2">
+    <div className="bg-canvas border-t border-gray-800 p-4 animate-in slide-in-from-top-2">
       <div className="w-full overflow-x-auto bg-surface border border-gray-800 rounded-xl shadow-xl">
         <table className="w-full table-fixed text-left border-collapse whitespace-nowrap">
           <thead>
             <tr className="bg-canvas border-b border-gray-800">
               <th className="py-2.5 px-3 border-r border-gray-800/50 w-[16%]"></th>
-              <th className="py-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-muted font-mono text-center border-r border-gray-800/50 w-[6%] overflow-hidden">UOM</th>
+              <th className="py-2.5 px-1 text-xs font-semibold uppercase tracking-wider text-muted text-center border-r border-gray-800/50 w-[6%] overflow-hidden">UOM</th>
               
               {STANDARD_SIZES.map(size => {
                 const isActive = !!sizes[size];
                 
                 return (
                   <React.Fragment key={size}>
-                    <th className={`py-2.5 px-1 text-[11px] font-bold uppercase tracking-wider border-r border-gray-800/50 text-center relative font-mono transition-colors w-[8%] overflow-hidden ${isActive ? 'text-primary bg-surface' : 'text-gray-600 bg-canvas/30'}`}>
+                    <th className={`py-2.5 px-1 text-xs font-semibold uppercase tracking-wider border-r border-gray-800/50 text-center relative transition-colors w-[8%] overflow-hidden ${isActive ? 'text-primary bg-surface' : 'text-gray-600 bg-canvas/30'}`}>
                       <div className="flex flex-col items-center justify-center gap-1">
                         {!isReadOnly && (
                           <button 
@@ -219,7 +219,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         <span>{size}</span>
                       </div>
                     </th>
-                    <th className={`py-2.5 px-1 text-[11px] font-bold uppercase tracking-wider border-r border-gray-800/50 text-center font-mono transition-colors w-[5%] overflow-hidden ${isActive ? 'text-muted bg-surface' : 'text-gray-700 bg-canvas/30'}`}>&plusmn; TOL</th>
+                    <th className={`py-2.5 px-1 text-xs font-semibold uppercase tracking-wider border-r border-gray-800/50 text-center transition-colors w-[5%] overflow-hidden ${isActive ? 'text-muted bg-surface' : 'text-gray-700 bg-canvas/30'}`}>&plusmn; TOL</th>
                   </React.Fragment>
                 );
               })}
@@ -253,9 +253,9 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={wgtTarget}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'weightTarget', e.target.value)}
-                        className={`w-full h-9 rounded-md px-2 text-xs font-mono text-center outline-none transition-all ${
+                        className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
-                            ? 'bg-canvas border border-gray-800 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 text-primary' 
+                            ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary' 
                             : 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
                         }`}
                       />
@@ -266,9 +266,9 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={wgtTol}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'weightTolerance', formatTolerance(e.target.value))}
-                        className={`w-full h-9 rounded-md px-1 text-xs font-mono text-center outline-none transition-all ${
+                        className={`w-full h-9 rounded-md px-1 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
-                            ? `bg-canvas border border-gray-800 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 ${wgtTol.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}` 
+                            ? `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${wgtTol.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}` 
                             : 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
                         }`}
                       />
@@ -304,9 +304,9 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={lenTarget}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'lengthTarget', e.target.value)}
-                        className={`w-full h-9 rounded-md px-2 text-xs font-mono text-center outline-none transition-all ${
+                        className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
-                            ? 'bg-canvas border border-gray-800 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 text-primary' 
+                            ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary' 
                             : 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
                         }`}
                       />
@@ -317,9 +317,9 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={lenTol}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'lengthTolerance', formatTolerance(e.target.value))}
-                        className={`w-full h-9 rounded-md px-1 text-xs font-mono text-center outline-none transition-all ${
+                        className={`w-full h-9 rounded-md px-1 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
-                            ? `bg-canvas border border-gray-800 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 ${lenTol.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}` 
+                            ? `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${lenTol.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}` 
                             : 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
                         }`}
                       />
@@ -355,9 +355,9 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={palmTarget}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'palmWidthTarget', e.target.value)}
-                        className={`w-full h-9 rounded-md px-2 text-xs font-mono text-center outline-none transition-all ${
+                        className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
-                            ? 'bg-canvas border border-gray-800 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 text-primary' 
+                            ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary' 
                             : 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
                         }`}
                       />
@@ -368,9 +368,9 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={palmTol}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'palmWidthTolerance', formatTolerance(e.target.value))}
-                        className={`w-full h-9 rounded-md px-1 text-xs font-mono text-center outline-none transition-all ${
+                        className={`w-full h-9 rounded-md px-1 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
-                            ? `bg-canvas border border-gray-800 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 ${palmTol.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}` 
+                            ? `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${palmTol.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}` 
                             : 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
                         }`}
                       />
@@ -398,7 +398,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                             if (e.key === 'Escape') setEditingDim(null);
                           }}
                           onChange={e => setEditingDim({ ...editingDim, name: e.target.value.toUpperCase() })}
-                          className="w-full bg-canvas border border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded px-2 h-7 text-sm font-semibold text-primary outline-none uppercase"
+                          className="w-full h-9 px-2 bg-canvas border border-gray-700 rounded font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none uppercase"
                         />
                         <div className="flex items-center gap-0.5 shrink-0">
                           <button onClick={handleSaveDimension} className="w-7 h-7 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-500/20 outline-none" title="Save">
@@ -411,7 +411,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                       </div>
                     ) : (
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-semibold text-primary uppercase">{def.name}</span>
+                        <span className="font-mono text-sm text-primary uppercase">{def.name}</span>
                         {!isReadOnly && (
                           <div className="flex items-center gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity">
                             <button 
@@ -447,7 +447,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         type="text"
                         value={editingDim.unit}
                         onChange={e => setEditingDim({ ...editingDim, unit: e.target.value })}
-                        className="w-full min-w-[40px] bg-canvas border border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded px-1 h-7 text-[11px] font-bold text-primary text-center outline-none"
+                        className="w-full h-9 min-w-[40px] px-1 bg-canvas border border-gray-700 rounded font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-center outline-none"
                       />
                     ) : (
                       <span className="text-[11px] font-bold text-muted uppercase font-mono block">{def.unit}</span>
@@ -470,9 +470,9 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                             value={dimVal.minSpec}
                             disabled={!isActive || isReadOnly}
                             onChange={e => handleUpdateDimensionValue(size, def.id, 'minSpec', e.target.value)}
-                            className={`w-full h-9 rounded-md px-2 text-xs font-mono text-center outline-none transition-all ${
+                            className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
                               isActive
-                                ? 'bg-canvas border border-gray-800 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 text-primary'
+                                ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary'
                                 : 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
                             }`}
                           />
@@ -483,9 +483,9 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                             value={dimVal.tolerance}
                             disabled={!isActive || isReadOnly}
                             onChange={e => handleUpdateDimensionValue(size, def.id, 'tolerance', formatTolerance(e.target.value))}
-                            className={`w-full h-9 rounded-md px-1 text-xs font-mono text-center outline-none transition-all ${
+                            className={`w-full h-9 rounded-md px-1 text-sm font-mono text-center outline-none transition-all ${
                               isActive
-                                ? `bg-canvas border border-gray-800 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 ${dimVal.tolerance.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}`
+                                ? `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${dimVal.tolerance.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}`
                                 : 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
                             }`}
                           />
@@ -503,9 +503,10 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                 <td colSpan={2 + STANDARD_SIZES.length * 2} className="p-0">
                   <button 
                     onClick={handleAddDimension}
-                    className="w-full h-12 flex items-center justify-center text-xs font-semibold text-muted hover:text-brand-secondary hover:bg-surface-light/40 uppercase gap-2 transition-colors outline-none"
+                    className="w-full h-12 rounded border border-dashed border-gray-700 bg-transparent text-muted hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 font-semibold text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all outline-none"
                   >
-                    <Plus className="w-4 h-4" /> ADD NEW DIMENSION
+                    <Plus className="w-4 h-4" strokeWidth={2} />
+                    <span>ADD</span>
                   </button>
                 </td>
               </tr>
@@ -516,3 +517,4 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
     </div>
   );
 }
+

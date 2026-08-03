@@ -204,49 +204,49 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
+    <div className="space-y-4 animate-in fade-in duration-300">
       
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         {/* ── Section 1: Production Lines ────────────────────────────────────── */}
         <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm flex flex-col h-full">
-          <div className="p-5 border-b border-gray-800 bg-surface flex items-center justify-between shrink-0">
+          <div className="p-4 border-b border-gray-800 bg-surface flex items-center justify-between shrink-0">
           <div>
-            <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+            <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
               <Activity className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
               PRODUCTION LINES
             </h3>
-            <p className="text-xs text-muted mt-1">Manage active lines available for assignment during inspections.</p>
+            <p className="text-xs text-muted mt-1 font-normal normal-case">Manage active lines available for assignment during inspections.</p>
           </div>
         </div>
 
-        <div className="p-5 overflow-x-auto">
+        <div className="p-4 overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[500px]">
             <thead>
               <tr className="border-b border-gray-800">
-                <th className="pb-3 pl-2 text-[10px] font-bold text-muted uppercase tracking-wider w-32">Line ID (Code)</th>
-                <th className="pb-3 text-[10px] font-bold text-muted uppercase tracking-wider flex-1">Display Name</th>
-                <th className="pb-3 pr-2 text-[10px] font-bold text-muted uppercase tracking-wider text-right w-24">Actions</th>
+                <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted w-32">Line ID (Code)</th>
+                <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted flex-1">Display Name</th>
+                <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted text-right w-24">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-800/50">
+            <tbody className="">
               {lines.map((line: any) => {
                 const isEditing = editingLineId === line.id;
                 
                 return (
-                  <tr key={line.id} className="hover:bg-surface/50 transition-colors group">
-                    <td className="py-2 pl-2">
+                  <tr key={line.id} className="hover:bg-surface/50 transition-colors group border-b border-gray-700/50">
+                    <td className="py-3 px-3">
                       {isEditing ? (
                         <input 
                           type="text"
                           value={editLineForm.id}
                           onChange={(e) => setEditLineForm({ ...editLineForm, id: e.target.value })}
-                          className="w-full h-8 px-2 bg-canvas border border-brand-secondary rounded text-primary font-mono text-xs outline-none uppercase"
+                          className="w-full h-9 px-2 bg-canvas border border-gray-700 rounded font-mono text-sm font-bold text-brand-secondary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none uppercase"
                         />
                       ) : (
-                        <span className="text-sm font-mono font-bold text-primary">{line.id}</span>
+                        <span className="font-mono text-sm font-bold text-brand-secondary">{line.id}</span>
                       )}
                     </td>
-                    <td className="py-2 pr-4">
+                    <td className="py-3 px-3">
                       {isEditing ? (
                         <div className="relative">
                           <input 
@@ -258,16 +258,16 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
                               if (e.key === 'Enter') saveEditingLine(line.id);
                               if (e.key === 'Escape') setEditingLineId(null);
                             }}
-                            className="w-full h-8 px-2 pr-20 bg-canvas border border-brand-secondary rounded text-primary text-sm font-medium outline-none"
+                            className="w-full h-9 px-2 pr-20 bg-canvas border border-gray-700 rounded font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none"
                             placeholder="Line Name"
                           />
                           <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted pointer-events-none">Enter ↵</span>
                         </div>
                       ) : (
-                        <span className="text-sm font-medium text-gray-300">{line.name}</span>
+                        <span className="font-mono text-sm text-primary">{line.name}</span>
                       )}
                     </td>
-                    <td className="py-2 pr-2 text-right">
+                    <td className="py-3 px-3 text-right">
                       {isEditing ? (
                         <div className="flex justify-end gap-1">
                           <button onClick={() => saveEditingLine(line.id)} className="p-1.5 rounded-md text-emerald-400 hover:bg-emerald-500/20 transition-colors outline-none" title="Save (Enter)">
@@ -307,54 +307,54 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
           
           <button 
             onClick={handleAddLine}
-            className="w-full mt-4 h-10 rounded-md border border-dashed border-gray-700 bg-surface-light/30 text-muted hover:text-brand-secondary hover:border-brand-secondary hover:bg-brand-primary/10 font-semibold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all outline-none"
+            className="w-full mt-4 h-10 rounded-md border border-dashed border-gray-700 bg-transparent text-muted hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 font-semibold text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all outline-none"
           >
             <Plus className="w-4 h-4" strokeWidth={2} />
-            <span>ADD LINE</span>
+            <span>ADD</span>
           </button>
         </div>
       </div>
       
       {/* ── Section 2: Sides Registration ────────────────────────────────────── */}
       <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
-        <div className="p-5 border-b border-gray-800 bg-surface flex items-center justify-between">
+        <div className="p-4 border-b border-gray-800 bg-surface flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+            <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
               <SplitSquareHorizontal className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
               SIDES CONFIGURATION
             </h3>
-            <p className="text-xs text-muted mt-1">Manage glove sides (e.g., Side A, Side Z) available during inspection.</p>
+            <p className="text-xs text-muted mt-1 font-normal normal-case">Manage glove sides (e.g., Side A, Side Z) available during inspection.</p>
           </div>
         </div>
 
-        <div className="p-5 overflow-x-auto">
+        <div className="p-4 overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[500px]">
             <thead>
               <tr className="border-b border-gray-800">
-                <th className="pb-3 pl-2 text-[10px] font-bold text-muted uppercase tracking-wider w-32">Side ID</th>
-                <th className="pb-3 text-[10px] font-bold text-muted uppercase tracking-wider flex-1">Display Name</th>
-                <th className="pb-3 pr-2 text-[10px] font-bold text-muted uppercase tracking-wider text-right w-24">Actions</th>
+                <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted w-32">Side ID</th>
+                <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted flex-1">Display Name</th>
+                <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted text-right w-24">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-800/50">
+            <tbody className="">
               {sides.map((side: any) => {
                 const isEditing = editingSideId === side.id;
                 
                 return (
-                  <tr key={side.id} className="hover:bg-surface/50 transition-colors group">
-                    <td className="py-2 pl-2">
+                  <tr key={side.id} className="hover:bg-surface/50 transition-colors group border-b border-gray-700/50">
+                    <td className="py-3 px-3">
                       {isEditing ? (
                         <input 
                           type="text"
                           value={editSideForm.id}
                           onChange={(e) => setEditSideForm({ ...editSideForm, id: e.target.value })}
-                          className="w-full h-8 px-2 bg-canvas border border-brand-secondary rounded text-primary font-mono text-xs outline-none uppercase"
+                          className="w-full h-9 px-2 bg-canvas border border-gray-700 rounded font-mono text-sm font-bold text-brand-secondary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none uppercase"
                         />
                       ) : (
-                        <span className="text-sm font-mono font-bold text-primary">{side.id}</span>
+                        <span className="font-mono text-sm font-bold text-brand-secondary">{side.id}</span>
                       )}
                     </td>
-                    <td className="py-2 pr-4">
+                    <td className="py-3 px-3">
                       {isEditing ? (
                         <div className="relative">
                           <input 
@@ -366,16 +366,16 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
                               if (e.key === 'Enter') saveEditingSide(side.id);
                               if (e.key === 'Escape') setEditingSideId(null);
                             }}
-                            className="w-full h-8 px-2 pr-20 bg-canvas border border-brand-secondary rounded text-primary text-sm font-medium outline-none"
+                            className="w-full h-9 px-2 pr-20 bg-canvas border border-gray-700 rounded font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none"
                             placeholder="Side Name"
                           />
                           <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted pointer-events-none">Enter ↵</span>
                         </div>
                       ) : (
-                        <span className="text-sm font-medium text-gray-300">{side.name}</span>
+                        <span className="font-mono text-sm text-primary">{side.name}</span>
                       )}
                     </td>
-                    <td className="py-2 pr-2 text-right">
+                    <td className="py-3 px-3 text-right">
                       {isEditing ? (
                         <div className="flex justify-end gap-1">
                           <button onClick={() => saveEditingSide(side.id)} className="p-1.5 rounded-md text-emerald-400 hover:bg-emerald-500/20 transition-colors outline-none" title="Save (Enter)">
@@ -415,10 +415,10 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
           
           <button 
             onClick={handleAddSide}
-            className="w-full mt-4 h-10 shrink-0 rounded-md border border-dashed border-gray-700 bg-surface-light/30 text-muted hover:text-brand-secondary hover:border-brand-secondary hover:bg-brand-primary/10 font-semibold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all outline-none"
+            className="w-full mt-4 h-10 shrink-0 rounded-md border border-dashed border-gray-700 bg-transparent text-muted hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 font-semibold text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all outline-none"
           >
             <Plus className="w-4 h-4" strokeWidth={2} />
-            <span>ADD SIDE</span>
+            <span>ADD</span>
           </button>
         </div>
       </div>
@@ -427,13 +427,13 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
 
       {/* ── Section 3: Shift Registration ────────────────────────────────── */}
       <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm flex flex-col">
-        <div className="p-5 border-b border-gray-800 bg-surface flex items-center justify-between shrink-0">
+        <div className="p-4 border-b border-gray-800 bg-surface flex items-center justify-between shrink-0">
           <div>
-            <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+            <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
               <Clock className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
               SHIFT REGISTRATION
             </h3>
-            <p className="text-xs text-muted mt-1">Define factory shift schedules for auto-shift calculations and reporting.</p>
+            <p className="text-xs text-muted mt-1 font-normal normal-case">Define factory shift schedules for auto-shift calculations and reporting.</p>
           </div>
         </div>
         
@@ -444,7 +444,7 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
           </div>
         )}
         
-        <div className="p-5 flex-1 flex flex-col gap-4">
+        <div className="p-4 flex-1 flex flex-col gap-4">
           {shifts.map((shift: any, index: number) => {
             const isEditing = editingShiftId === shift.id;
             const overlappingPartner = shifts.find((s: any) => checkShiftOverlap(shift, s));
@@ -480,7 +480,7 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
                             if (e.key === 'Enter') saveEditingShift(shift.id);
                             if (e.key === 'Escape') setEditingShiftId(null);
                           }}
-                          className="w-full h-8 px-2 pr-16 bg-canvas border border-brand-secondary rounded text-primary text-sm font-bold outline-none"
+                          className="w-full h-9 px-2 pr-16 bg-canvas border border-gray-700 rounded font-mono text-sm font-bold text-brand-secondary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none"
                           placeholder="Shift Name (e.g. Shift A or A)"
                         />
                         <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted pointer-events-none font-mono">Enter ↵</span>
@@ -491,7 +491,7 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
                     <div className="flex flex-wrap items-center gap-4">
                       <div className="flex items-center gap-2">
                         <div className="flex flex-col">
-                          <label className="text-[10px] font-bold text-muted uppercase">Start Hour</label>
+                          <label className="text-xs font-semibold uppercase tracking-wider text-muted">Start Hour</label>
                           <input 
                             type="text" 
                             value={String(editShiftForm.startHour ?? 0).padStart(2, '0')}
@@ -505,12 +505,12 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
                               if (e.key === 'Enter') saveEditingShift(shift.id);
                               if (e.key === 'Escape') setEditingShiftId(null);
                             }}
-                            className="h-9 px-2 w-16 rounded-md bg-canvas border border-gray-700 text-brand-secondary font-mono text-xs focus:border-brand-secondary outline-none text-center"
+                            className="h-9 px-2 w-16 rounded-md bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none text-center"
                           />
                         </div>
                         <span className="font-bold text-muted pt-4">:</span>
                         <div className="flex flex-col">
-                          <label className="text-[10px] font-bold text-muted uppercase">Start Min</label>
+                          <label className="text-xs font-semibold uppercase tracking-wider text-muted">Start Min</label>
                           <input 
                             type="text" 
                             value={String(editShiftForm.startMinute ?? 0).padStart(2, '0')}
@@ -524,7 +524,7 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
                               if (e.key === 'Enter') saveEditingShift(shift.id);
                               if (e.key === 'Escape') setEditingShiftId(null);
                             }}
-                            className="h-9 px-2 w-16 rounded-md bg-canvas border border-gray-700 text-brand-secondary font-mono text-xs focus:border-brand-secondary outline-none text-center"
+                            className="h-9 px-2 w-16 rounded-md bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none text-center"
                           />
                         </div>
                       </div>
@@ -532,7 +532,7 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
                       <div className="h-8 w-px bg-gray-800 hidden md:block"></div>
 
                       <div className="flex flex-col">
-                        <label className="text-[10px] font-bold text-muted uppercase">Duration (Hrs)</label>
+                        <label className="text-xs font-semibold uppercase tracking-wider text-muted">Duration (Hrs)</label>
                         <input 
                           type="number" 
                           min="1" max="24" step="0.5"
@@ -542,7 +542,7 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
                             if (e.key === 'Enter') saveEditingShift(shift.id);
                             if (e.key === 'Escape') setEditingShiftId(null);
                           }}
-                          className="h-9 px-2 w-20 rounded-md bg-canvas border border-gray-700 text-brand-secondary font-mono text-xs focus:border-brand-secondary outline-none text-center"
+                          className="h-9 px-2 w-20 rounded-md bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none text-center"
                         />
                       </div>
 
@@ -559,8 +559,8 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
                 ) : (
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <span className="text-sm font-bold text-primary font-mono">{shift.name}</span>
-                      <span className="text-[10px] font-mono font-bold text-brand-secondary bg-brand-primary/10 border border-brand-secondary/30 px-2 py-0.5 rounded flex items-center gap-1">
+                      <span className="font-mono text-sm font-bold text-brand-secondary">{shift.name}</span>
+                      <span className="text-[10px] font-mono text-muted bg-gray-800/50 border border-gray-700/50 px-2 py-0.5 rounded flex items-center gap-1">
                         <Clock className="w-3 h-3" /> {shiftTimeRangeStr}
                       </span>
                       {overlappingPartner && (
@@ -617,7 +617,7 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
                       if (e.key === 'Enter') saveNewShift();
                       if (e.key === 'Escape') setIsAddingShift(false);
                     }}
-                    className="w-full h-8 px-2 pr-16 bg-canvas border border-brand-secondary rounded text-primary text-sm font-bold outline-none"
+                    className="w-full h-9 px-2 pr-16 bg-canvas border border-gray-700 rounded font-mono text-sm font-bold text-brand-secondary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none"
                     placeholder="New Shift Name (e.g. Shift C)"
                   />
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted pointer-events-none font-mono">Enter ↵</span>
@@ -627,7 +627,7 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
               <div className="flex flex-wrap items-center gap-4">
                 <div className="flex items-center gap-2">
                   <div className="flex flex-col">
-                    <label className="text-[10px] font-bold text-muted uppercase">Start Hour</label>
+                    <label className="text-xs font-semibold uppercase tracking-wider text-muted">Start Hour</label>
                     <input 
                       type="text" 
                       value={String(newShiftForm.startHour ?? 0).padStart(2, '0')}
@@ -641,12 +641,12 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
                         if (e.key === 'Enter') saveNewShift();
                         if (e.key === 'Escape') setIsAddingShift(false);
                       }}
-                      className="h-9 px-2 w-16 rounded-md bg-canvas border border-gray-700 text-brand-secondary font-mono text-xs focus:border-brand-secondary outline-none text-center"
+                      className="h-9 px-2 w-16 rounded-md bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none text-center"
                     />
                   </div>
                   <span className="font-bold text-muted pt-4">:</span>
                   <div className="flex flex-col">
-                    <label className="text-[10px] font-bold text-muted uppercase">Start Min</label>
+                    <label className="text-xs font-semibold uppercase tracking-wider text-muted">Start Min</label>
                     <input 
                       type="text" 
                       value={String(newShiftForm.startMinute ?? 0).padStart(2, '0')}
@@ -660,7 +660,7 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
                         if (e.key === 'Enter') saveNewShift();
                         if (e.key === 'Escape') setIsAddingShift(false);
                       }}
-                      className="h-9 px-2 w-16 rounded-md bg-canvas border border-gray-700 text-brand-secondary font-mono text-xs focus:border-brand-secondary outline-none text-center"
+                      className="h-9 px-2 w-16 rounded-md bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none text-center"
                     />
                   </div>
                 </div>
@@ -668,7 +668,7 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
                 <div className="h-8 w-px bg-gray-800 hidden md:block"></div>
 
                 <div className="flex flex-col">
-                  <label className="text-[10px] font-bold text-muted uppercase">Duration (Hrs)</label>
+                  <label className="text-xs font-semibold uppercase tracking-wider text-muted">Duration (Hrs)</label>
                   <input 
                     type="number" 
                     min="1" max="24" step="0.5"
@@ -678,7 +678,7 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
                       if (e.key === 'Enter') saveNewShift();
                       if (e.key === 'Escape') setIsAddingShift(false);
                     }}
-                    className="h-9 px-2 w-20 rounded-md bg-canvas border border-gray-700 text-brand-secondary font-mono text-xs focus:border-brand-secondary outline-none text-center"
+                    className="h-9 px-2 w-20 rounded-md bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none text-center"
                   />
                 </div>
 
@@ -701,10 +701,10 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
           {!isAddingShift && (
             <button 
               onClick={startAddingShift}
-              className="w-full h-10 rounded-md border border-dashed border-gray-700 bg-surface-light/30 text-muted hover:text-brand-secondary hover:border-brand-secondary hover:bg-brand-primary/10 font-semibold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all outline-none"
+              className="w-full h-10 rounded-md border border-dashed border-gray-700 bg-transparent text-muted hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 font-semibold text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all outline-none"
             >
               <Plus className="w-4 h-4" strokeWidth={2} />
-              <span>ADD SHIFT</span>
+              <span>ADD</span>
             </button>
           )}
         </div>
@@ -713,3 +713,4 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
     </div>
   );
 }
+

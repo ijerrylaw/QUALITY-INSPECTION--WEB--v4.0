@@ -177,16 +177,16 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300 w-full">
+    <div className="space-y-4 animate-in fade-in duration-300 w-full">
       
       {/* ── Section 1: PRODUCT CODE DICTIONARY (6x1 Grid Squeezed) ─────────── */}
       <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
-        <div className="p-5 border-b border-gray-800 bg-surface">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+        <div className="p-4 border-b border-gray-800 bg-surface">
+          <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
             <Layers className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
             PRODUCT CODE DICTIONARY
           </h3>
-          <p className="text-xs text-muted mt-1">Manage the strict nomenclature components.</p>
+          <p className="text-xs text-muted mt-1 font-normal normal-case">Manage the strict nomenclature components.</p>
         </div>
         {/* Squeezed Grid container */}
         <div className="p-2 grid grid-cols-2 md:grid-cols-6 gap-2">
@@ -274,39 +274,39 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
 
       {/* ── Section 2: PRODUCT CODE REGISTRATION ───────────────────────────── */}
       <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
-        <div className="p-5 border-b border-gray-800 bg-surface flex items-center justify-between">
+        <div className="p-4 border-b border-gray-800 bg-surface flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
-              <Box className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
-              PRODUCT CODE REGISTRATION
-            </h3>
-            <p className="text-xs text-muted mt-1">Assemble new Product Codes from the dictionaries.</p>
+            <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
+            <Box className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
+            PRODUCT CODE REGISTRATION
+          </h3>
+          <p className="text-xs text-muted mt-1 font-normal normal-case">Assemble new Product Codes from the dictionaries.</p>
           </div>
         </div>
         
-        <div className="p-5 bg-canvas flex flex-col gap-4">
+        <div className="p-4 bg-canvas flex flex-col gap-4">
           <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
-            <select value={selMat} onChange={e => setSelMat(e.target.value)} className="h-10 bg-surface border border-gray-700 rounded-lg px-2 text-xs text-primary font-mono outline-none focus:border-brand-secondary">
+            <select value={selMat} onChange={e => setSelMat(e.target.value)} className="h-9 px-2 bg-canvas border border-gray-700 rounded-lg font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none">
               <option value="">1. MATERIAL</option>
               {skuMaterials.map(o => <option key={o.value} value={o.value}>{o.value} - {o.label}</option>)}
             </select>
-            <select value={selWgt} onChange={e => setSelWgt(e.target.value)} className="h-10 bg-surface border border-gray-700 rounded-lg px-2 text-xs text-primary font-mono outline-none focus:border-brand-secondary">
+            <select value={selWgt} onChange={e => setSelWgt(e.target.value)} className="h-9 px-2 bg-canvas border border-gray-700 rounded-lg font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none">
               <option value="">2. GLOVE WEIGHT</option>
               {skuWeights.map(o => <option key={o.value} value={o.value}>{o.value} - {o.label}</option>)}
             </select>
-            <select value={selCol} onChange={e => setSelCol(e.target.value)} className="h-10 bg-surface border border-gray-700 rounded-lg px-2 text-xs text-primary font-mono outline-none focus:border-brand-secondary">
+            <select value={selCol} onChange={e => setSelCol(e.target.value)} className="h-9 px-2 bg-canvas border border-gray-700 rounded-lg font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none">
               <option value="">3. COLOR</option>
               {skuColors.map(o => <option key={o.value} value={o.value}>{o.value} - {o.label}</option>)}
             </select>
-            <select value={selTrt} onChange={e => setSelTrt(e.target.value)} className="h-10 bg-surface border border-gray-700 rounded-lg px-2 text-xs text-primary font-mono outline-none focus:border-brand-secondary">
+            <select value={selTrt} onChange={e => setSelTrt(e.target.value)} className="h-9 px-2 bg-canvas border border-gray-700 rounded-lg font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none">
               <option value="">4. INNER SURFACE</option>
               {skuTreatments.map(o => <option key={o.value} value={o.value}>{o.value} - {o.label}</option>)}
             </select>
-            <select value={selLen} onChange={e => setSelLen(e.target.value)} className="h-10 bg-surface border border-gray-700 rounded-lg px-2 text-xs text-primary font-mono outline-none focus:border-brand-secondary">
+            <select value={selLen} onChange={e => setSelLen(e.target.value)} className="h-9 px-2 bg-canvas border border-gray-700 rounded-lg font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none">
               <option value="">5. GLOVE LENGTH</option>
               {skuLengths.map(o => <option key={o.value} value={o.value}>{o.value} - {o.label}</option>)}
             </select>
-            <select value={selTex} onChange={e => setSelTex(e.target.value)} className="h-10 bg-surface border border-gray-700 rounded-lg px-2 text-xs text-primary font-mono outline-none focus:border-brand-secondary">
+            <select value={selTex} onChange={e => setSelTex(e.target.value)} className="h-9 px-2 bg-canvas border border-gray-700 rounded-lg font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none">
               <option value="">6. TEXTURE</option>
               {skuTextures.map(o => <option key={o.value} value={o.value}>{o.value} - {o.label}</option>)}
             </select>
@@ -319,7 +319,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
             <button 
               onClick={handleAddProduct}
               disabled={!canBuildSKU || productCodes.includes(derivedSKU)}
-              className="h-12 px-8 rounded-lg bg-accent-gradient text-white font-bold uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:brightness-110 transition-all outline-none disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              className="h-12 px-8 rounded-lg bg-accent-gradient text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:brightness-110 transition-all outline-none disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
             >
               <Plus className="w-5 h-5" /> ADD PRODUCT CODE
             </button>
@@ -329,12 +329,12 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
 
       {/* ── Section 3: REGISTERED PRODUCTS ─────────────────────────────────── */}
       <div className="bg-canvas border border-gray-800 rounded-xl shadow-sm">
-        <div className="p-5 border-b border-gray-800 bg-surface">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+        <div className="p-4 border-b border-gray-800 bg-surface">
+          <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
             <Box className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
             REGISTERED PRODUCTS ({productCodes.length})
           </h3>
-          <p className="text-xs text-muted mt-1">Configure dimensions and sizes per product.</p>
+          <p className="text-xs text-muted mt-1 font-normal normal-case">Configure dimensions and sizes per product.</p>
         </div>
 
         <div className="flex flex-col">
@@ -346,12 +346,12 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
               <div key={code} className="border-b border-gray-800 last:border-b-0 group/prod">
                 {/* Row Header */}
                 <div 
-                  className={`h-14 px-4 flex items-center justify-between transition-colors ${isExpanded && !expandedProductDraft ? 'bg-surface' : 'cursor-pointer hover:bg-surface-light'}`}
+                  className={`h-12 px-4 flex items-center justify-between transition-colors ${isExpanded && !expandedProductDraft ? 'bg-surface' : 'cursor-pointer hover:bg-surface-light'}`}
                   onClick={() => handleToggleExpandProduct(code)}
                 >
                   <div className="flex items-center gap-3">
                     {isExpanded ? <ChevronDown className="w-4 h-4 text-brand-secondary" /> : <ChevronRight className="w-4 h-4 text-muted" />}
-                    <span className="font-mono text-sm font-bold text-primary tracking-wide">{code}</span>
+                    <span className="font-mono text-sm text-primary tracking-wide">{code}</span>
                     {needsSetup ? (
                       <span className="flex items-center gap-1 bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">
                         <AlertTriangle className="w-3 h-3" /> Setup Required
@@ -421,3 +421,4 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
     </div>
   );
 }
+

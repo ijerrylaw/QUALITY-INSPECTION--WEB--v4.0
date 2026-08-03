@@ -160,10 +160,10 @@ export function ConfigPage() {
   };
 
   return (
-    <div className="p-8 space-y-6 max-w-7xl mx-auto min-h-screen bg-canvas text-primary relative">
+    <div className="p-6 space-y-4 max-w-7xl mx-auto min-h-screen bg-canvas text-primary relative">
       
       {/* ── Page Header ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-800/80 pb-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-800/80 pb-4">
         <div>
           <h1 className="text-3xl font-bold uppercase tracking-tight text-primary">
             CONFIGURATION CONTROL
@@ -238,7 +238,7 @@ export function ConfigPage() {
       </div>
 
       {/* ── Submenu-Level Save Action Bar ─────────────────────────────────────── */}
-      <div className={`flex items-center justify-between p-4 rounded-xl border transition-all duration-300 ${
+      <div className={`flex items-center justify-between px-6 h-14 rounded-xl border transition-all duration-300 ${
         isDirty ? 'bg-amber-500/10 border-amber-500/30' : 'bg-surface border-gray-800/80'
       }`}>
         <div className="flex items-center gap-3">
@@ -283,7 +283,7 @@ export function ConfigPage() {
 
       {/* ── Tab Content Area (Placeholders for Steps 11-13) ────────────────── */}
       {isLoading ? (
-        <div className="h-64 rounded-xl bg-surface border border-gray-800/80 flex items-center justify-center p-8">
+        <div className="h-64 rounded-xl bg-surface border border-gray-800/80 flex items-center justify-center p-4">
           <div className="flex flex-col items-center gap-3">
             <RefreshCw className="w-8 h-8 text-brand-secondary animate-spin" strokeWidth={2} />
             <span className="text-xs font-semibold uppercase tracking-wider text-muted font-mono">
@@ -292,7 +292,7 @@ export function ConfigPage() {
           </div>
         </div>
       ) : (
-        <div className="bg-surface border border-gray-800 rounded-xl p-8 min-h-[400px] flex flex-col items-center justify-center relative overflow-hidden">
+        <div className="bg-surface border border-gray-800 rounded-xl p-4 min-h-[400px] flex flex-col items-center justify-center relative overflow-hidden">
           
           {/* Developer Tool: Mock Edit Button to test Dirty state */}
           <button onClick={simulateEdit} className="absolute top-4 right-4 text-[10px] uppercase font-mono text-muted hover:text-brand-secondary underline">
@@ -318,7 +318,7 @@ export function ConfigPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="bg-canvas border border-gray-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
             
-            <div className="flex items-start gap-4 p-6 border-b border-gray-800">
+            <div className="flex items-start gap-4 p-4 border-b border-gray-800">
               <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0">
                 <AlertTriangle className="w-6 h-6 text-amber-400" strokeWidth={2} />
               </div>
@@ -357,7 +357,7 @@ export function ConfigPage() {
       {showDiscardConfirm && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-canvas border border-gray-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
-            <div className="flex items-start gap-4 p-6 border-b border-gray-800">
+            <div className="flex items-start gap-4 p-4 border-b border-gray-800">
               <div className="w-12 h-12 rounded-full bg-rose-500/10 flex items-center justify-center shrink-0">
                 <AlertTriangle className="w-6 h-6 text-rose-400" strokeWidth={2} />
               </div>

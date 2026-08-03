@@ -64,11 +64,11 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
       name: 'GLOBAL STANDARD',
       isDefault: true,
       aqlCategories: [
-        { id: 'BARRIER',   name: 'BARRIER',   iconName: 'ShieldAlert',   color: 'text-rose-400',    bg: 'bg-rose-500/10',    border: 'border-rose-500/30',    aql: 'AND',           evalMode: 'N/A' },
-        { id: 'CRITICAL',  name: 'CRITICAL',  iconName: 'AlertCircle',   color: 'text-amber-400',   bg: 'bg-amber-500/10',   border: 'border-amber-500/30',   aql: '1.5',           evalMode: 'CUMULATIVE' },
-        { id: 'MAJOR',     name: 'MAJOR',     iconName: 'AlertTriangle', color: 'text-blue-400',    bg: 'bg-blue-500/10',    border: 'border-blue-500/30',    aql: '2.5',           evalMode: 'CUMULATIVE' },
-        { id: 'MINOR',     name: 'MINOR',     iconName: 'Info',          color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', aql: '4.0',           evalMode: 'GRANULAR' },
-        { id: 'PACKAGING', name: 'PACKAGING', iconName: 'CheckSquare',   color: 'text-cyan-400',    bg: 'bg-cyan-500/10',    border: 'border-cyan-500/30',    aql: 'PASS/FAIL/NIL', evalMode: 'N/A' },
+        { id: 'BARRIER',   name: 'BARRIER',   aql: 'AND',           evalMode: 'N/A' },
+        { id: 'CRITICAL',  name: 'CRITICAL',  aql: '1.5',           evalMode: 'CUMULATIVE' },
+        { id: 'MAJOR',     name: 'MAJOR',     aql: '2.5',           evalMode: 'CUMULATIVE' },
+        { id: 'MINOR',     name: 'MINOR',     aql: '4.0',           evalMode: 'GRANULAR' },
+        { id: 'PACKAGING', name: 'PACKAGING', aql: 'PASS/FAIL/NIL', evalMode: 'N/A' },
       ],
       defectDefinitions: [
         { id: 'def_hole', name: 'Hole', categoryId: 'BARRIER' },
@@ -186,10 +186,6 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
     const newCat = {
       id: `cat_${Date.now()}`,
       name: 'NEW CATEGORY',
-      iconName: 'ShieldAlert',
-      color: 'text-gray-400',
-      bg: 'bg-gray-500/10',
-      border: 'border-gray-500/30',
       aql: '1.5',
       evalMode: 'CUMULATIVE',
     };
@@ -307,35 +303,35 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300 w-full">
+    <div className="space-y-4 animate-in fade-in duration-300 w-full">
       
       {/* ── Top Control Bar: Profile Selection ────────────────────────────── */}
       <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
-        <div className="p-5 border-b border-gray-800 bg-surface flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="p-4 border-b border-gray-800 bg-surface flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+            <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
               INSPECTION PROFILES
             </h3>
-            <p className="text-xs text-muted mt-1">Select or create rulesets to assign to specific SKUs.</p>
+            <p className="text-xs text-muted mt-1 font-normal normal-case">Select or create rulesets to assign to specific SKUs.</p>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={handleDuplicateProfile} className="h-9 px-4 rounded-md bg-canvas border border-gray-700 text-muted hover:text-white hover:bg-gray-800 font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0">
+            <button onClick={handleDuplicateProfile} className="h-9 px-4 rounded-md bg-canvas border border-gray-700 text-muted hover:text-white hover:bg-gray-800 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0">
               DUPLICATE
             </button>
-            <button onClick={handleAddProfile} className="h-9 px-4 rounded-md bg-canvas border border-gray-700 text-brand-secondary hover:text-white hover:bg-brand-primary/20 hover:border-brand-secondary font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0">
+            <button onClick={handleAddProfile} className="h-9 px-4 rounded-md bg-canvas border border-gray-700 text-brand-secondary hover:text-white hover:bg-brand-primary/20 hover:border-brand-secondary font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0">
               <Plus className="w-4 h-4" strokeWidth={2} />
               <span>NEW PROFILE</span>
             </button>
           </div>
         </div>
         
-        <div className="p-5 flex flex-wrap items-center gap-3">
+        <div className="p-4 flex flex-wrap items-center gap-3">
           <div className="relative flex items-center min-w-[280px]">
             <select
               value={activeProfileId}
               onChange={(e) => setActiveProfileId(e.target.value)}
-              className="w-full h-12 pl-4 pr-10 rounded-lg bg-surface border border-gray-700 text-sm font-semibold uppercase tracking-wide text-primary hover:border-gray-500 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none appearance-none cursor-pointer"
+              className="w-full h-9 px-3 pr-10 rounded-lg bg-canvas border border-gray-700 font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none appearance-none cursor-pointer"
             >
               {profiles.map(p => (
                 <option key={p.id} value={p.id}>
@@ -358,22 +354,22 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                   if (e.key === 'Enter') saveProfileEdit(activeProfileId);
                   if (e.key === 'Escape') setEditingProfileId(null);
                 }}
-                className="h-10 px-3 bg-canvas border border-gray-700 rounded text-sm font-semibold uppercase text-primary outline-none focus:border-brand-secondary w-48"
+                className="h-9 px-2 bg-canvas border border-gray-700 rounded font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none w-48"
               />
-              <button onClick={() => saveProfileEdit(activeProfileId)} className="h-10 px-3 rounded bg-brand-primary/20 text-brand-secondary hover:bg-brand-primary/30 flex items-center gap-2 font-bold text-xs outline-none">
+              <button onClick={() => saveProfileEdit(activeProfileId)} className="h-9 px-3 rounded bg-brand-primary/20 text-brand-secondary hover:bg-brand-primary/30 flex items-center gap-2 font-bold text-xs outline-none">
                 <Check className="w-4 h-4" /> SAVE
               </button>
-              <button onClick={() => setEditingProfileId(null)} className="h-10 px-3 rounded bg-canvas text-muted hover:text-white border border-gray-700 flex items-center gap-2 font-bold text-xs outline-none">
+              <button onClick={() => setEditingProfileId(null)} className="h-9 px-3 rounded bg-canvas text-muted hover:text-white border border-gray-700 flex items-center gap-2 font-bold text-xs outline-none">
                 <X className="w-4 h-4" />
               </button>
             </div>
           ) : (
             <div className="flex items-center gap-2">
-              <button onClick={() => { setEditingProfileId(activeProfileId); setEditProfileName(activeProfile.name); }} className="h-12 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-white flex items-center gap-2 font-bold text-xs transition-colors outline-none">
+              <button onClick={() => { setEditingProfileId(activeProfileId); setEditProfileName(activeProfile.name); }} className="h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-white flex items-center gap-2 font-bold text-xs transition-colors outline-none">
                 <Edit2 className="w-4 h-4" /> RENAME
               </button>
               {!activeProfile?.isDefault && (
-                <button onClick={() => handleSetDefaultProfile(activeProfileId)} className="h-12 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-emerald-400 hover:border-emerald-500/30 flex items-center gap-2 font-bold text-xs transition-colors outline-none">
+                <button onClick={() => handleSetDefaultProfile(activeProfileId)} className="h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-emerald-400 hover:border-emerald-500/30 flex items-center gap-2 font-bold text-xs transition-colors outline-none">
                   <Check className="w-4 h-4" /> SET AS DEFAULT
                 </button>
               )}
@@ -383,58 +379,52 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
       </div>
 
       {/* ── Split Grid: Defect Category Setup + ISO Sample Sizes ────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
         {/* ── Left (2/3): Defect Category Setup ─────────────────────────────── */}
         <div className="lg:col-span-2 bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
-          <div className="p-5 border-b border-gray-800 bg-surface flex justify-between items-center">
+          <div className="p-4 border-b border-gray-800 bg-surface flex justify-between items-center">
             <div>
-              <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+              <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
                 <Settings2 className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
                 DEFECT CATEGORY SETUP
               </h3>
-              <p className="text-xs text-muted mt-1">Bind ISO 2859-1 inspection levels to severity categories.</p>
+              <p className="text-xs text-muted mt-1 font-normal normal-case">Bind ISO 2859-1 inspection levels to severity categories.</p>
             </div>
             <button
               onClick={handleAddCategory}
-              className="h-9 px-4 rounded-md bg-canvas border border-gray-700 text-brand-secondary hover:text-white hover:bg-brand-primary/20 hover:border-brand-secondary font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0"
+              className="h-9 px-4 rounded-md bg-canvas border border-gray-700 text-brand-secondary hover:text-white hover:bg-brand-primary/20 hover:border-brand-secondary font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0"
             >
               <Plus className="w-4 h-4" strokeWidth={2} />
               <span>ADD</span>
             </button>
           </div>
 
-          <div className="p-5 overflow-x-auto">
+          <div className="p-4 overflow-x-auto">
             <table className="w-full text-left border-collapse min-w-[480px]">
               <thead>
                 <tr className="border-b border-gray-800">
-                  <th className="pb-3 pl-2 text-[10px] font-bold text-muted uppercase tracking-wider">Severity Category</th>
-                  <th className="pb-3 text-[10px] font-bold text-brand-secondary uppercase tracking-wider w-36">AQL Level</th>
-                  <th className="pb-3 text-[10px] font-bold text-muted uppercase tracking-wider w-40">Eval Mode</th>
-                  <th className="pb-3 pr-2 text-[10px] font-bold text-muted uppercase tracking-wider text-right w-12">Act.</th>
+                  <th className="py-3 px-3 text-xs font-semibold text-muted uppercase tracking-wider">Severity Category</th>
+                  <th className="py-3 px-3 text-xs font-semibold text-brand-secondary uppercase tracking-wider w-36">AQL Level</th>
+                  <th className="py-3 px-3 text-xs font-semibold text-muted uppercase tracking-wider w-40">Eval Mode</th>
+                  <th className="py-3 px-3 text-xs font-semibold text-muted uppercase tracking-wider text-right w-12">Act.</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-800/50">
+              <tbody>
                 {activeCategories.map((cat: any) => {
-                  const Icon = IconMap[cat.iconName] || ShieldAlert;
                   const isAutoLocked = cat.aql === 'AND' || cat.aql === 'PASS/FAIL/NIL';
 
                   return (
-                    <tr key={cat.id} className="hover:bg-surface/50 transition-colors group">
-                      <td className="py-4 pl-2">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-8 h-8 rounded-lg ${cat.bg} flex items-center justify-center shrink-0`}>
-                            <Icon className={`w-4 h-4 ${cat.color}`} strokeWidth={2.5} />
-                          </div>
-                          <span className="text-sm font-bold tracking-wide text-primary">{cat.name}</span>
-                        </div>
+                    <tr key={cat.id} className="hover:bg-surface/50 transition-colors group border-b border-gray-700/50">
+                      <td className="py-3 px-3">
+                        <span className="font-mono text-sm font-bold text-primary">{cat.name}</span>
                       </td>
 
-                      <td className="py-4 pr-3">
+                      <td className="py-3 px-3">
                         <select
                           value={cat.aql}
                           onChange={(e) => handleUpdateCategory(cat.id, 'aql', e.target.value)}
-                          className="w-full h-10 px-3 rounded-md bg-surface border border-gray-700 text-brand-secondary font-mono text-sm font-bold focus:border-brand-secondary outline-none transition-all cursor-pointer"
+                          className="w-full h-9 px-2 rounded-md bg-canvas border border-gray-700 font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none transition-all cursor-pointer"
                         >
                           {ISO_WHITELIST.map(aql => (
                             <option key={aql} value={aql}>{aql}</option>
@@ -442,16 +432,16 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                         </select>
                       </td>
 
-                      <td className="py-4 pr-3">
+                      <td className="py-3 px-3">
                         <div className="relative">
                           <select
                             value={cat.evalMode}
                             onChange={(e) => handleUpdateCategory(cat.id, 'evalMode', e.target.value)}
                             disabled={isAutoLocked}
-                            className={`w-full h-10 px-3 rounded-md border font-mono text-xs font-semibold outline-none transition-all ${
+                            className={`w-full h-9 px-2 rounded-md border font-mono text-sm outline-none transition-all ${
                               isAutoLocked
                                 ? 'bg-canvas border-gray-800 text-gray-500 cursor-not-allowed opacity-50'
-                                : 'bg-surface border-gray-700 text-primary focus:border-brand-secondary cursor-pointer'
+                                : 'bg-canvas border-gray-700 text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary cursor-pointer'
                             }`}
                           >
                             {isAutoLocked ? (
@@ -462,13 +452,10 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                               ))
                             )}
                           </select>
-                          {isAutoLocked && (
-                            <Lock className="w-3.5 h-3.5 text-gray-500 absolute right-8 top-3" strokeWidth={2} />
-                          )}
                         </div>
                       </td>
 
-                      <td className="py-4 pr-2 text-right">
+                      <td className="py-3 px-3 text-right">
                         <button
                           onClick={() => handleRemoveCategory(cat.id)}
                           className="w-8 h-8 rounded flex items-center justify-center text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-colors outline-none ml-auto"
@@ -486,20 +473,20 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
 
         {/* ── Right (1/3): ISO Sample Sizes ──────────────────────────────────── */}
         <div className="lg:col-span-1 bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm flex flex-col">
-          <div className="p-5 border-b border-gray-800 bg-surface">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+          <div className="p-4 border-b border-gray-800 bg-surface">
+            <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
               <ListOrdered className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
               ISO SAMPLE SIZES
             </h3>
-            <p className="text-xs text-muted mt-1">Standard AQL bracket sizes for lot sampling.</p>
+            <p className="text-xs text-muted mt-1 font-normal normal-case">Standard AQL bracket sizes for lot sampling.</p>
           </div>
 
-          <div className="p-5 flex flex-col gap-2 flex-1">
+          <div className="p-4 flex flex-col gap-2 flex-1">
             <div className="flex flex-col gap-1.5 max-h-72 overflow-y-auto pr-1">
               {sampleSizes.map((size, idx) => (
                 <div
                   key={size}
-                  className="h-10 pl-3 pr-1 rounded-lg bg-surface border border-gray-700 flex items-center justify-between group shrink-0"
+                  className="py-3 px-3 border-b border-gray-700/50 flex items-center justify-between group relative hover:bg-surface-light transition-colors"
                 >
                   {editingSampleSize === size ? (
                     <div className="relative flex items-center w-full gap-1">
@@ -513,7 +500,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                             if (e.key === 'Enter') handleEditSampleSize(size, editSampleSizeVal);
                             if (e.key === 'Escape') setEditingSampleSize(null);
                           }}
-                          className="w-full h-7 px-2 pr-12 rounded bg-canvas border border-brand-secondary text-primary font-mono text-xs outline-none"
+                          className="w-full h-9 px-2 pr-12 rounded bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none"
                         />
                         <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[9px] text-muted font-mono pointer-events-none">Enter ↵</span>
                       </div>
@@ -528,7 +515,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                     </div>
                   ) : (
                     <>
-                      <span className="font-mono text-sm font-bold text-primary">{size}</span>
+                      <span className="font-mono text-sm text-primary">{size}</span>
                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => handleMoveSampleSize(size, 'up')} disabled={idx === 0} className="w-6 h-6 rounded flex items-center justify-center text-muted hover:text-primary disabled:opacity-20 outline-none">
                           <ArrowUp className="w-3 h-3" />
@@ -550,7 +537,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
             </div>
 
             {isAddingSampleSize ? (
-              <div className="mt-2 bg-canvas border border-gray-700 rounded-lg p-2 flex items-center gap-1">
+              <div className="py-3 px-3 border-b border-gray-700/50 flex items-center gap-1">
                 <div className="relative flex-1 min-w-0">
                   <input
                     type="number"
@@ -562,7 +549,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                       if (e.key === 'Escape') { setIsAddingSampleSize(false); setNewSampleSize(''); }
                     }}
                     placeholder="e.g. 800"
-                    className="w-full h-8 px-2 pr-14 text-xs bg-surface border border-brand-secondary rounded outline-none text-primary font-mono"
+                    className="w-full h-9 px-2 pr-14 rounded bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none"
                   />
                   <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[9px] text-muted font-mono pointer-events-none">Enter ↵</span>
                 </div>
@@ -578,9 +565,9 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
             ) : (
               <button
                 onClick={() => setIsAddingSampleSize(true)}
-                className="mt-2 w-full h-10 rounded-lg border border-dashed border-gray-700 text-muted hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 flex items-center justify-center gap-2 font-semibold text-[11px] uppercase tracking-wider transition-all outline-none"
+                className="mt-2 w-full h-10 rounded border border-dashed border-gray-700 bg-transparent text-muted hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 flex items-center justify-center gap-2 font-semibold text-[11px] uppercase tracking-wider transition-all outline-none"
               >
-                <Plus className="w-3.5 h-3.5" /> ADD SIZE
+                <Plus className="w-4 h-4" /> ADD
               </button>
             )}
           </div>
@@ -589,19 +576,18 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
 
       {/* ── Section: Defect Management Kanban Board ──────────────────────────── */}
       <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm flex flex-col">
-        <div className="p-5 border-b border-gray-800 bg-surface">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+        <div className="p-4 border-b border-gray-800 bg-surface">
+          <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
             <LayoutGrid className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
             DEFECT MANAGEMENT KANBAN
           </h3>
-          <p className="text-xs text-muted mt-1">Drag and drop defects to remap their severity categorization in real-time.</p>
+          <p className="text-xs text-muted mt-1 font-normal normal-case">Drag and drop defects to remap their severity categorization in real-time.</p>
         </div>
         
-        <div className="p-5 overflow-x-auto">
+        <div className="p-4 overflow-x-auto">
           <div className="flex gap-4 min-w-max pb-4">
             {activeCategories.map((cat: any) => {
               const catDefects = activeDefects.filter((d: any) => d.categoryId === cat.id);
-              const Icon = IconMap[cat.iconName] || ShieldAlert;
               
               return (
                 <div 
@@ -615,8 +601,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                     draggedDefectId ? 'bg-surface-light border-dashed' : ''
                   }`}>
                     <div className="flex items-center gap-2">
-                      <Icon className={`w-4 h-4 ${cat.color}`} strokeWidth={2.5} />
-                      <span className="font-bold text-xs uppercase tracking-wider text-primary">{cat.name}</span>
+                      <span className="font-bold text-xs uppercase tracking-wider text-primary font-mono">{cat.name}</span>
                     </div>
                     <span className="text-[10px] font-mono bg-gray-800 text-muted px-2 py-0.5 rounded-full">{catDefects.length}</span>
                   </div>
@@ -628,7 +613,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                         key={defect.id}
                         draggable
                         onDragStart={(e) => handleDragStart(e, defect.id)}
-                        className={`bg-canvas border ${cat.border} rounded-lg p-2.5 flex items-center justify-between group cursor-grab active:cursor-grabbing hover:bg-surface-light shadow-sm transition-all`}
+                        className="bg-canvas border border-gray-700 rounded-lg p-2.5 flex items-center justify-between group cursor-grab active:cursor-grabbing hover:bg-surface-light shadow-sm transition-all"
                       >
                         {editingDefectId === defect.id ? (
                           <div className="flex items-center gap-1 w-full">
@@ -642,7 +627,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                                   if (e.key === 'Enter') saveEditDefect(defect.id);
                                   if (e.key === 'Escape') setEditingDefectId(null);
                                 }}
-                                className="w-full h-7 px-2 pr-14 text-xs bg-surface border border-brand-secondary rounded outline-none text-primary"
+                                className="w-full h-9 px-2 pr-14 rounded bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none"
                               />
                               <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted font-mono pointer-events-none">Enter ↵</span>
                             </div>
@@ -657,7 +642,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                           </div>
                         ) : (
                           <>
-                            <span className="text-sm font-semibold text-primary select-none">{defect.name}</span>
+                            <span className="font-mono text-sm font-bold text-primary select-none">{defect.name}</span>
                             <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
                               <button onClick={() => startEditingDefect(defect)} className="p-1 rounded hover:bg-gray-700 text-muted hover:text-white outline-none">
                                 <Edit2 className="w-3.5 h-3.5" />
@@ -685,7 +670,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                               if (e.key === 'Escape') setAddingToCategory(null);
                             }}
                             placeholder="Defect Name..."
-                            className="w-full h-8 px-2 pr-14 text-xs bg-surface border border-brand-secondary rounded outline-none text-primary"
+                            className="w-full h-9 px-2 pr-14 rounded bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none"
                           />
                           <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] text-muted font-mono pointer-events-none">Enter ↵</span>
                         </div>
@@ -701,9 +686,9 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                     ) : (
                       <button 
                         onClick={() => setAddingToCategory(cat.id)}
-                        className="w-full h-10 rounded-lg border border-dashed border-gray-700 text-muted hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 flex items-center justify-center gap-2 font-semibold text-[11px] uppercase tracking-wider transition-all outline-none"
+                        className="w-full h-10 rounded border border-dashed border-gray-700 bg-transparent text-muted hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 flex items-center justify-center gap-2 font-semibold text-[11px] uppercase tracking-wider transition-all outline-none"
                       >
-                        <Plus className="w-3.5 h-3.5" /> ADD DEFECT
+                        <Plus className="w-4 h-4" /> ADD
                       </button>
                     )}
                   </div>
@@ -717,3 +702,4 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
     </div>
   );
 }
+

@@ -107,10 +107,10 @@ export function ProductCatalog() {
       {options.map((opt) => (
         <div 
           key={opt.value} 
-          className="bg-brand-primary/10 text-brand-secondary border border-brand-secondary/30 text-xs font-semibold rounded-lg px-3 py-2 flex items-center gap-2"
+          className="bg-canvas border border-gray-700 rounded-lg px-3 py-2 flex items-center gap-2"
         >
-          <span className="font-mono text-white/50">{opt.value}</span>
-          <span>{opt.label}</span>
+          <span className="font-mono text-sm font-bold text-brand-secondary">{opt.value}</span>
+          <span className="font-mono text-sm font-normal text-primary">{opt.label}</span>
         </div>
       ))}
       {options.length === 0 && <span className="text-muted text-xs italic">No entries configured</span>}
@@ -136,10 +136,10 @@ export function ProductCatalog() {
             {lines.map((line) => (
               <div 
                 key={line.id} 
-                className="bg-brand-primary/10 text-brand-secondary border border-brand-secondary/30 text-xs font-semibold rounded-lg px-3 py-2 flex items-center gap-2"
+                className="bg-canvas border border-gray-700 rounded-lg px-3 py-2 flex items-center gap-2"
               >
-                <span className="font-mono text-white/50">{line.id}</span>
-                <span>{line.name}</span>
+                <span className="font-mono text-sm font-bold text-brand-secondary">{line.id}</span>
+                <span className="font-mono text-sm font-normal text-primary">{line.name}</span>
               </div>
             ))}
           </div>
@@ -157,10 +157,10 @@ export function ProductCatalog() {
             {shifts.map((shift) => (
               <div 
                 key={shift.id} 
-                className="bg-brand-primary/10 text-brand-secondary border border-brand-secondary/30 text-xs font-semibold rounded-lg px-3 py-2 flex items-center gap-2"
+                className="bg-canvas border border-gray-700 rounded-lg px-3 py-2 flex items-center gap-2"
               >
-                <span className="font-mono text-white/50">{shift.id}</span>
-                <span>{shift.name}</span>
+                <span className="font-mono text-sm font-bold text-brand-secondary">{shift.id}</span>
+                <span className="font-mono text-sm font-normal text-primary">{shift.name}</span>
               </div>
             ))}
           </div>
@@ -178,12 +178,13 @@ export function ProductCatalog() {
             {sizes.map((size) => (
               <div 
                 key={size} 
-                className="bg-brand-primary/10 text-brand-secondary border border-brand-secondary/30 text-xs font-semibold rounded-lg px-3 py-2 font-mono"
+                className="bg-canvas border border-gray-700 rounded-lg px-3 py-2 font-mono text-sm font-bold text-brand-secondary"
               >
                 {size}
               </div>
             ))}
           </div>
+        </div>
       </div>
 
       {/* ── SKU Builder Dictionaries ───────────────────────────────────────── */}
@@ -204,7 +205,7 @@ export function ProductCatalog() {
             {productCodes.map((code) => (
               <div 
                 key={code} 
-                className="bg-brand-primary/10 text-brand-secondary border border-brand-secondary/30 text-xs font-semibold rounded-lg px-3 py-2 font-mono"
+                className="bg-canvas border border-gray-700 rounded-lg px-3 py-2 font-mono text-sm font-bold text-brand-secondary"
               >
                 {code}
               </div>
