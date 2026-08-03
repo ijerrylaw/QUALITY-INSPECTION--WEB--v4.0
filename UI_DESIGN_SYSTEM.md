@@ -19,11 +19,12 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
 * **Text Primary:** `text-primary` (`#F3F4F6`) - High contrast off-white.
 * **Text Muted:** `text-muted` (`#9CA3AF`) - Secondary text.
 
-### 1.2 Structural Geometry & Container Hierarchy
+### 1.2 Structural Geometry & Container Hierarchy (Compact Spacing)
+* **Global Page Wrapper:** Outer page containers MUST use `p-6` padding and `space-y-4` gap spacing.
 * **Global Border Radius:** All interactive components MUST use **8px** radius (`rounded-lg`).
-* **Concentric Radius Formula:** When nesting containers: `Inner Radius = Outer Radius - Padding`. (e.g., `rounded-xl` outer with `p-6` padding requires a `rounded-lg` inner child).
-* **Factory Touch Target:** All clickable elements MUST maintain a minimum height of **48px** (`h-12`). Kiosk keypads require **64px** (`h-16`).
-* **Card Padding:** Standard card padding is strictly `p-6` (`p-4` for compact grids).
+* **Concentric Radius Formula:** When nesting containers: `Inner Radius = Outer Radius - Padding`.
+* **Global Component Height (Desktop First):** To maximize data density, interactive form elements (inputs, dropdowns) MUST maintain a compact `h-9` (36px) height. Action buttons and navigation tabs use `h-10` (40px).
+* **Card Padding:** Standard card padding is strictly `p-4`.
 * **Container Hierarchy (Tier System)**: Define a strict 3-tier nesting model to prevent messy "borders within borders":
   - **Tier 1 (Outer Cards)**: `bg-canvas border border-gray-800`
   - **Tier 2 (Inner Sections)**: `bg-surface border border-gray-700/50`
@@ -34,7 +35,7 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
   - **UI Chrome** (labels, headers, buttons, helper text) MUST use `Inter` (sans-serif).
   - **User Data** (editable fields, key-in inputs, dropdown selections, database values, codes) MUST use `JetBrains Mono` (`font-mono`). This creates a strict visual boundary between the application structure and the underlying data.
 * **Text Data Exemption**: While numbers, codes, IDs, and timestamps strictly use `JetBrains Mono`, long readable text strings (like Emails, User Names, or descriptive Notes) should remain in standard `Inter` (sans-serif) for natural reading legibility.
-* **Action Buttons** (e.g., "SAVE CONFIGURATION"): Strictly UPPERCASE with `tracking-wider text-xs font-bold` (`Inter`). No exceptions for inline table buttons (e.g., "Review Diff" must become "REVIEW DIFF").
+* **Action Buttons** (e.g., "SAVE CONFIGURATION"): Strictly UPPERCASE with `tracking-wider text-xs font-bold` (`Inter`). No exceptions for inline table buttons.
 * **Helper/Description Text** (under headers): `text-xs text-muted mt-1 font-normal normal-case` (`Inter`).
 * **Standard Body Text** (e.g., Kanban defect titles): `text-sm font-semibold text-primary` (`Inter`).
 * **Hero Titles (H1):** `text-3xl font-bold uppercase tracking-tight text-primary`
@@ -46,6 +47,7 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
 * **Library:** `lucide-react` exclusively.
 * **Stroke Weight:** Fixed at **2px** (`strokeWidth={2}`).
 * **Sizing:** Standard inline icons: `w-5 h-5`. Header/Sidebar icons: `w-6 h-6`.
+* **Dynamic User Data Exemption:** Items that are dynamically added by the user (e.g., Custom Defect Categories, Kanban cards) MUST NOT use arbitrary decorative icons or semantic colors. They must rely purely on typography (`font-mono font-bold text-primary`) for identification to guarantee UI consistency and infinite scalability.
 
 ---
 
@@ -61,7 +63,7 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
 
 ### 2.2 Action Bar (Dirty State)
 * Must be docked at the top of the page (`sticky top-0`) immediately below the page tabs, not at the bottom.
-* Base styling: `bg-surface border-b border-gray-800 px-6 h-16 flex items-center justify-between z-40`.
+* Base styling: `bg-surface border-b border-gray-800 px-6 h-14 flex items-center justify-between z-40`.
 * Features a pulsing amber unsaved changes indicator, a Rose discard button, and an Accent Gradient save button.
 
 ### 2.3 Scrollbars
@@ -74,7 +76,7 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
 
 ### 3.1 Form Controls (Inputs, Dropdowns, Labels)
 * **Form Labels with Icons**: When an icon accompanies a form label, it must be `w-3 h-3` and placed immediately to the left of the `text-xs uppercase` label text.
-* **Editable State**: `bg-canvas border border-gray-700`
+* **Editable State**: `h-9 px-2 bg-canvas border border-gray-700`
   - Focus: `focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none`
   - Inner text: Must strictly use `font-mono text-sm text-primary` (per the Strict Font Protocol).
 * **Read-Only / Auto-Generated State**:
@@ -83,16 +85,16 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
 
 ### 3.2 Vertical Form Layouts (Settings & Admin Pages)
 * **Purpose**: Used for dense configuration forms (e.g., System & Tenant Admin) where fields need maximum width.
-* **Layout**: Vertically stacked (`flex-col`). The label sits above the input with a tight gap (`gap-1.5`).
-* **Group Spacing**: Distinct form fields or groups MUST be separated by generous spacing (`gap-6` or `mb-6`) to prevent vertical crowding.
+* **Layout**: Vertically stacked (`flex-col`). The label sits above the input with a tight gap (`gap-1`).
+* **Group Spacing**: Distinct form fields or groups MUST be separated by spacing (`gap-4` or `mb-4`) to prevent vertical crowding.
 
 ### 3.3 Multi-Field Inline Layouts (Data Grids & Forms)
-* When multiple input fields are placed inline within a card (e.g., 6 dictionary dropdowns, or AQL table rows), they MUST use strict CSS Grid (`grid grid-cols-[X] gap-4`).
+* When multiple input fields are placed inline within a card (e.g., 6 dictionary dropdowns, or AQL table rows), they MUST use strict CSS Grid (`grid grid-cols-[X] gap-3`).
 * This ensures all columns align perfectly vertically down the page, avoiding the jagged edges caused by `flex-wrap`.
 
 ### 3.4 Mass Data Entry Inputs (Measurement Grids)
 * **Purpose**: Rapid numeric data entry via numpad (e.g., 5 sample inputs for Glove Length).
-* **Geometry**: Large hit-targets (`h-12 w-full`), placed in a tight grid (`gap-2`).
+* **Geometry**: Dense hit-targets (`h-9 w-full`), placed in a tight grid (`gap-1`).
 * **Typography**: `JetBrains Mono text-lg text-center`.
 * **Pre-Fill Untouched vs. Touched State**:
   - Untouched pre-filled target values MUST be `text-muted opacity-80` to visually signal auto-populated baseline data.
@@ -121,8 +123,8 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
 * **Input Cells**: Must be dense (`h-8`, `rounded-sm` or `rounded-none`), using `JetBrains Mono text-sm`.
 
 ### 4.2 Standard Reading Data Tables
-* **Purpose**: Lists of records (like Inspection Logs) prioritizing human readability over raw density (contrasting with Section 4.1 High-Density Grids).
-* **Geometry & Spacing**: Generous row padding (`py-4 px-4`).
+* **Purpose**: Lists of records (like Inspection Logs) prioritizing human readability over raw density.
+* **Geometry & Spacing**: Compact row padding (`py-3 px-3`).
 * **Separators**: Faint border between rows (`border-b border-gray-700/50`). No vertical borders.
 * **Stacked Data Cells**: To save horizontal space (e.g., Date & Time), stack related data. The primary top value MUST be `text-sm font-mono text-primary`, and the secondary bottom value MUST be `text-xs font-mono text-muted`.
 
@@ -139,22 +141,28 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
   - Values MUST be `font-mono text-sm text-primary` and aligned RIGHT.
 * **KPI Display Blocks**: Large, centered aggregate numbers (e.g., Total Slots Measured). The number MUST be `font-mono text-4xl text-primary font-bold`, with the label stacked underneath as `text-[10px] uppercase text-muted`.
 
-### 4.5 Metric Readouts / Aggregates
+### 4.5 The Wizard-Facing Identity Protocol
+* **Purpose**: To provide System Administrators with an immediate visual bridge between Configuration Control and the factory floor. Any data entity that acts as a primary, selectable identity in the Quality Entry Wizard (e.g., Line IDs, Shift Names, Defect Categories, SKUs) MUST be visually highlighted so admins know exactly what the operator will see and interact with.
+* **Selectable Wizard Identities**: MUST use `font-mono text-brand-secondary font-bold` (Cyan + Bold). This includes SKUs, Line Codes, Shift Names, and Defect Categories/Names.
+* **Secondary Context & Descriptive Names**: Standard readable names paired with identities MUST use `font-mono text-primary font-normal` (White + Normal) to provide context without competing for attention.
+* **Exemption for Data Matrices**: Numeric targets, tolerances, and data matrices (e.g., Spec limits in ProductEngine) MUST remain plain `font-mono text-primary` (White + Normal). Do NOT apply Cyan to dense numeric grids, as this will overwhelm the matrix and destroy readability. Color is reserved strictly for primary identities.
+
+### 4.6 Metric Readouts / Aggregates
 * **Purpose**: Small calculated values that sit below data entry grids (e.g., MINIMUM, AVERAGE).
 * **Layout**: Stacked.
 * **Label Typography**: `text-[10px] font-bold uppercase text-muted`.
 * **Value Typography**: `font-mono text-sm text-primary` (colors may shift to Danger/Warning if spec is violated).
 
-### 4.6 Critical Output Displays (Digital Readouts)
+### 4.7 Critical Output Displays (Digital Readouts)
 * **Purpose**: Used for high-visibility generated identifiers (e.g., "FULL SYSTEM LOT NUMBER", "4-DIGIT LOT NO").
 * **Typography**: MUST use `JetBrains Mono` (`font-mono`) per the Strict Font Protocol, but sized up (`text-xl` or `text-2xl` tracking-widest) for maximum legibility.
 * **Geometry & Styling**: Must look distinctly separate from form inputs. Use a "terminal readout" style: `bg-gray-900 border border-brand-secondary/50 text-white shadow-inner`.
 
-### 4.7 Badges, Chips & Dynamic Trackers
+### 4.8 Badges, Chips & Dynamic Trackers
 * **State Badges** (e.g., Warning, Setup Required): `bg-{color}-500/10 border border-{color}-500/30 text-{color}-400 text-[10px] font-bold uppercase tracking-wider`
 * **Value Chips** (e.g., Timestamps, Shift times, Dimension MIN/MAX badges): `bg-gray-800/50 border border-gray-700/50 text-muted font-mono text-[10px] uppercase`
 * **Dimension Card Header Badges**:
-  - Inline Spec: Rendered immediately after the card title in `text-muted font-mono text-xs font-normal` (e.g. `250.0±5.0mm` or `≥0.060mm`).
+  - Inline Spec: Rendered immediately after the card title in `text-muted font-mono text-xs font-normal`.
   - Top-Right Metric Chips: `MIN` and `MAX` chips sit top right. `MIN` turns red (`bg-rose-500/10 border-rose-500/30 text-rose-400`) if below threshold. `MAX` turns red if above max threshold.
   - Conditional Suppression: When `isMin === true` (minimum-only boundary), the `MAX` chip MUST be hidden entirely.
 * **Dynamic Composite Badges (e.g., Compliance Tracker)**
@@ -162,12 +170,12 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
   - **Layout**: Icon on the left, stacked text on the right.
   - **Typography**: Title is `text-[10px] uppercase font-bold text-current`, Main Value is `text-sm font-mono font-bold text-current`, optional Subtext is `text-[10px] uppercase font-bold text-current`.
 
-### 4.8 Drag-and-Drop Items (e.g., Kanban Cards)
-* Base state: `bg-canvas border border-gray-700` universally (no category color borders).
-* Interaction state: `cursor-grab hover:bg-surface-light hover:border-gray-500`.
-* Active drag state: `active:cursor-grabbing`.
+### 4.9 Drag-and-Drop Items (e.g., Kanban Cards)
+* **Styling**: `bg-canvas border border-gray-700`. (Must strictly follow Section 1.4 Dynamic User Data Exemption: No semantic color borders or arbitrary icons).
+* **Interaction state**: `cursor-grab hover:bg-surface-light hover:border-gray-500`.
+* **Active drag state**: `active:cursor-grabbing`.
 
-### 4.9 List Management & Inline CRUD Protocol
+### 4.10 List Management & Inline CRUD Protocol
 * **Icons:** Delete (`Trash`), Edit (`Edit2`), Save (`Check`), Cancel (`X`), Reorder (`ArrowUp` / `ArrowDown`).
 * **Inline Edit & Keyboard Shortcuts:** Pressing `Enter` commits changes. Pressing `Escape` cancels edits. Input fields render a subtle `Enter ↵` indicator.
 * **Text Truncation (Absolute Overlay Trick):** In narrow grid columns, text containers use `w-full truncate`. Action buttons are absolutely positioned (`absolute right-1 top-1/2 -translate-y-1/2`) with hover opacity toggles to prevent text clipping.
@@ -192,5 +200,5 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
 
 ### 5.3 Inline Informational Alerts
 * **Purpose**: Contextual instructions or warnings placed directly inside form flows.
-* **Geometry**: `p-4 rounded-lg border border-l-4 flex gap-3 text-sm`.
+* **Geometry**: `p-3 rounded-lg border border-l-4 flex gap-3 text-sm`.
 * **State Styling**: Semantic colors based on intent. (e.g., Info: `bg-brand-secondary/5 border-brand-secondary/20 border-l-brand-secondary text-brand-secondary`).
