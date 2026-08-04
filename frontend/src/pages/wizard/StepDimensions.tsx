@@ -265,12 +265,12 @@ export function StepDimensions({ onNext, onBack, onUpdate, initialData }: StepDi
   };
 
   return (
-    <form id="wizard-step-form" onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <form id="wizard-step-form" onSubmit={handleSubmit} className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
       {/* ── Top Summary & Compliance Tracker ──────────────────────────────── */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-surface border border-gray-800 rounded-xl p-6 shadow-sm">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-surface border border-gray-700/50 rounded-lg p-4 shadow-sm">
         <div>
-          <h2 className="text-xl font-bold uppercase tracking-wide text-primary flex items-center gap-2">
+          <h2 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
             <Ruler className="w-6 h-6 text-brand-secondary" strokeWidth={2} />
             PHYSICAL DIMENSIONS
           </h2>
@@ -281,8 +281,8 @@ export function StepDimensions({ onNext, onBack, onUpdate, initialData }: StepDi
           </p>
         </div>
 
-        {/* Compliance Tracker — Dynamic Composite Badge per UI_DESIGN_SYSTEM.md §4.7 */}
-        <div className={`flex items-center gap-3 px-5 py-3 rounded-xl border shadow-inner ${
+        {/* Compliance Tracker — Dynamic Composite Badge per UI_DESIGN_SYSTEM.md §4.8 */}
+        <div className={`flex items-center gap-3 px-4 py-3 rounded-lg border shadow-inner ${
           failedSlots > 0
             ? 'bg-rose-500/10 border-rose-500/30'
             : filledSlots === totalSlots && totalSlots > 0
@@ -302,7 +302,9 @@ export function StepDimensions({ onNext, onBack, onUpdate, initialData }: StepDi
             }`}>
               COMPLIANCE TRACKER
             </span>
-            <span className="text-sm font-mono font-bold text-white tracking-tight">
+            <span className={`text-sm font-mono font-bold tracking-tight ${
+              failedSlots > 0 ? 'text-rose-400' : filledSlots === totalSlots && totalSlots > 0 ? 'text-emerald-400' : 'text-amber-400'
+            }`}>
               {passedSlots}/{totalSlots} SLOTS PASSED
             </span>
             <span className={`text-[10px] font-bold uppercase mt-0.5 tracking-wider ${
@@ -320,7 +322,7 @@ export function StepDimensions({ onNext, onBack, onUpdate, initialData }: StepDi
 
       {/* ── Dimension Cards Grid ───────────────────────────────────────────── */}
       {activeDimensions.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {activeDimensions.map((dim) => {
             const dimStats = stats[dim.id] ?? { min: 0, max: 0, avg: 0, fails: [], threshold: 0, maxThreshold: Infinity, isMin: false };
             const { minSpec, tolerance, isMin: dimIsMin } = getDimSpec(dim.id);
@@ -331,10 +333,10 @@ export function StepDimensions({ onNext, onBack, onUpdate, initialData }: StepDi
             const decPlaces    = getDecimalPlaces(dim);
 
             return (
-              <div key={dim.id} className="bg-surface border border-gray-800 rounded-xl p-5 shadow-sm hover:border-gray-700 transition-colors">
+              <div key={dim.id} className="bg-surface border border-gray-700/50 rounded-lg p-4 shadow-sm hover:border-gray-700 transition-colors">
 
                 {/* Card Header */}
-                <div className="flex items-center justify-between border-b border-gray-800/80 pb-3 mb-4">
+                <div className="flex items-center justify-between border-b border-gray-700/50 pb-3 mb-4">
                   {/* Title + inline spec */}
                   <span className={`text-sm font-bold uppercase tracking-wider flex items-baseline gap-2 ${
                     dim.id === FIXED_DIM_LENGTH || dim.id === FIXED_DIM_PALM ? 'text-brand-secondary' : 'text-primary'
@@ -371,8 +373,8 @@ export function StepDimensions({ onNext, onBack, onUpdate, initialData }: StepDi
                   </div>
                 </div>
 
-                {/* 5-Slot Input Grid — 48px touch targets per UI_DESIGN_SYSTEM.md §3.4 */}
-                <div className="grid grid-cols-5 gap-2">
+                {/* 5-Slot Input Grid — Mass Data Entry per UI_DESIGN_SYSTEM.md §3.4 */}
+                <div className="grid grid-cols-5 gap-1">
                   {(measurements[dim.id] ?? Array(SLOTS_PER_DIM).fill('')).map((val, idx) => {
                     const isFail  = dimStats.fails[idx] ?? false;
                     const numVal  = parseFloat(val);
@@ -402,7 +404,7 @@ export function StepDimensions({ onNext, onBack, onUpdate, initialData }: StepDi
                             }
                           }}
                           placeholder={(idx + 1).toString()}
-                          className={`w-full h-9 rounded-lg bg-canvas text-center font-mono text-sm shadow-inner transition-all outline-none border focus:ring-1
+                          className={`w-full h-9 rounded-lg bg-canvas text-center font-mono text-lg shadow-inner transition-all outline-none border focus:ring-1
                             ${isFail
                               ? 'border-rose-500/50 text-rose-400 bg-rose-500/5 focus:ring-rose-500/30'
                               : dirtySlots[dim.id]?.[idx]
@@ -427,7 +429,7 @@ export function StepDimensions({ onNext, onBack, onUpdate, initialData }: StepDi
 
       {/* ── No Product/Size configured informational hint ─────────────────── */}
       {activeDimensions.length === 0 && (
-        <div className="col-span-full py-16 flex flex-col items-center justify-center text-muted border-2 border-dashed border-gray-800/60 rounded-xl bg-surface/50">
+        <div className="col-span-full py-16 flex flex-col items-center justify-center text-muted border-2 border-dashed border-gray-800/60 rounded-lg bg-surface/50">
           <Info className="w-10 h-10 mb-3 opacity-40 text-brand-secondary" />
           <span className="text-sm font-semibold uppercase tracking-widest text-muted">No Dimension Definitions Found</span>
           <p className="text-xs text-muted mt-2 text-center max-w-sm">

@@ -105,6 +105,12 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   const [editingDefectId, setEditingDefectId] = useState<string | null>(null);
   const [editDefectName, setEditDefectName] = useState('');
 
+  // ── Category Setup State ─────────────────────────────────────────────────
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
+  const [newCategoryForm, setNewCategoryForm] = useState({ name: '', aql: '1.5', evalMode: 'CUMULATIVE' });
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [editCategoryForm, setEditCategoryForm] = useState({ name: '', aql: '1.5', evalMode: 'CUMULATIVE' });
+
   // ── Generic Change Trigger ────────────────────────────────────────────────
   const triggerChange = (newProfiles: any[], newSampleSizes?: number[]) => {
     onDirty();
@@ -163,33 +169,65 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   };
 
   // Categories
-  const handleUpdateCategory = (id: string, field: 'aql' | 'evalMode', value: string) => {
-    const updatedCats = activeCategories.map((c: any) => {
-      if (c.id !== id) return c;
-      const newCat = { ...c, [field]: value };
-      
-      // Auto-lock evalMode per ISO2859_MATH_ENGINE.md §1 (Zero Tolerance Overrides)
+  const updateCategoryForm = (formSetter: any, field: string, value: string) => {
+    formSetter((prev: any) => {
+      const next = { ...prev, [field]: value };
       if (field === 'aql' && (value === 'AND' || value === 'PASS/FAIL/NIL')) {
-        newCat.evalMode = 'N/A';
-      } else if (field === 'aql' && newCat.evalMode === 'N/A') {
-        newCat.evalMode = 'CUMULATIVE';
+        next.evalMode = 'N/A';
+      } else if (field === 'aql' && next.evalMode === 'N/A') {
+        next.evalMode = 'CUMULATIVE';
       }
-      return newCat;
+      return next;
     });
-    
-    const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, aqlCategories: updatedCats } : p);
+  };
+
+  const startAddingCategory = () => {
+    setIsAddingCategory(true);
+    setNewCategoryForm({ name: '', aql: '1.5', evalMode: 'CUMULATIVE' });
+  };
+
+  const saveAddCategory = () => {
+    if (!newCategoryForm.name.trim()) return;
+    const newCat = {
+      id: `cat_${Date.now()}`,
+      name: newCategoryForm.name.trim().toUpperCase(),
+      aql: newCategoryForm.aql,
+      evalMode: newCategoryForm.evalMode,
+    };
+    const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, aqlCategories: [...activeCategories, newCat] } : p);
     setProfiles(updatedProfiles);
+    setIsAddingCategory(false);
     triggerChange(updatedProfiles);
   };
 
-  const handleAddCategory = () => {
-    const newCat = {
-      id: `cat_${Date.now()}`,
-      name: 'NEW CATEGORY',
-      aql: '1.5',
-      evalMode: 'CUMULATIVE',
-    };
-    const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, aqlCategories: [...activeCategories, newCat] } : p);
+  const startEditingCategory = (cat: any) => {
+    setEditingCategoryId(cat.id);
+    setEditCategoryForm({ name: cat.name, aql: cat.aql, evalMode: cat.evalMode });
+  };
+
+  const saveEditCategory = (catId: string) => {
+    if (!editCategoryForm.name.trim()) return;
+    const updatedCats = activeCategories.map((c: any) => c.id === catId ? {
+      ...c,
+      name: editCategoryForm.name.trim().toUpperCase(),
+      aql: editCategoryForm.aql,
+      evalMode: editCategoryForm.evalMode
+    } : c);
+    const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, aqlCategories: updatedCats } : p);
+    setProfiles(updatedProfiles);
+    setEditingCategoryId(null);
+    triggerChange(updatedProfiles);
+  };
+
+  const handleMoveCategory = (index: number, direction: 'up' | 'down') => {
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === activeCategories.length - 1) return;
+    
+    const updatedCats = [...activeCategories];
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    [updatedCats[index], updatedCats[newIndex]] = [updatedCats[newIndex], updatedCats[index]];
+
+    const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, aqlCategories: updatedCats } : p);
     setProfiles(updatedProfiles);
     triggerChange(updatedProfiles);
   };
@@ -270,7 +308,18 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   // CRUD Defects
   const handleAddDefect = (categoryId: string) => {
     if (newDefectName.trim()) {
-      const newId = `def_${Date.now()}`;
+      // Smart Slug Generator: "Pin Hole" -> "def_pin_hole" (renders as ID: DEF_PIN_HOLE)
+      const rawSlug = newDefectName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      const baseId = rawSlug ? `def_${rawSlug}` : `def_${Date.now()}`;
+
+      // Guarantee ID uniqueness across all profiles/defects
+      let newId = baseId;
+      let counter = 1;
+      while (activeDefects.some((d: any) => d.id === newId)) {
+        newId = `${baseId}_${counter}`;
+        counter++;
+      }
+
       const updatedDefs = [...activeDefects, { id: newId, name: newDefectName.trim(), categoryId }];
       const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, defectDefinitions: updatedDefs } : p);
       setProfiles(updatedProfiles);
@@ -280,11 +329,34 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
     }
   };
 
-  const handleDeleteDefect = (id: string) => {
-    const updatedDefs = activeDefects.filter((d: any) => d.id !== id);
+  const handleDeleteDefect = (defectId: string) => {
+    const updatedDefs = activeDefects.filter((d: any) => d.id !== defectId);
     const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, defectDefinitions: updatedDefs } : p);
     setProfiles(updatedProfiles);
     triggerChange(updatedProfiles);
+  };
+
+  const handleMoveDefect = (defectId: string, direction: 'up' | 'down') => {
+    const targetDefect = activeDefects.find((d: any) => d.id === defectId);
+    if (!targetDefect) return;
+
+    const catDefects = activeDefects.filter((d: any) => d.categoryId === targetDefect.categoryId);
+    const catIndex = catDefects.findIndex((d: any) => d.id === defectId);
+    if (catIndex < 0) return;
+    if (direction === 'up' && catIndex === 0) return;
+    if (direction === 'down' && catIndex === catDefects.length - 1) return;
+
+    const swapTarget = catDefects[direction === 'up' ? catIndex - 1 : catIndex + 1];
+    const updatedDefs = [...activeDefects];
+    const idxA = updatedDefs.findIndex((d: any) => d.id === defectId);
+    const idxB = updatedDefs.findIndex((d: any) => d.id === swapTarget.id);
+
+    if (idxA >= 0 && idxB >= 0) {
+      [updatedDefs[idxA], updatedDefs[idxB]] = [updatedDefs[idxB], updatedDefs[idxA]];
+      const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, defectDefinitions: updatedDefs } : p);
+      setProfiles(updatedProfiles);
+      triggerChange(updatedProfiles);
+    }
   };
 
   const startEditingDefect = (defect: { id: string, name: string }) => {
@@ -392,8 +464,9 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
               <p className="text-xs text-muted mt-1 font-normal normal-case">Bind ISO 2859-1 inspection levels to severity categories.</p>
             </div>
             <button
-              onClick={handleAddCategory}
-              className="h-9 px-4 rounded-md bg-canvas border border-gray-700 text-brand-secondary hover:text-white hover:bg-brand-primary/20 hover:border-brand-secondary font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0"
+              onClick={startAddingCategory}
+              disabled={isAddingCategory}
+              className="h-9 px-4 rounded-md bg-canvas border border-gray-700 text-brand-secondary hover:text-white hover:bg-brand-primary/20 hover:border-brand-secondary font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0 disabled:opacity-50"
             >
               <Plus className="w-4 h-4" strokeWidth={2} />
               <span>ADD</span>
@@ -405,43 +478,67 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
               <thead>
                 <tr className="border-b border-gray-800">
                   <th className="py-3 px-3 text-xs font-semibold text-muted uppercase tracking-wider">Severity Category</th>
-                  <th className="py-3 px-3 text-xs font-semibold text-brand-secondary uppercase tracking-wider w-36">AQL Level</th>
+                  <th className="py-3 px-3 text-xs font-semibold text-muted uppercase tracking-wider w-36">AQL Level</th>
                   <th className="py-3 px-3 text-xs font-semibold text-muted uppercase tracking-wider w-40">Eval Mode</th>
-                  <th className="py-3 px-3 text-xs font-semibold text-muted uppercase tracking-wider text-right w-12">Act.</th>
+                  <th className="py-3 px-3 text-xs font-semibold text-muted uppercase tracking-wider text-right w-36">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {activeCategories.map((cat: any) => {
-                  const isAutoLocked = cat.aql === 'AND' || cat.aql === 'PASS/FAIL/NIL';
+                {activeCategories.map((cat: any, index: number) => {
+                  const isEditing = editingCategoryId === cat.id;
+                  const targetAql = isEditing ? editCategoryForm.aql : cat.aql;
+                  const isAutoLocked = targetAql === 'AND' || targetAql === 'PASS/FAIL/NIL';
 
                   return (
-                    <tr key={cat.id} className="hover:bg-surface/50 transition-colors group border-b border-gray-700/50">
+                    <tr key={cat.id} className="hover:bg-surface-light transition-colors group border-b border-gray-700/50">
                       <td className="py-3 px-3">
-                        <span className="font-mono text-sm font-bold text-primary">{cat.name}</span>
+                        {isEditing ? (
+                          <div className="relative">
+                            <input
+                              type="text"
+                              autoFocus
+                              value={editCategoryForm.name}
+                              onChange={(e) => updateCategoryForm(setEditCategoryForm, 'name', e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') saveEditCategory(cat.id);
+                                if (e.key === 'Escape') setEditingCategoryId(null);
+                              }}
+                              className="w-full h-9 px-2 rounded-md bg-canvas border border-brand-secondary ring-1 ring-brand-secondary font-mono text-sm font-bold text-primary outline-none transition-all uppercase"
+                              placeholder="Category Name"
+                            />
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-brand-secondary font-mono pointer-events-none">Enter ↵</span>
+                          </div>
+                        ) : (
+                          <span className="font-mono text-sm font-bold text-brand-secondary uppercase">{cat.name}</span>
+                        )}
                       </td>
 
                       <td className="py-3 px-3">
-                        <select
-                          value={cat.aql}
-                          onChange={(e) => handleUpdateCategory(cat.id, 'aql', e.target.value)}
-                          className="w-full h-9 px-2 rounded-md bg-canvas border border-gray-700 font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none transition-all cursor-pointer"
-                        >
-                          {ISO_WHITELIST.map(aql => (
-                            <option key={aql} value={aql}>{aql}</option>
-                          ))}
-                        </select>
-                      </td>
-
-                      <td className="py-3 px-3">
-                        <div className="relative">
+                        {isEditing ? (
                           <select
-                            value={cat.evalMode}
-                            onChange={(e) => handleUpdateCategory(cat.id, 'evalMode', e.target.value)}
+                            value={editCategoryForm.aql}
+                            onChange={(e) => updateCategoryForm(setEditCategoryForm, 'aql', e.target.value)}
+                            className="w-full h-9 px-2 rounded-md bg-canvas border border-gray-700 font-mono text-sm text-primary focus:border-brand-secondary outline-none cursor-pointer"
+                          >
+                            {ISO_WHITELIST.map(aql => (
+                              <option key={aql} value={aql}>{aql}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="font-mono text-sm text-primary">{cat.aql}</span>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-3">
+                        {isEditing ? (
+                          <select
+                            value={editCategoryForm.evalMode}
+                            onChange={(e) => updateCategoryForm(setEditCategoryForm, 'evalMode', e.target.value)}
                             disabled={isAutoLocked}
-                            className={`w-full h-9 px-2 rounded-md border font-mono text-sm outline-none transition-all ${
+                            className={`w-full h-9 px-2 rounded-md border font-mono text-sm outline-none ${
                               isAutoLocked
                                 ? 'bg-canvas border-gray-800 text-gray-500 cursor-not-allowed opacity-50'
-                                : 'bg-canvas border-gray-700 text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary cursor-pointer'
+                                : 'bg-canvas border-gray-700 text-primary focus:border-brand-secondary cursor-pointer'
                             }`}
                           >
                             {isAutoLocked ? (
@@ -452,20 +549,128 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                               ))
                             )}
                           </select>
-                        </div>
+                        ) : (
+                          <span className={`font-mono text-xs px-2 py-0.5 rounded-full border ${
+                            cat.evalMode === 'N/A' 
+                              ? 'bg-gray-800/50 text-gray-500 border-gray-700' 
+                              : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                          }`}>
+                            {cat.evalMode}
+                          </span>
+                        )}
                       </td>
 
                       <td className="py-3 px-3 text-right">
-                        <button
-                          onClick={() => handleRemoveCategory(cat.id)}
-                          className="w-8 h-8 rounded flex items-center justify-center text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-colors outline-none ml-auto"
-                        >
-                          <Trash className="w-4 h-4" />
-                        </button>
+                        {isEditing ? (
+                          <div className="flex justify-end gap-1">
+                            <button onClick={() => saveEditCategory(cat.id)} className="w-8 h-8 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-500/20 outline-none" title="Save">
+                              <Check className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => setEditingCategoryId(null)} className="w-8 h-8 rounded flex items-center justify-center text-rose-400 hover:bg-rose-500/20 outline-none" title="Cancel">
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button 
+                              onClick={() => handleMoveCategory(index, 'up')}
+                              disabled={index === 0}
+                              className="p-1.5 rounded-md text-muted hover:text-white hover:bg-gray-800 disabled:opacity-30 transition-colors outline-none" title="Move Up"
+                            >
+                              <ArrowUp className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={() => handleMoveCategory(index, 'down')}
+                              disabled={index === activeCategories.length - 1}
+                              className="p-1.5 rounded-md text-muted hover:text-white hover:bg-gray-800 disabled:opacity-30 transition-colors outline-none" title="Move Down"
+                            >
+                              <ArrowDown className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={() => startEditingCategory(cat)}
+                              className="p-1.5 rounded-md text-muted hover:text-white hover:bg-gray-800 transition-colors outline-none" title="Edit"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleRemoveCategory(cat.id)}
+                              className="p-1.5 rounded-md text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-colors outline-none" title="Remove"
+                            >
+                              <Trash className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
                 })}
+                
+                {/* ── Inline Add Category Row ───────────────────────────────── */}
+                {isAddingCategory && (() => {
+                  const isAutoLocked = newCategoryForm.aql === 'AND' || newCategoryForm.aql === 'PASS/FAIL/NIL';
+                  return (
+                    <tr className="bg-surface-light border-b border-brand-secondary/30">
+                      <td className="py-3 px-3">
+                        <div className="relative">
+                          <input
+                            type="text"
+                            autoFocus
+                            value={newCategoryForm.name}
+                            onChange={(e) => updateCategoryForm(setNewCategoryForm, 'name', e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') saveAddCategory();
+                              if (e.key === 'Escape') setIsAddingCategory(false);
+                            }}
+                            className="w-full h-9 px-2 rounded-md bg-canvas border border-brand-secondary ring-1 ring-brand-secondary font-mono text-sm font-bold text-primary outline-none transition-all uppercase"
+                            placeholder="Category Name"
+                          />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-brand-secondary font-mono pointer-events-none">Enter ↵</span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-3">
+                        <select
+                          value={newCategoryForm.aql}
+                          onChange={(e) => updateCategoryForm(setNewCategoryForm, 'aql', e.target.value)}
+                          className="w-full h-9 px-2 rounded-md bg-canvas border border-gray-700 font-mono text-sm text-primary focus:border-brand-secondary outline-none cursor-pointer"
+                        >
+                          {ISO_WHITELIST.map(aql => (
+                            <option key={aql} value={aql}>{aql}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="py-3 px-3">
+                        <select
+                          value={newCategoryForm.evalMode}
+                          onChange={(e) => updateCategoryForm(setNewCategoryForm, 'evalMode', e.target.value)}
+                          disabled={isAutoLocked}
+                          className={`w-full h-9 px-2 rounded-md border font-mono text-sm outline-none ${
+                            isAutoLocked
+                              ? 'bg-canvas border-gray-800 text-gray-500 cursor-not-allowed opacity-50'
+                              : 'bg-canvas border-gray-700 text-primary focus:border-brand-secondary cursor-pointer'
+                          }`}
+                        >
+                          {isAutoLocked ? (
+                            <option value="N/A">N/A (Auto-Locked)</option>
+                          ) : (
+                            EVAL_MODES.map(mode => (
+                              <option key={mode} value={mode}>{mode}</option>
+                            ))
+                          )}
+                        </select>
+                      </td>
+                      <td className="py-3 px-3 text-right">
+                        <div className="flex justify-end gap-1">
+                          <button onClick={saveAddCategory} className="w-8 h-8 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-500/20 outline-none" title="Confirm">
+                            <Check className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => setIsAddingCategory(false)} className="w-8 h-8 rounded flex items-center justify-center text-rose-400 hover:bg-rose-500/20 outline-none" title="Cancel">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })()}
               </tbody>
             </table>
           </div>
@@ -597,18 +802,28 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                   onDrop={(e) => handleDrop(e, cat.id)}
                 >
                   {/* Column Header */}
-                  <div className={`p-3 border-b border-gray-800 bg-canvas/50 flex items-center justify-between rounded-t-xl ${
+                  <div className={`p-3 border-b border-gray-800 bg-canvas/50 flex flex-col gap-2 rounded-t-xl ${
                     draggedDefectId ? 'bg-surface-light border-dashed' : ''
                   }`}>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-xs uppercase tracking-wider text-primary font-mono">{cat.name}</span>
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-sm font-bold text-brand-secondary uppercase tracking-wider">{cat.name}</span>
+                      <span className="text-[10px] font-mono bg-gray-800 text-muted px-2 py-0.5 rounded-full">{catDefects.length}</span>
                     </div>
-                    <span className="text-[10px] font-mono bg-gray-800 text-muted px-2 py-0.5 rounded-full">{catDefects.length}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs text-primary bg-gray-800/50 px-2 py-0.5 rounded border border-gray-700">AQL: {cat.aql}</span>
+                      <span className={`font-mono text-xs px-2 py-0.5 rounded-full border ${
+                        cat.evalMode === 'N/A' 
+                          ? 'bg-gray-800/50 text-gray-500 border-gray-700' 
+                          : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                      }`}>
+                        {cat.evalMode}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Column Body */}
                   <div className="p-3 flex-1 overflow-y-auto max-h-[400px] space-y-2">
-                    {catDefects.map((defect: any) => (
+                    {catDefects.map((defect: any, idx: number) => (
                       <div 
                         key={defect.id}
                         draggable
@@ -643,11 +858,27 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                         ) : (
                           <>
                             <span className="font-mono text-sm font-bold text-primary select-none">{defect.name}</span>
-                            <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
-                              <button onClick={() => startEditingDefect(defect)} className="p-1 rounded hover:bg-gray-700 text-muted hover:text-white outline-none">
+                            <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-0.5">
+                              <button 
+                                onClick={() => handleMoveDefect(defect.id, 'up')}
+                                disabled={idx === 0}
+                                className="p-1 rounded text-muted hover:text-white disabled:opacity-20 outline-none"
+                                title="Move Up"
+                              >
+                                <ArrowUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button 
+                                onClick={() => handleMoveDefect(defect.id, 'down')}
+                                disabled={idx === catDefects.length - 1}
+                                className="p-1 rounded text-muted hover:text-white disabled:opacity-20 outline-none"
+                                title="Move Down"
+                              >
+                                <ArrowDown className="w-3.5 h-3.5" />
+                              </button>
+                              <button onClick={() => startEditingDefect(defect)} className="p-1 rounded hover:bg-gray-700 text-muted hover:text-white outline-none" title="Edit">
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
-                              <button onClick={() => handleDeleteDefect(defect.id)} className="p-1 rounded hover:bg-rose-500/20 text-muted hover:text-rose-400 outline-none">
+                              <button onClick={() => handleDeleteDefect(defect.id)} className="p-1 rounded hover:bg-rose-500/20 text-muted hover:text-rose-400 outline-none" title="Remove">
                                 <Trash className="w-3.5 h-3.5" />
                               </button>
                             </div>

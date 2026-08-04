@@ -67,6 +67,14 @@ const IconMap: Record<string, React.ElementType> = {
 const isQualitativeAql = (aql: string | undefined): boolean =>
   (aql ?? '').toUpperCase() === 'PASS/FAIL/NIL';
 
+/** Formats defect IDs into clean, uppercase human-readable slugs (e.g., DEF_DIRT) */
+export const getDisplayId = (defect: { id: string; name: string }) => {
+  if (!defect.id || /^def_\d+$/i.test(defect.id)) {
+    return `DEF_${defect.name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
+  }
+  return defect.id.toUpperCase();
+};
+
 export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDefectsProps) {
   const { config, isLoading, getResolvedProfile } = useConfig();
 
@@ -162,13 +170,13 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
   const isQual = isQualitativeAql(activeCategoryAql);
 
   return (
-    <form id="wizard-step-form" onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-surface border border-gray-800 rounded-xl p-6 space-y-6 shadow-sm">
+    <form id="wizard-step-form" onSubmit={handleSubmit} className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="bg-surface border border-gray-700/50 rounded-lg p-4 space-y-4 shadow-sm">
 
         {/* ── Header ────────────────────────────────────────────────────────── */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-800/80 pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-700/50 pb-4">
           <div>
-            <h2 className="text-xl font-bold uppercase tracking-wide text-primary flex items-center gap-2">
+            <h2 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
               <ShieldAlert className="w-6 h-6 text-brand-secondary" strokeWidth={2} />
               DEFECT TABULATION
             </h2>
@@ -185,7 +193,7 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
 
         {/* ── No Profile Configured Warning ─────────────────────────────────── */}
         {aqlCategories.length === 0 && (
-          <div className="p-4 rounded-lg border border-l-4 border-amber-500/20 border-l-amber-500 bg-amber-500/5 flex gap-3 text-sm">
+          <div className="p-3 rounded-lg border border-l-4 border-amber-500/20 border-l-amber-500 bg-amber-500/5 flex gap-3 text-sm">
             <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" strokeWidth={2} />
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-amber-400">NO INSPECTION PROFILE CONFIGURED</p>
@@ -238,8 +246,8 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
             </div>
 
             {/* ── Active Category Panel ─────────────────────────────────────── */}
-            <div className="p-6 rounded-xl bg-canvas border border-gray-800/80 space-y-6 shadow-inner">
-              <div className="flex items-center justify-between border-b border-gray-800/60 pb-4">
+            <div className="p-4 rounded-lg bg-canvas border border-gray-700 space-y-4 shadow-inner">
+              <div className="flex items-center justify-between border-b border-gray-700 pb-3">
                 <h3 className="text-lg font-semibold uppercase tracking-wide text-primary flex items-center gap-2">
 
                   {activeCategory?.name ?? '—'} CLASSIFICATION
@@ -263,15 +271,17 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
               {/* Defect Cards */}
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {activeCategoryDefects.map((defect) => {
+                  const displayId = getDisplayId(defect);
+
                   if (isQual) {
                     // ── QUALITATIVE: PASS / FAIL / NIL Toggle ─────────────
                     const state: QualitativeState = qualitativeStates[defect.id] ?? 'NIL';
 
                     return (
-                      <div key={defect.id} className="bg-surface border border-gray-800 rounded-xl p-3 flex flex-col justify-between shadow-sm">
-                        <div className="mb-3">
-                          <span className="font-mono text-sm font-bold text-primary tracking-wide block truncate">{defect.name}</span>
-                          <span className="font-mono text-[10px] text-muted uppercase tracking-widest mt-1 block">ID: {defect.id}</span>
+                      <div key={defect.id} className="bg-surface border border-gray-700/50 rounded-lg p-3 flex flex-col justify-between shadow-sm">
+                        <div className="mb-3 flex items-start justify-between gap-2">
+                          <span className="font-mono text-sm font-bold text-primary tracking-wide truncate">{defect.name}</span>
+                          <span className="font-mono text-[10px] text-muted uppercase tracking-widest shrink-0">ID: {displayId}</span>
                         </div>
 
                         {/* 3-State Segmented Toggle */}
@@ -320,10 +330,10 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
                   // ── QUANTITATIVE: -/count/+ Counter Card ─────────────────
                   const count = defectCounts[defect.id] ?? 0;
                   return (
-                    <div key={defect.id} className="bg-surface border border-gray-800 rounded-xl p-3 flex flex-col justify-between shadow-sm hover:border-gray-700 transition-colors">
-                      <div className="mb-3">
-                        <span className="font-mono text-sm font-bold text-primary tracking-wide block truncate">{defect.name}</span>
-                        <span className="font-mono text-[10px] text-muted uppercase tracking-widest mt-1 block">ID: {defect.id}</span>
+                    <div key={defect.id} className="bg-surface border border-gray-700/50 rounded-lg p-3 flex flex-col justify-between shadow-sm hover:border-gray-700 transition-colors">
+                      <div className="mb-3 flex items-start justify-between gap-2">
+                        <span className="font-mono text-sm font-bold text-primary tracking-wide truncate">{defect.name}</span>
+                        <span className="font-mono text-[10px] text-muted uppercase tracking-widest shrink-0">ID: {displayId}</span>
                       </div>
 
                       <div className="flex items-center justify-between bg-canvas rounded-lg p-1 border border-gray-800 shadow-inner">

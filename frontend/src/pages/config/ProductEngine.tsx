@@ -138,6 +138,19 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
     triggerChange({ productCodes: updatedCodes, productMatrixConfig: updatedMatrix });
   };
 
+  const moveProductCode = (index: number, direction: 'up' | 'down') => {
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === productCodes.length - 1) return;
+    
+    const newCodes = [...productCodes];
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    [newCodes[index], newCodes[newIndex]] = [newCodes[newIndex], newCodes[index]];
+    
+    setProductCodes(newCodes);
+    onDirty();
+    triggerChange({ productCodes: newCodes, productMatrixConfig });
+  };
+
   const handleToggleExpandProduct = (code: string) => {
     if (expandedProductDraft) return; // Prevent collapsing/expanding while editing
     setExpandedProduct(expandedProduct === code ? null : code);
@@ -198,6 +211,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
               onAdd={(v, l) => handleAddDict('skuMaterials', skuMaterials, setSkuMaterials, v, l)}
               onRemove={(v) => handleRemoveDict('skuMaterials', skuMaterials, setSkuMaterials, v)}
               onEdit={(old, v, l) => handleEditDict('skuMaterials', skuMaterials, setSkuMaterials, old, v, l)}
+              onMove={(val, dir) => handleMoveDict('skuMaterials', skuMaterials, setSkuMaterials, val, dir)}
               valuePlaceholder="N"
               labelPlaceholder="Nitrile"
               maxLength={1}
@@ -225,6 +239,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
               onAdd={(v, l) => handleAddDict('skuColors', skuColors, setSkuColors, v, l)}
               onRemove={(v) => handleRemoveDict('skuColors', skuColors, setSkuColors, v)}
               onEdit={(old, v, l) => handleEditDict('skuColors', skuColors, setSkuColors, old, v, l)}
+              onMove={(val, dir) => handleMoveDict('skuColors', skuColors, setSkuColors, val, dir)}
               valuePlaceholder="SKB"
               labelPlaceholder="Sky Blue"
               maxLength={3}
@@ -238,6 +253,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
               onAdd={(v, l) => handleAddDict('skuTreatments', skuTreatments, setSkuTreatments, v, l)}
               onRemove={(v) => handleRemoveDict('skuTreatments', skuTreatments, setSkuTreatments, v)}
               onEdit={(old, v, l) => handleEditDict('skuTreatments', skuTreatments, setSkuTreatments, old, v, l)}
+              onMove={(val, dir) => handleMoveDict('skuTreatments', skuTreatments, setSkuTreatments, val, dir)}
               valuePlaceholder="OC"
               labelPlaceholder="Online"
               maxLength={2}
@@ -251,6 +267,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
               onAdd={(v, l) => handleAddDict('skuLengths', skuLengths, setSkuLengths, v, l)}
               onRemove={(v) => handleRemoveDict('skuLengths', skuLengths, setSkuLengths, v)}
               onEdit={(old, v, l) => handleEditDict('skuLengths', skuLengths, setSkuLengths, old, v, l)}
+              onMove={(val, dir) => handleMoveDict('skuLengths', skuLengths, setSkuLengths, val, dir)}
               valuePlaceholder="24"
               labelPlaceholder="24cm"
               maxLength={2}
@@ -264,6 +281,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
               onAdd={(v, l) => handleAddDict('skuTextures', skuTextures, setSkuTextures, v, l)}
               onRemove={(v) => handleRemoveDict('skuTextures', skuTextures, setSkuTextures, v)}
               onEdit={(old, v, l) => handleEditDict('skuTextures', skuTextures, setSkuTextures, old, v, l)}
+              onMove={(val, dir) => handleMoveDict('skuTextures', skuTextures, setSkuTextures, val, dir)}
               valuePlaceholder="FT"
               labelPlaceholder="Textured"
               maxLength={2}
@@ -338,7 +356,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
         </div>
 
         <div className="flex flex-col">
-          {productCodes.map(code => {
+          {productCodes.map((code, index) => {
             const isExpanded = expandedProduct === code;
             const needsSetup = isSetupIncomplete(code);
 
@@ -381,9 +399,25 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                     ) : (
                       <>
                         <button 
+                          onClick={() => moveProductCode(index, 'up')} 
+                          disabled={index === 0 || !!expandedProductDraft}
+                          className={`p-1.5 rounded-md transition-colors outline-none ${expandedProductDraft || index === 0 ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`} 
+                          title="Move Up"
+                        >
+                          <ArrowUp className="w-4 h-4" />
+                        </button>
+                        <button 
+                          onClick={() => moveProductCode(index, 'down')} 
+                          disabled={index === productCodes.length - 1 || !!expandedProductDraft}
+                          className={`p-1.5 rounded-md transition-colors outline-none ${expandedProductDraft || index === productCodes.length - 1 ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`} 
+                          title="Move Down"
+                        >
+                          <ArrowDown className="w-4 h-4" />
+                        </button>
+                        <button 
                           onClick={() => handleStartEditProduct(code)} 
                           disabled={!!expandedProductDraft}
-                          className={`p-2 rounded-md transition-colors outline-none ${expandedProductDraft ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`} 
+                          className={`p-1.5 rounded-md transition-colors outline-none ${expandedProductDraft ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`} 
                           title={expandedProductDraft ? 'Save active edits first' : 'Edit Config'}
                         >
                           <Edit2 className="w-4 h-4" />
@@ -391,7 +425,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                         <button 
                           onClick={() => handleRemoveProduct(code)} 
                           disabled={!!expandedProductDraft}
-                          className={`p-2 rounded-md transition-colors outline-none ${expandedProductDraft ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-rose-400 hover:bg-rose-500/10'}`} 
+                          className={`p-1.5 rounded-md transition-colors outline-none ${expandedProductDraft ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-rose-400 hover:bg-rose-500/10'}`} 
                           title={expandedProductDraft ? 'Save active edits first' : 'Remove'}
                         >
                           <Trash className="w-4 h-4" />

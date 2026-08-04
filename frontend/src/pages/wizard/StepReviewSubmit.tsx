@@ -290,7 +290,7 @@ export function StepReviewSubmit({ inspectionData, onSubmit, onBack }: StepRevie
   };
 
   return (
-    <form id="wizard-step-form" onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <form id="wizard-step-form" onSubmit={handleSubmit} className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
       {/* ── Hero Verdict Banner — UI_DESIGN_SYSTEM.md §5.1 ──────────────────── */}
       <div className={`p-6 rounded-xl border flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm ${
@@ -320,8 +320,8 @@ export function StepReviewSubmit({ inspectionData, onSubmit, onBack }: StepRevie
           </div>
         </div>
 
-        {/* Final System Lot — Critical Output per UI_DESIGN_SYSTEM.md §4.6 */}
-        <div className="bg-gray-900 border border-gray-800 rounded-lg px-6 py-3 shadow-inner text-center">
+        {/* Final System Lot — Critical Output per UI_DESIGN_SYSTEM.md §4.7 & §5.1 */}
+        <div className="bg-canvas border border-brand-secondary/50 rounded-lg px-6 py-3 shadow-inner text-center">
           <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1">FINAL SYSTEM LOT</span>
           <span className="text-xl font-mono font-bold text-white tracking-widest">
             {inspectionData?.fullSystemLotNo ?? 'UNKNOWN'}
@@ -333,8 +333,8 @@ export function StepReviewSubmit({ inspectionData, onSubmit, onBack }: StepRevie
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         {/* Card 1: Batch Metadata */}
-        <div className="bg-surface border border-gray-800 rounded-xl p-6 shadow-sm flex flex-col">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-primary border-b border-gray-800 pb-3 mb-4 flex items-center gap-2">
+        <div className="bg-surface border border-gray-700/50 rounded-lg p-4 shadow-sm flex flex-col">
+          <h3 className="text-lg font-semibold uppercase text-primary border-b border-gray-700/50 pb-3 mb-4 flex items-center gap-2">
             <Box className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
             BATCH METADATA
           </h3>
@@ -349,21 +349,21 @@ export function StepReviewSubmit({ inspectionData, onSubmit, onBack }: StepRevie
             ].map(({ label, value }) => (
               <div key={label} className="flex justify-between items-center border-b border-gray-800/50 pb-2 last:border-0 last:pb-0">
                 <span className="text-[10px] font-bold uppercase text-muted tracking-wider">{label}</span>
-                <span className="text-sm font-mono text-primary">{value}</span>
+                <span className="text-sm font-mono text-primary font-bold">{value}</span>
               </div>
             ))}
           </div>
         </div>
 
         {/* Card 2: Physical Dimensions */}
-        <div className="bg-surface border border-gray-800 rounded-xl p-6 shadow-sm flex flex-col">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-primary border-b border-gray-800 pb-3 mb-4 flex items-center gap-2">
+        <div className="bg-surface border border-gray-700/50 rounded-lg p-4 shadow-sm flex flex-col">
+          <h3 className="text-lg font-semibold uppercase text-primary border-b border-gray-700/50 pb-3 mb-4 flex items-center gap-2">
             <Ruler className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
             PHYSICAL DIMENSIONS
           </h3>
           <div className="flex-1 flex flex-col items-center justify-center py-4">
             {/* KPI Block — UI_DESIGN_SYSTEM.md §4.4 */}
-            <div className={`text-4xl font-mono font-bold mb-2 ${failedDimensions > 0 ? 'text-rose-400' : 'text-white'}`}>
+            <div className={`text-4xl font-mono font-bold mb-2 ${failedDimensions > 0 ? 'text-rose-400' : 'text-primary'}`}>
               {inspectionData?.totalSlots ?? 0}
             </div>
             <span className="text-[10px] uppercase text-muted font-bold tracking-widest text-center">
@@ -379,13 +379,13 @@ export function StepReviewSubmit({ inspectionData, onSubmit, onBack }: StepRevie
         </div>
 
         {/* Card 3: Defect Tabulation KPI */}
-        <div className="bg-surface border border-gray-800 rounded-xl p-6 shadow-sm flex flex-col">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-primary border-b border-gray-800 pb-3 mb-4 flex items-center gap-2">
+        <div className="bg-surface border border-gray-700/50 rounded-lg p-4 shadow-sm flex flex-col">
+          <h3 className="text-lg font-semibold uppercase text-primary border-b border-gray-700/50 pb-3 mb-4 flex items-center gap-2">
             <ShieldAlert className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
             DEFECT TABULATION
           </h3>
           <div className="flex-1 flex flex-col items-center justify-center py-4">
-            <div className={`text-4xl font-mono font-bold mb-2 ${totalDefects > 0 ? 'text-rose-400' : 'text-white'}`}>
+            <div className={`text-4xl font-mono font-bold mb-2 ${totalDefects > 0 ? 'text-rose-400' : 'text-primary'}`}>
               {totalDefects}
             </div>
             <span className="text-[10px] uppercase text-muted font-bold tracking-widest text-center">
@@ -403,8 +403,8 @@ export function StepReviewSubmit({ inspectionData, onSubmit, onBack }: StepRevie
 
       {/* ── Per-Category ISO 2859-1 Breakdown ────────────────────────────── */}
       {categoryVerdicts.length > 0 && (
-        <div className="bg-surface border border-gray-800 rounded-xl p-6 shadow-sm space-y-4">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-primary border-b border-gray-800 pb-3 flex items-center gap-2">
+        <div className="bg-surface border border-gray-700/50 rounded-lg p-4 shadow-sm space-y-4">
+          <h3 className="text-lg font-semibold uppercase text-primary border-b border-gray-700/50 pb-3 flex items-center gap-2">
             <Info className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
             ISO 2859-1 CATEGORY BREAKDOWN
           </h3>

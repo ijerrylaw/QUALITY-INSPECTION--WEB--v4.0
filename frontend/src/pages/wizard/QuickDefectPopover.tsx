@@ -12,6 +12,7 @@ import { useState } from 'react';
 import { ShieldAlert, X, Minus, Plus } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useConfig } from '../../context/ConfigContext';
+import { getDisplayId } from './StepDefects';
 
 export interface QuickDefectPopoverProps {
   isOpen: boolean;
@@ -96,14 +97,16 @@ export function QuickDefectPopover({ isOpen, onClose, rowId, sequenceNo, initial
         {/* Content */}
         <div className="p-6 overflow-y-auto bg-surface flex-1">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {activeDefects.map(defect => {
+            {activeDefects.map((defect: any) => {
+              const displayId = getDisplayId(defect);
+
               if (isQualitativeCategory) {
                 const state = qualitativeStates[defect.id] || 'NIL';
                 return (
-                  <div key={defect.id} className="bg-canvas border border-gray-800 rounded-xl p-3 shadow-sm flex flex-col justify-between">
-                    <div className="mb-3">
-                      <span className="font-mono text-sm font-bold text-primary block truncate">{defect.name}</span>
-                      <span className="font-mono text-[10px] text-muted uppercase tracking-widest mt-1 block">ID: {defect.id}</span>
+                  <div key={defect.id} className="bg-canvas border border-gray-700/50 rounded-lg p-3 shadow-sm flex flex-col justify-between">
+                    <div className="mb-3 flex items-start justify-between gap-2">
+                      <span className="font-mono text-sm font-bold text-primary truncate">{defect.name}</span>
+                      <span className="font-mono text-[10px] text-muted uppercase tracking-widest shrink-0">ID: {displayId}</span>
                     </div>
                     <div className="inline-flex bg-surface p-1 rounded-lg border border-gray-800 items-center gap-1 w-full justify-between shadow-inner">
                       <button onClick={() => setQualState(defect.id, 'PASS')} className={`flex-1 h-8 flex items-center justify-center rounded-md text-xs font-bold uppercase tracking-wider transition-all outline-none ${state === 'PASS' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 shadow-sm' : 'text-muted hover:text-primary hover:bg-surface/50 border border-transparent'}`}>PASS</button>
@@ -116,10 +119,10 @@ export function QuickDefectPopover({ isOpen, onClose, rowId, sequenceNo, initial
 
               const count = defectCounts[defect.id] || 0;
               return (
-                <div key={defect.id} className="bg-canvas border border-gray-800 rounded-xl p-3 shadow-sm flex flex-col justify-between hover:border-gray-700 transition-colors">
-                  <div className="mb-3">
-                    <span className="font-mono text-sm font-bold text-primary block truncate">{defect.name}</span>
-                    <span className="font-mono text-[10px] text-muted uppercase tracking-widest mt-1 block">ID: {defect.id}</span>
+                <div key={defect.id} className="bg-canvas border border-gray-700/50 rounded-lg p-3 shadow-sm flex flex-col justify-between hover:border-gray-700 transition-colors">
+                  <div className="mb-3 flex items-start justify-between gap-2">
+                    <span className="font-mono text-sm font-bold text-primary truncate">{defect.name}</span>
+                    <span className="font-mono text-[10px] text-muted uppercase tracking-widest shrink-0">ID: {displayId}</span>
                   </div>
                   <div className="flex items-center justify-between bg-surface rounded-lg p-1 border border-gray-800 shadow-inner">
                     <motion.button whileTap={{ scale: 0.92 }} onClick={() => handleDecrement(defect.id)} disabled={count === 0} className="w-8 h-8 shrink-0 flex items-center justify-center bg-canvas border border-gray-700 rounded-md text-muted hover:text-rose-400 hover:border-rose-500/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors outline-none">

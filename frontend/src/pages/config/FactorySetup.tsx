@@ -191,6 +191,18 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
     triggerChange(lines, newShifts, sides);
   };
 
+  const moveLine = (index: number, direction: 'up' | 'down') => {
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === lines.length - 1) return;
+    
+    const newLines = [...lines];
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    [newLines[index], newLines[newIndex]] = [newLines[newIndex], newLines[index]];
+    
+    setLines(newLines);
+    triggerChange(newLines, shifts, sides);
+  };
+
   const moveShift = (index: number, direction: 'up' | 'down') => {
     if (direction === 'up' && index === 0) return;
     if (direction === 'down' && index === shifts.length - 1) return;
@@ -201,6 +213,18 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
     
     setShifts(newShifts);
     triggerChange(lines, newShifts, sides);
+  };
+
+  const moveSide = (index: number, direction: 'up' | 'down') => {
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === sides.length - 1) return;
+    
+    const newSides = [...sides];
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    [newSides[index], newSides[newIndex]] = [newSides[newIndex], newSides[index]];
+    
+    setSides(newSides);
+    triggerChange(lines, shifts, newSides);
   };
 
   return (
@@ -225,11 +249,11 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
               <tr className="border-b border-gray-800">
                 <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted w-32">Line ID (Code)</th>
                 <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted flex-1">Display Name</th>
-                <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted text-right w-24">Actions</th>
+                <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted text-right w-36">Actions</th>
               </tr>
             </thead>
             <tbody className="">
-              {lines.map((line: any) => {
+              {lines.map((line: any, index: number) => {
                 const isEditing = editingLineId === line.id;
                 
                 return (
@@ -278,10 +302,24 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
                           </button>
                         </div>
                       ) : (
-                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button 
+                            onClick={() => moveLine(index, 'up')}
+                            disabled={index === 0}
+                            className="p-1.5 rounded-md text-muted hover:text-white hover:bg-gray-800 disabled:opacity-30 transition-colors outline-none" title="Move Up"
+                          >
+                            <ArrowUp className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={() => moveLine(index, 'down')}
+                            disabled={index === lines.length - 1}
+                            className="p-1.5 rounded-md text-muted hover:text-white hover:bg-gray-800 disabled:opacity-30 transition-colors outline-none" title="Move Down"
+                          >
+                            <ArrowDown className="w-4 h-4" />
+                          </button>
                           <button 
                             onClick={() => startEditingLine(line)}
-                            className="p-1 rounded text-muted hover:text-white hover:bg-gray-700 outline-none transition-colors" title="Edit"
+                            className="p-1.5 rounded-md text-muted hover:text-white hover:bg-gray-800 outline-none transition-colors" title="Edit"
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
@@ -333,11 +371,11 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
               <tr className="border-b border-gray-800">
                 <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted w-32">Side ID</th>
                 <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted flex-1">Display Name</th>
-                <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted text-right w-24">Actions</th>
+                <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted text-right w-36">Actions</th>
               </tr>
             </thead>
             <tbody className="">
-              {sides.map((side: any) => {
+              {sides.map((side: any, index: number) => {
                 const isEditing = editingSideId === side.id;
                 
                 return (
@@ -386,10 +424,24 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
                           </button>
                         </div>
                       ) : (
-                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button 
+                            onClick={() => moveSide(index, 'up')}
+                            disabled={index === 0}
+                            className="p-1.5 rounded-md text-muted hover:text-white hover:bg-gray-800 disabled:opacity-30 transition-colors outline-none" title="Move Up"
+                          >
+                            <ArrowUp className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={() => moveSide(index, 'down')}
+                            disabled={index === sides.length - 1}
+                            className="p-1.5 rounded-md text-muted hover:text-white hover:bg-gray-800 disabled:opacity-30 transition-colors outline-none" title="Move Down"
+                          >
+                            <ArrowDown className="w-4 h-4" />
+                          </button>
                           <button 
                             onClick={() => startEditingSide(side)}
-                            className="p-1 rounded text-muted hover:text-white hover:bg-gray-700 outline-none transition-colors" title="Edit"
+                            className="p-1.5 rounded-md text-muted hover:text-white hover:bg-gray-800 outline-none transition-colors" title="Edit"
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>

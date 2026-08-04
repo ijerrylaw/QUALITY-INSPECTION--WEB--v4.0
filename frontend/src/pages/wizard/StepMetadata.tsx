@@ -327,18 +327,18 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
   const weightStep = weightDecimals === 0 ? '1' : (1 / Math.pow(10, weightDecimals)).toFixed(weightDecimals);
 
   return (
-    <form id="wizard-step-form" onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <form id="wizard-step-form" onSubmit={handleSubmit} className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
         {/* ── LEFT COLUMN: Manual Inputs ──────────────────────────────────── */}
-        <div className="lg:col-span-8 bg-surface border border-gray-800 rounded-lg p-6 space-y-6 shadow-sm">
-          <h2 className="text-xl font-bold uppercase tracking-wide text-primary border-b border-gray-800 pb-3 flex items-center gap-2">
+        <div className="lg:col-span-8 bg-surface border border-gray-700/50 rounded-lg p-4 space-y-4 shadow-sm">
+          <h2 className="text-lg font-semibold uppercase text-primary border-b border-gray-700/50 pb-3 flex items-center gap-2">
             <Box className="w-5 h-5 text-brand-secondary" strokeWidth={2} />
             INSPECTION METADATA & SETUP
           </h2>
 
           {/* ── INSPECTION PROFILE DROPDOWN (user-selectable, product-agnostic) */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <label className="text-xs font-semibold uppercase tracking-wider text-muted flex items-center gap-1.5">
               <ShieldCheck className="w-3 h-3 text-brand-secondary" strokeWidth={2} />
               INSPECTION PROFILE
@@ -356,14 +356,14 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                   </option>
                 ))}
               </select>
-              <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-4 pointer-events-none" />
+              <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-6 pt-1">
 
             {/* Product Code */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted flex items-center gap-1.5">
                 <Barcode className="w-3 h-3 text-brand-secondary" strokeWidth={2} />
                 PRODUCT CODE
@@ -379,12 +379,12 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                     <option key={code} value={code} className="bg-surface text-primary">{code}</option>
                   ))}
                 </select>
-                <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-4 pointer-events-none" />
+                <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
             </div>
 
             {/* Glove Size */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted flex items-center gap-1.5">
                 <Scaling className="w-3 h-3 text-brand-secondary" strokeWidth={2} />
                 GLOVE SIZE
@@ -400,12 +400,12 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                     <option key={s} value={s} className="bg-surface text-primary">{s}</option>
                   ))}
                 </select>
-                <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-4 pointer-events-none" />
+                <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
             </div>
 
             {/* Production Line */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted flex items-center gap-1.5">
                 <Activity className="w-3 h-3 text-brand-secondary" strokeWidth={2} />
                 PRODUCTION LINE
@@ -421,12 +421,12 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                     <option key={l.id} value={l.id} className="bg-surface text-primary">{l.id} ({l.name})</option>
                   ))}
                 </select>
-                <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-4 pointer-events-none" />
+                <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
             </div>
 
             {/* Side */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted flex items-center gap-1.5">
                 <SplitSquareHorizontal className="w-3 h-3 text-brand-secondary" strokeWidth={2} />
                 SIDE
@@ -441,12 +441,12 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                     <option key={s.id} value={s.id} className="bg-surface text-primary">{s.id} ({s.name})</option>
                   ))}
                 </select>
-                <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-4 pointer-events-none" />
+                <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
             </div>
 
             {/* Sequence No */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted flex items-center gap-1.5">
                 <Hash className="w-3 h-3 text-brand-secondary" strokeWidth={2} />
                 SEQUENCE NO
@@ -467,7 +467,7 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
             </div>
 
             {/* Total Carton */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted flex items-center gap-1.5">
                 <Box className="w-3 h-3 text-brand-secondary" strokeWidth={2} />
                 TOTAL CARTON
@@ -488,7 +488,7 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
             </div>
 
             {/* Sample Size */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted flex items-center gap-1.5">
                 <Hash className="w-3 h-3 text-brand-secondary" strokeWidth={2} />
                 SAMPLE SIZE
@@ -504,12 +504,12 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                     <option key={ss} value={ss.toString()} className="bg-surface text-primary font-mono">{ss}</option>
                   ))}
                 </select>
-                <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-4 pointer-events-none" />
+                <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
             </div>
 
             {/* Glove Weight (auto-extracted, user-editable override) */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted flex items-center gap-1.5">
                 <Scale className="w-3 h-3 text-brand-secondary" strokeWidth={2} />
                 GLOVE WEIGHT (g)
@@ -538,11 +538,11 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
         </div>
 
         {/* ── RIGHT COLUMN: System Automations ────────────────────────────── */}
-        <div className="lg:col-span-4 bg-brand-primary/5 p-6 rounded-lg border border-brand-primary/20 shadow-sm relative overflow-hidden flex flex-col justify-between">
+        <div className="lg:col-span-4 bg-brand-primary/5 p-4 rounded-lg border border-brand-primary/20 shadow-sm relative overflow-hidden flex flex-col justify-between">
           <div className="absolute top-0 right-0 w-32 h-32 bg-brand-primary/10 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none" />
 
-          <div className="space-y-5 relative z-10">
-            <h2 className="text-lg font-bold uppercase tracking-wide text-brand-secondary flex items-center gap-2 border-b border-brand-primary/20 pb-3">
+          <div className="space-y-4 relative z-10">
+            <h2 className="text-lg font-semibold uppercase text-brand-secondary flex items-center gap-2 border-b border-brand-primary/20 pb-3">
               <Clock className="w-5 h-5" strokeWidth={2} />
               SYSTEM AUTOMATIONS
             </h2>
@@ -557,7 +557,7 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                 type="datetime-local"
                 value={new Date(timestamp.getTime() - timestamp.getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
                 onChange={handleDateChange}
-                className="w-full h-9 bg-surface border border-gray-700 rounded text-sm text-primary font-mono px-3 outline-none focus:border-brand-secondary [color-scheme:dark] transition-opacity"
+                className="w-full h-9 bg-surface border border-gray-700 rounded-lg text-sm text-primary font-mono px-3 outline-none focus:border-brand-secondary [color-scheme:dark] transition-opacity"
               />
             </div>
 

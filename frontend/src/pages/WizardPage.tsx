@@ -33,7 +33,7 @@ import { StepMetadata } from './wizard/StepMetadata';
 import { StepDimensions } from './wizard/StepDimensions';
 import { StepDefects } from './wizard/StepDefects';
 import { StepReviewSubmit } from './wizard/StepReviewSubmit';
-import { SpreadsheetGrid } from './wizard/SpreadsheetGrid';
+import { BatchEntry } from './wizard/BatchEntry';
 
 type EntryMode = 'GUIDED' | 'SPREADSHEET';
 
@@ -352,9 +352,10 @@ export function WizardPage() {
         </div>
       ) : (
         <div className="w-full">
-          <SpreadsheetGrid />
+          <BatchEntry />
         </div>
       )}
     </div>
   );
 }
+
