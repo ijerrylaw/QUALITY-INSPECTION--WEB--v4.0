@@ -436,12 +436,12 @@ export function SpreadsheetGrid() {
                     
                     {/* Sticky Sequence & Lot */}
                     <td className="p-1 border-r border-gray-800 sticky left-0 bg-surface group-hover:bg-surface-light z-10 text-center">
-                      <div className="w-full h-9 flex items-center justify-center text-brand-secondary font-mono text-xs font-bold">
+                      <div className="w-full h-8 flex items-center justify-center text-brand-secondary font-mono text-sm font-bold">
                         {row.sequenceNo}
                       </div>
                     </td>
                     <td className="p-1 border-r border-gray-800 sticky left-16 bg-surface group-hover:bg-surface-light z-10">
-                      <div className="w-full h-9 px-2 flex items-center bg-canvas/50 rounded text-muted font-mono text-[10px]">
+                      <div className="w-full h-8 px-2 flex items-center bg-canvas/50 rounded text-muted font-mono text-sm">
                         {lineId || 'XXX'}{side}{lot4Digit}{row.sequenceNo}
                       </div>
                     </td>
@@ -455,7 +455,7 @@ export function SpreadsheetGrid() {
                         onKeyDown={(e) => handleKeyDown(e, rowIndex, 'crt', row.id)}
                         data-row={rowIndex}
                         data-col="crt"
-                        className="w-full h-9 px-1 bg-canvas border border-gray-700 rounded text-primary font-mono text-xs text-center focus:border-brand-secondary focus:outline-none focus:ring-1 focus:ring-brand-secondary/30 transition-all"
+                        className="w-full h-8 px-1 bg-canvas border border-gray-700 rounded text-primary font-mono text-sm text-center focus:border-brand-secondary focus:outline-none focus:ring-1 focus:ring-brand-secondary/30 transition-all"
                       />
                     </td>
                     <td className="p-1 border-r border-gray-800 w-20">
@@ -471,7 +471,7 @@ export function SpreadsheetGrid() {
                         onKeyDown={(e) => handleKeyDown(e, rowIndex, 'wt', row.id)}
                         data-row={rowIndex}
                         data-col="wt"
-                        className="w-full h-9 px-1 bg-canvas border border-gray-700 rounded text-primary font-mono text-xs text-center focus:border-brand-secondary focus:outline-none focus:ring-1 focus:ring-brand-secondary/30 transition-all"
+                        className="w-full h-8 px-1 bg-canvas border border-gray-700 rounded text-primary font-mono text-sm text-center focus:border-brand-secondary focus:outline-none focus:ring-1 focus:ring-brand-secondary/30 transition-all"
                       />
                     </td>
                     
@@ -506,7 +506,7 @@ export function SpreadsheetGrid() {
                               onKeyDown={(e) => handleKeyDown(e, rowIndex, `${d.id}-${idx}`, row.id)}
                               data-row={rowIndex}
                               data-col={`${d.id}-${idx}`}
-                              className={`w-14 h-9 px-1 border rounded font-mono text-xs text-center focus:outline-none focus:ring-1 focus:ring-brand-secondary transition-all ${bgClass}`}
+                              className={`w-14 h-8 px-1 border rounded font-mono text-sm text-center focus:outline-none focus:ring-1 focus:ring-brand-secondary transition-all ${bgClass}`}
                             />
                           </td>
                         );
@@ -521,7 +521,7 @@ export function SpreadsheetGrid() {
                         onKeyDown={(e) => handleKeyDown(e, rowIndex, 'defects', row.id)}
                         data-row={rowIndex}
                         data-col="defects"
-                        className={`w-full h-9 px-2 rounded-md font-semibold text-[11px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all outline-none border focus:ring-1 focus:ring-brand-secondary ${
+                        className={`w-full h-8 px-2 rounded-md font-semibold text-[11px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all outline-none border focus:ring-1 focus:ring-brand-secondary ${
                           totalIssues > 0 
                             ? 'bg-rose-500/10 border-rose-500/50 text-rose-400'
                             : 'bg-canvas border-gray-700 text-muted hover:text-primary hover:border-gray-600'
@@ -534,7 +534,7 @@ export function SpreadsheetGrid() {
 
                     {/* Verdict Readout Badge */}
                     <td className="p-1 text-center w-28">
-                      <div className={`w-full h-9 flex items-center justify-center gap-1.5 rounded-md font-semibold text-[11px] uppercase tracking-wider border ${
+                      <div className={`w-full h-8 flex items-center justify-center gap-1.5 rounded-md font-semibold text-[11px] uppercase tracking-wider border ${
                         verdictState === 'PASS' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
                         verdictState === 'FAIL' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' :
                         'bg-canvas text-gray-500 border-gray-800'
