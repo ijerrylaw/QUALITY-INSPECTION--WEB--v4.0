@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { useConfig } from '../../context/ConfigContext';
+import React, { useState, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
+import { useConfig, API_BASE_URL } from '../../context/ConfigContext';
 import { useToast } from '../../components/ui/ToastProvider';
 import {
-  Layers, ShieldCheck, Barcode, Scaling, Activity, Calendar,
-  Hash, Box, CheckCircle2, XCircle, Plus, ChevronRight, Edit2,
-  Ruler, AlertTriangle, Trash2
+  ShieldCheck, Barcode, Scaling, Activity, Calendar,
+  Hash, CheckCircle2, XCircle, Plus, ChevronRight, Ruler, AlertTriangle, Trash2
 } from 'lucide-react';
 
 interface BatchLotRow {
@@ -161,7 +160,7 @@ function BatchModalDimensions({ row, updateRow, config, productCode, size }: any
     <div className="space-y-4 animate-in fade-in">
       <div className="flex items-center gap-2 mb-4">
         <Ruler className="w-5 h-5 text-brand-secondary" />
-        <h4 className="text-sm font-bold uppercase tracking-wider text-primary">Dimensions (5 Samples)</h4>
+        <h4 className="text-sm font-bold uppercase tracking-wider text-primary">Physical Dimensions</h4>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {activeDimensions.map((dim: any) => {
@@ -283,7 +282,7 @@ function BatchModalVisual({ row, updateRow, config, profileId }: any) {
     <div className="space-y-4 animate-in fade-in">
       <div className="flex items-center gap-2 mb-4">
         <AlertTriangle className="w-5 h-5 text-brand-secondary" />
-        <h4 className="text-sm font-bold uppercase tracking-wider text-primary">Visual Defects</h4>
+        <h4 className="text-sm font-bold uppercase tracking-wider text-primary">Defect Tabulation</h4>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {aqlCategories.map((cat: any) => {
@@ -291,8 +290,18 @@ function BatchModalVisual({ row, updateRow, config, profileId }: any) {
           if (catDefects.length === 0) return null;
           return (
             <div key={cat.id} className="space-y-2">
-              <div className="text-xs font-bold uppercase tracking-wider text-brand-secondary border-b border-gray-800 pb-1">
-                {cat.name}
+              <div className="flex items-end justify-between border-b border-gray-800 pb-1 gap-2">
+                <span className="font-mono text-sm font-bold uppercase tracking-wider text-primary truncate">{cat.name}</span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 font-mono text-[10px] uppercase px-2 py-0.5 rounded">AQL: {cat.aql}</span>
+                  <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider ${
+                    cat.evalMode === 'N/A' 
+                      ? 'bg-gray-500/10 border-gray-500/30 text-gray-400' 
+                      : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                  }`}>
+                    {cat.evalMode}
+                  </span>
+                </div>
               </div>
               <div className="space-y-1">
                 {catDefects.map((defect: any) => {
@@ -319,7 +328,11 @@ function BatchModalVisual({ row, updateRow, config, profileId }: any) {
 
 // ── MAIN PAGE COMPONENT ───────────────────────────────────────────────────
 
-export function BatchEntry() {
+export interface BatchEntryHandle {
+  submitBatch: () => void;
+}
+
+export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
   const { config, isLoading } = useConfig();
   const { addToast } = useToast();
 
@@ -403,6 +416,91 @@ export function BatchEntry() {
     return `${lineStr}${YY}${MM}${DD}${seq || ''}`;
   };
 
+  const generateJulianLotNo = (ts: Date) => {
+    if (!ts) return '';
+    const dateObj = new Date(ts);
+    const Y = dateObj.getFullYear().toString().slice(-1);
+    const start = new Date(dateObj.getFullYear(), 0, 0);
+    const diff = dateObj.getTime() - start.getTime();
+    const oneDay = 1000 * 60 * 60 * 24;
+    const day = Math.floor(diff / oneDay);
+    return `${Y}${day.toString().padStart(3, '0')}`;
+  };
+
+  const hasRealData = (r: BatchLotRow) => {
+    const dimsDirty = r.dirtySlots
+      ? Object.values(r.dirtySlots).some(slots => slots.some(isDirty => isDirty))
+      : false;
+    const defsHasData = Object.values(r.defects).some(v => v > 0);
+    return dimsDirty || defsHasData;
+  };
+
+  const handleSubmitBatch = async () => {
+    const validRows = rows.filter(hasRealData);
+    if (validRows.length === 0) {
+      addToast('info', 'No lots have data entered yet.');
+      return;
+    }
+
+    const submissions = validRows.map(row => ({
+      productCode,
+      productionDate: timestamp.toISOString(),
+      samplingTime: timestamp.toISOString(),
+      machineId: lineId,
+      shift: 'Shift 1',
+      batchNumber: generateLotNo(lineId, timestamp, row.sequenceNo),
+      size,
+      sampleSize: parseInt(row.sampleSize) || 125,
+      dimensions: row.dimensions,
+      dimensionMins: {},
+      defects: row.defects,
+      aadObjectId: 'mock-user-id',
+      userPrincipalName: 'operator@oneglove.com',
+      totalCarton: parseInt(row.totalCarton) || 0,
+      profileId,
+    }));
+
+    try {
+      const results = await Promise.allSettled(
+        submissions.map(sub => 
+          fetch(`${API_BASE_URL}/api/submissions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(sub),
+          }).then(res => {
+            if (!res.ok) throw new Error(`Server error`);
+            return res.json();
+          })
+        )
+      );
+
+      let successCount = 0;
+      results.forEach((result, idx) => {
+        if (result.status === 'fulfilled') {
+          successCount++;
+          updateRowField(validRows[idx].id, 'dirtySlots', {});
+          updateRowField(validRows[idx].id, 'dimensions', {});
+          updateRowField(validRows[idx].id, 'defects', {});
+        }
+      });
+
+      if (successCount === validRows.length) {
+        addToast('success', `Successfully submitted ${successCount} lots.`);
+      } else if (successCount > 0) {
+        addToast('info', `Submitted ${successCount} lots. Some failed.`);
+      } else {
+        addToast('error', 'Failed to submit batch.');
+      }
+    } catch (err) {
+      console.error(err);
+      addToast('error', 'An error occurred during submission.');
+    }
+  };
+
+  useImperativeHandle(ref, () => ({
+    submitBatch: handleSubmitBatch
+  }));
+
   // Loading state
   if (isLoading || !config) {
     return (
@@ -415,20 +513,14 @@ export function BatchEntry() {
   }
 
   return (
-    <div className="p-6 space-y-4 h-full flex flex-col max-h-screen">
-      <div className="flex items-center justify-end gap-3 mb-2">
-        <button className="h-10 px-6 rounded-lg bg-surface border border-gray-700 text-xs font-bold tracking-wider uppercase hover:bg-surface-light transition-colors">
-          SAVE DRAFT
-        </button>
-        <button className="h-10 px-6 rounded-lg bg-brand-primary text-white text-xs font-bold tracking-wider uppercase hover:opacity-90 transition-opacity">
-          SUBMIT BATCH
-        </button>
-      </div>
+    <div className="space-y-4 h-full flex flex-col pt-6">
 
       {/* ── SHARED METADATA (Tier 2 Container) ───────────────────────────── */}
       <div className="bg-surface border border-gray-700/50 rounded-lg p-4 shrink-0 shadow-sm">
-        <h2 className="text-xs font-bold uppercase tracking-wider text-brand-secondary mb-3">Shared Batch Metadata</h2>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="flex justify-between items-start mb-3">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-brand-secondary">Shared Batch Metadata</h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
           
           <div className="space-y-1.5">
             <label className="text-[10px] font-semibold uppercase tracking-wider text-muted flex items-center gap-1.5">
@@ -502,6 +594,15 @@ export function BatchEntry() {
             />
           </div>
 
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-semibold uppercase tracking-wider text-muted flex items-center gap-1.5">
+              <Hash className="w-3 h-3" /> LOT (YJJJ)
+            </label>
+            <div className="w-full h-9 bg-surface-light/50 border border-transparent rounded-lg px-2 flex items-center text-sm font-mono text-brand-secondary font-bold cursor-not-allowed opacity-80">
+              {generateJulianLotNo(timestamp)}
+            </div>
+          </div>
+
         </div>
       </div>
 
@@ -514,9 +615,10 @@ export function BatchEntry() {
           </div>
           <button 
             onClick={handleAddRow}
-            className="h-8 px-4 rounded border border-dashed border-gray-600 hover:border-brand-secondary hover:text-brand-secondary hover:bg-brand-primary/10 transition-colors text-xs font-bold uppercase tracking-wider text-muted flex items-center gap-1.5"
+            className="h-9 px-4 rounded-md bg-canvas border border-emerald-500/50 text-emerald-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0"
           >
-            <Plus className="w-3 h-3" /> ADD LOT
+            <Plus className="w-4 h-4" strokeWidth={2} />
+            <span>ADD LOT</span>
           </button>
         </div>
 
@@ -538,7 +640,9 @@ export function BatchEntry() {
             </thead>
             <tbody>
               {rows.map((row, index) => {
-                const hasData = Object.keys(row.dimensions).length > 0 || Object.keys(row.defects).length > 0;
+                const dimsHasData = row.dirtySlots ? Object.values(row.dirtySlots).some(slots => slots.some(isDirty => isDirty)) : false;
+                const defsHasData = Object.values(row.defects).some(v => v > 0);
+                const hasData = dimsHasData || defsHasData;
                 const lotNumber = generateLotNo(lineId, timestamp, row.sequenceNo);
                 
                 return (
@@ -587,7 +691,11 @@ export function BatchEntry() {
                     <td className="py-2 px-3 text-center">
                       <button 
                         onClick={() => { setSelectedRowId(row.id); setActiveTab('dimensions'); }}
-                        className="h-8 px-8 rounded bg-brand-primary/10 text-brand-secondary hover:bg-brand-primary hover:text-white transition-colors text-xs font-bold uppercase tracking-wider mx-auto flex items-center justify-center w-24"
+                        className={`h-8 px-8 rounded transition-colors text-xs font-bold uppercase tracking-wider mx-auto flex items-center justify-center w-24 ${
+                          dimsHasData 
+                            ? 'bg-gray-800/50 text-gray-400 hover:text-white hover:bg-gray-700 border border-gray-700' 
+                            : 'bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-white border border-transparent'
+                        }`}
                       >
                         ENTRY
                       </button>
@@ -595,7 +703,11 @@ export function BatchEntry() {
                     <td className="py-2 px-3 text-center">
                       <button 
                         onClick={() => { setSelectedRowId(row.id); setActiveTab('visual'); }}
-                        className="h-8 px-8 rounded bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-white transition-colors text-xs font-bold uppercase tracking-wider mx-auto flex items-center justify-center w-24"
+                        className={`h-8 px-8 rounded transition-colors text-xs font-bold uppercase tracking-wider mx-auto flex items-center justify-center w-24 ${
+                          defsHasData 
+                            ? 'bg-gray-800/50 text-gray-400 hover:text-white hover:bg-gray-700 border border-gray-700' 
+                            : 'bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-white border border-transparent'
+                        }`}
                       >
                         ENTRY
                       </button>
@@ -645,6 +757,14 @@ export function BatchEntry() {
                 <h3 className="text-sm font-bold uppercase text-primary">
                   Lot Details <span className="text-brand-secondary font-mono tracking-widest ml-2">SEQ: {activeRow.sequenceNo}</span>
                 </h3>
+                <div className="flex items-center gap-3 ml-4 border-l border-gray-700 pl-4">
+                  <span className="text-primary text-sm font-mono uppercase font-normal">
+                    {productCode} {size ? `- ${size}` : ''}
+                  </span>
+                  <span className="text-brand-secondary text-sm font-mono uppercase font-bold tracking-widest">
+                    {generateLotNo(lineId, timestamp, activeRow.sequenceNo)}
+                  </span>
+                </div>
               </div>
               <button 
                 onClick={() => setSelectedRowId(null)}
@@ -655,22 +775,24 @@ export function BatchEntry() {
             </div>
             
             {/* Modal Tabs */}
-            <div className="flex items-center gap-4 px-6 border-b border-gray-800 bg-surface shrink-0">
+            <div className="flex items-center px-6 border-b border-gray-800 bg-surface shrink-0 pt-2 gap-1">
               <button
                 onClick={() => setActiveTab('dimensions')}
-                className={`h-12 border-b-2 text-xs font-bold uppercase tracking-wider transition-colors ${
-                  activeTab === 'dimensions' ? 'border-brand-secondary text-brand-secondary' : 'border-transparent text-muted hover:text-primary'
+                className={`h-10 px-6 gap-2 flex items-center justify-center rounded-t-lg text-xs font-bold uppercase tracking-wider transition-colors ${
+                  activeTab === 'dimensions' ? 'bg-brand-primary text-white' : 'bg-surface text-muted hover:text-primary hover:bg-surface-light'
                 }`}
               >
-                Dimensional Inspection
+                <Ruler className="w-4 h-4" />
+                PHYSICAL DIMENSIONS
               </button>
               <button
                 onClick={() => setActiveTab('visual')}
-                className={`h-12 border-b-2 text-xs font-bold uppercase tracking-wider transition-colors ${
-                  activeTab === 'visual' ? 'border-brand-secondary text-brand-secondary' : 'border-transparent text-muted hover:text-primary'
+                className={`h-10 px-6 gap-2 flex items-center justify-center rounded-t-lg text-xs font-bold uppercase tracking-wider transition-colors ${
+                  activeTab === 'visual' ? 'bg-brand-primary text-white' : 'bg-surface text-muted hover:text-primary hover:bg-surface-light'
                 }`}
               >
-                Visual Defects
+                <AlertTriangle className="w-4 h-4" />
+                DEFECT TABULATION
               </button>
             </div>
 
@@ -698,9 +820,9 @@ export function BatchEntry() {
             <div className="h-16 px-6 border-t border-gray-800 bg-surface flex items-center justify-between rounded-b-xl shrink-0">
               <button 
                 onClick={() => setSelectedRowId(null)}
-                className="text-xs font-bold uppercase text-muted hover:text-white transition-colors"
+                className="h-10 px-6 rounded-lg bg-surface border border-gray-700 text-xs font-bold uppercase tracking-wider text-muted hover:text-white transition-colors"
               >
-                Done
+                DONE
               </button>
               <div className="flex gap-2">
                 <button 
@@ -709,9 +831,9 @@ export function BatchEntry() {
                     if (idx > 0) setSelectedRowId(rows[idx - 1].id);
                   }}
                   disabled={rows.findIndex(r => r.id === selectedRowId) === 0}
-                  className="h-10 px-4 rounded-lg bg-surface-light border border-gray-700 text-xs font-bold uppercase text-primary hover:bg-gray-800 transition-colors disabled:opacity-50"
+                  className="h-10 px-4 rounded-lg bg-surface-light border border-gray-700 text-xs font-bold uppercase tracking-wider text-primary hover:bg-gray-800 transition-colors disabled:opacity-50"
                 >
-                  Save & Prev
+                  PREVIOUS LOT
                 </button>
                 <button 
                   onClick={() => {
@@ -719,9 +841,9 @@ export function BatchEntry() {
                     if (idx < rows.length - 1) setSelectedRowId(rows[idx + 1].id);
                   }}
                   disabled={rows.findIndex(r => r.id === selectedRowId) === rows.length - 1}
-                  className="h-10 px-4 rounded-lg bg-brand-primary text-xs font-bold uppercase text-white hover:opacity-90 transition-opacity flex items-center gap-2 disabled:opacity-50"
+                  className="h-10 px-4 rounded-lg bg-brand-primary text-xs font-bold uppercase tracking-wider text-white hover:opacity-90 transition-opacity flex items-center gap-2 disabled:opacity-50"
                 >
-                  Save & Next <ChevronRight className="w-4 h-4" />
+                  NEXT LOT <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -730,7 +852,12 @@ export function BatchEntry() {
       )}
     </div>
   );
-}
+});
+
+
+
+
+
 
 
 

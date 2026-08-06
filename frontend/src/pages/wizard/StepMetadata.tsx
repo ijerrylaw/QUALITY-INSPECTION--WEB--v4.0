@@ -38,7 +38,6 @@ import {
   Box,
   Scaling,
   Scale,
-  ArrowRight,
   Barcode,
   Calendar,
   Hash,
@@ -49,13 +48,14 @@ import {
 import { useToast } from '../../components/ui/ToastProvider';
 
 export interface StepMetadataProps {
-  onNext: (data: any) => void;
-  onUpdate?: (partial: Record<string, any>) => void; // Auto-save: fires on every field change
+  onNext: (data: Record<string, any>) => void;
+  onUpdate?: (partialData: Record<string, any>) => void;
   initialData?: Record<string, any>;
+  originalData?: Record<string, any> | null;
 }
 
-export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProps) {
-  const { config, isLoading, getResolvedProfile } = useConfig();
+export function StepMetadata({ onNext, onUpdate, initialData, originalData }: StepMetadataProps) {
+  const { config, isLoading } = useConfig();
   const { addToast } = useToast();
 
   // ── Form State ───────────────────────────────────────────────────────────
@@ -137,7 +137,7 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
     const sizeEntry = matrixEntry?.sizes?.[size];
     
     if (sizeEntry?.weightTarget) {
-      const dec = matrixEntry.weightDecimals ?? 0;
+      const dec = matrixEntry?.weightDecimals ?? 0;
       const num = parseFloat(sizeEntry.weightTarget);
       if (!isNaN(num)) {
         setGloveWeight(num.toFixed(dec));
@@ -485,6 +485,11 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                 placeholder="01"
                 className="w-full h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all"
               />
+              {originalData?.totalCarton !== undefined && String(originalData.totalCarton) !== String(totalCarton) && (
+                <div className="text-[10px] text-muted font-mono mt-1">
+                  Original: {originalData.totalCarton || '—'}
+                </div>
+              )}
             </div>
 
             {/* Sample Size */}
@@ -506,6 +511,11 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                 </select>
                 <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
+              {originalData?.sampleSize !== undefined && String(originalData.sampleSize) !== String(sampleSize) && (
+                <div className="text-[10px] text-muted font-mono mt-1">
+                  Original: {originalData.sampleSize || '—'}
+                </div>
+              )}
             </div>
 
             {/* Glove Weight (auto-extracted, user-editable override) */}
@@ -529,9 +539,14 @@ export function StepMetadata({ onNext, onUpdate, initialData }: StepMetadataProp
                     }
                   }
                 }}
-                placeholder="0.00"
+                placeholder="e.g. 5.2"
                 className="w-full h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all"
               />
+              {originalData?.gloveWeight !== undefined && String(originalData.gloveWeight) !== String(gloveWeight) && (
+                <div className="text-[10px] text-muted font-mono mt-1">
+                  Original: {originalData.gloveWeight || '—'}
+                </div>
+              )}
             </div>
 
           </div>

@@ -198,14 +198,14 @@ export function ConfigPage() {
         </div>
       )}
 
-      {/* ── 3-Submenu Architecture ───────────────────────────────────────────── */}
-      <div className="flex overflow-x-auto items-center gap-3 border-b border-gray-800/60 pb-1 scrollbar-hide">
+      {/* ── 3-Submenu Architecture (UI_DESIGN_SYSTEM.md §2.1) ─────────────── */}
+      <div className="flex overflow-x-auto items-center gap-0 border-b border-gray-800 pb-0 scrollbar-hide">
         <button
           onClick={() => attemptNavigation('factory')}
-          className={`h-12 px-6 rounded-lg font-semibold text-xs uppercase tracking-wider flex items-center gap-2.5 transition-all outline-none shrink-0 ${
+          className={`h-10 px-6 gap-2 flex items-center justify-center rounded-t-lg text-xs font-bold uppercase tracking-wider transition-all outline-none shrink-0 ${
             activeTab === 'factory'
-              ? 'bg-brand-primary text-white border border-brand-secondary/40 shadow-lg shadow-brand-primary/20'
-              : 'bg-surface text-muted hover:text-primary hover:bg-surface-light border border-gray-800/80'
+              ? 'bg-brand-primary text-white shadow-md'
+              : 'bg-surface text-muted hover:text-primary hover:bg-surface-light'
           }`}
         >
           <Building2 className="w-4 h-4" strokeWidth={2} />
@@ -214,10 +214,10 @@ export function ConfigPage() {
 
         <button
           onClick={() => attemptNavigation('product')}
-          className={`h-12 px-6 rounded-lg font-semibold text-xs uppercase tracking-wider flex items-center gap-2.5 transition-all outline-none shrink-0 ${
+          className={`h-10 px-6 gap-2 flex items-center justify-center rounded-t-lg text-xs font-bold uppercase tracking-wider transition-all outline-none shrink-0 ${
             activeTab === 'product'
-              ? 'bg-brand-primary text-white border border-brand-secondary/40 shadow-lg shadow-brand-primary/20'
-              : 'bg-surface text-muted hover:text-primary hover:bg-surface-light border border-gray-800/80'
+              ? 'bg-brand-primary text-white shadow-md'
+              : 'bg-surface text-muted hover:text-primary hover:bg-surface-light'
           }`}
         >
           <PackageSearch className="w-4 h-4" strokeWidth={2} />
@@ -226,10 +226,10 @@ export function ConfigPage() {
 
         <button
           onClick={() => attemptNavigation('quality')}
-          className={`h-12 px-6 rounded-lg font-semibold text-xs uppercase tracking-wider flex items-center gap-2.5 transition-all outline-none shrink-0 ${
+          className={`h-10 px-6 gap-2 flex items-center justify-center rounded-t-lg text-xs font-bold uppercase tracking-wider transition-all outline-none shrink-0 ${
             activeTab === 'quality'
-              ? 'bg-brand-primary text-white border border-brand-secondary/40 shadow-lg shadow-brand-primary/20'
-              : 'bg-surface text-muted hover:text-primary hover:bg-surface-light border border-gray-800/80'
+              ? 'bg-brand-primary text-white shadow-md'
+              : 'bg-surface text-muted hover:text-primary hover:bg-surface-light'
           }`}
         >
           <ShieldCheck className="w-4 h-4" strokeWidth={2} />
@@ -238,8 +238,8 @@ export function ConfigPage() {
       </div>
 
       {/* ── Submenu-Level Save Action Bar ─────────────────────────────────────── */}
-      <div className={`flex items-center justify-between px-6 h-14 rounded-xl border transition-all duration-300 ${
-        isDirty ? 'bg-amber-500/10 border-amber-500/30' : 'bg-surface border-gray-800/80'
+      <div className={`sticky top-0 z-40 flex items-center justify-between px-6 h-14 rounded-xl border transition-all duration-300 ${
+        isDirty ? 'bg-amber-500/10 border-amber-500/30 backdrop-blur-sm' : 'bg-surface/95 border-gray-800/80 backdrop-blur-sm'
       }`}>
         <div className="flex items-center gap-3">
           {isDirty ? (

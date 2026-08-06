@@ -21,15 +21,12 @@
 
 import { useState, useMemo } from 'react';
 import {
-  ClipboardCheck,
-  ArrowLeft,
   CheckCircle2,
   XCircle,
   BookmarkCheck,
   Box,
   Ruler,
   ShieldAlert,
-  ArrowRight,
   Info,
 } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastProvider';
@@ -180,7 +177,7 @@ interface CategoryVerdict {
 // COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function StepReviewSubmit({ inspectionData, onSubmit, onBack }: StepReviewSubmitProps) {
+export function StepReviewSubmit({ inspectionData, onSubmit }: StepReviewSubmitProps) {
   const { addToast } = useToast();
   const { getResolvedProfile } = useConfig();
 

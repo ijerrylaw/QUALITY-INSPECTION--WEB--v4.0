@@ -15,7 +15,7 @@
 import { useState, useEffect } from 'react';
 import { useConfig } from '../../context/ConfigContext';
 import { useToast } from '../../components/ui/ToastProvider';
-import { Activity, Clock, Scaling, Ruler, Tag, Beaker, Save, Loader2, Database } from 'lucide-react';
+import { Activity, Clock, Scaling, Tag, Beaker, Save, Loader2, Database } from 'lucide-react';
 import type { LineOption, ShiftOption, SKUOption } from '../../context/ConfigContext';
 
 // --- API Helper ---

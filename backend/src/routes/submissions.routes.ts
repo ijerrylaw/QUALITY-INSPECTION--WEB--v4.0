@@ -151,23 +151,43 @@ router.post('/', async (req: Request, res: Response) => {
     let defectDefinitions: Awaited<ReturnType<typeof prisma.defectDefinition.findMany>> = [];
 
     if (profileId) {
-      const profile = await prisma.inspectionProfile.findUnique({
-        where: { id: profileId },
-        include: {
-          aqlCategories: true,
-          defectDefinitions: true,
-        },
-      });
+      const appConfig = await prisma.appConfig.findUnique({ where: { id: '1' } });
+      const profilesList = appConfig?.inspectionProfiles 
+        ? safeParseJSON<any[]>(appConfig.inspectionProfiles, []) 
+        : [];
+        
+      let profile = profilesList.find(p => p.id === profileId);
+
+      if (!profile && profileId === 'prof_default') {
+        // Fallback for unsaved mock profile from UI
+        profile = {
+          id: 'prof_default',
+          aqlCategories: [
+            { id: 'BARRIER',   name: 'BARRIER',   aqlLevel: 'AND',           evaluationMode: 'N/A' },
+            { id: 'CRITICAL',  name: 'CRITICAL',  aqlLevel: '1.5',           evaluationMode: 'CUMULATIVE' },
+            { id: 'MAJOR',     name: 'MAJOR',     aqlLevel: '2.5',           evaluationMode: 'CUMULATIVE' },
+            { id: 'MINOR',     name: 'MINOR',     aqlLevel: '4.0',           evaluationMode: 'GRANULAR' },
+            { id: 'PACKAGING', name: 'PACKAGING', aqlLevel: 'PASS/FAIL/NIL', evaluationMode: 'N/A' },
+          ],
+          defectDefinitions: [
+            { id: 'def_hole', name: 'Hole', categoryId: 'BARRIER' },
+            { id: 'def_tear', name: 'Tear', categoryId: 'BARRIER' },
+            { id: 'def_stain', name: 'Stain', categoryId: 'CRITICAL' },
+            { id: 'def_particle', name: 'Particle', categoryId: 'CRITICAL' },
+            { id: 'def_dirt', name: 'Dirt', categoryId: 'MAJOR' },
+            { id: 'def_flow', name: 'Flow Mark', categoryId: 'MINOR' },
+            { id: 'def_box', name: 'Box Damage', categoryId: 'PACKAGING' },
+          ]
+        };
+      }
 
       if (!profile) {
         res.status(404).json({ error: `InspectionProfile '${profileId}' not found.` });
         return;
       }
 
-      // Pass native Prisma model arrays directly — no DTO mapping needed.
-      // evaluateAQLVerdict accepts AQLCategory[] and DefectDefinition[] from Prisma.
-      categories = profile.aqlCategories;
-      defectDefinitions = profile.defectDefinitions;
+      categories = profile.aqlCategories || [];
+      defectDefinitions = profile.defectDefinitions || [];
     }
 
     // ── 4. Run native AQL verdict engine ──────────────────────────────────────
@@ -178,8 +198,15 @@ router.post('/', async (req: Request, res: Response) => {
       defectCounts,
     });
 
-    // ── 5. Persist Submission record ──────────────────────────────────────────
-    const submission = await prisma.submission.create({
+    // Verify if profile exists in native DB to avoid Prisma foreign key constraint errors
+    let validDbProfileId = null;
+    if (profileId) {
+      const existsInDb = await prisma.inspectionProfile.findUnique({ where: { id: profileId } });
+      if (existsInDb) validDbProfileId = profileId;
+    }
+
+    // ── 5. Insert into Database ───────────────────────────────────────────────
+    const newSubmission = await prisma.submission.create({
       data: {
         productCode:         String(body['productCode']),
         productionDate:      String(body['productionDate']),
@@ -199,11 +226,11 @@ router.post('/', async (req: Request, res: Response) => {
         amendmentStatus:     'UNMODIFIED',
         totalCarton:  body['totalCarton'] != null ? Number(body['totalCarton']) : null,
         gloveWeight:  body['gloveWeight']  != null ? Number(body['gloveWeight'])  : null,
-        profileId:    profileId ?? null,
+        profileId:    validDbProfileId,
       },
     });
 
-    res.status(201).json({ submission, verdict, categoryResults });
+    res.status(201).json({ submission: newSubmission, verdict, categoryResults });
 
   } catch (err) {
     console.error('[POST /api/submissions]', err);
@@ -260,6 +287,77 @@ router.get('/:id', async (req: Request, res: Response) => {
     res.status(200).json({ submission });
   } catch (err) {
     console.error('[GET /api/submissions/:id]', err);
+    res.status(500).json({ error: 'Internal server error', details: String(err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/submissions/:id/amendments  (draft an amendment request)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Creates an AmendmentLog record and sets the Submission status to PENDING_APPROVAL.
+ *
+ * Request body (JSON):
+ * {
+ *   "reason": "Data entry error in defect count",
+ *   "newValues": {
+ *     "productCode": "...",
+ *     // ... full submission payload
+ *   }
+ * }
+ */
+router.post('/:id/amendments', async (req: Request, res: Response) => {
+  try {
+    const submissionId = String(req.params['id']);
+    const body = req.body as { reason?: string; newValues?: Record<string, unknown> };
+
+    if (!body.reason || !body.reason.trim()) {
+      res.status(400).json({ error: 'Amendment reason is required' });
+      return;
+    }
+
+    if (!body.newValues || typeof body.newValues !== 'object') {
+      res.status(400).json({ error: 'newValues payload is required' });
+      return;
+    }
+
+    // 1. Fetch the original submission
+    const originalSubmission = await prisma.submission.findUnique({
+      where: { id: submissionId },
+    });
+
+    if (!originalSubmission) {
+      res.status(404).json({ error: `Submission '${submissionId}' not found.` });
+      return;
+    }
+
+    // 2. Perform transaction: update status and insert log
+    const transaction = await prisma.$transaction([
+      prisma.submission.update({
+        where: { id: submissionId },
+        data: { amendmentStatus: 'PENDING_APPROVAL' },
+      }),
+      prisma.amendmentLog.create({
+        data: {
+          submissionId,
+          originalValues: JSON.stringify(originalSubmission),
+          newValues: JSON.stringify(body.newValues),
+          requestedBy: 'operator@oneglove.com', // Mock authentication for now
+          requestedAt: new Date().toISOString(),
+          supervisorNote: body.reason.trim(),
+          status: 'PENDING_APPROVAL',
+        },
+      }),
+    ]);
+
+    res.status(201).json({
+      message: 'Amendment submitted successfully for approval.',
+      submission: transaction[0],
+      amendmentLog: transaction[1],
+    });
+  } catch (err) {
+    console.error('[POST /api/submissions/:id/amendments]', err);
     res.status(500).json({ error: 'Internal server error', details: String(err) });
   }
 });

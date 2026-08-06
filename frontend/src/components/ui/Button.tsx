@@ -6,7 +6,7 @@ interface ButtonProps extends React.ComponentProps<typeof motion.button> {
 }
 
 export function Button({ variant = 'primary', className = '', children, ...props }: ButtonProps) {
-  const baseStyles = "h-12 rounded-lg px-6 text-sm font-semibold flex items-center justify-center transition-all hover:brightness-110 outline-none";
+  const baseStyles = "h-10 rounded-lg px-6 text-xs font-bold tracking-wider uppercase flex items-center justify-center transition-all hover:brightness-110 outline-none";
   
   const variants = {
     primary: "bg-accent-gradient text-white border-none shadow-md",

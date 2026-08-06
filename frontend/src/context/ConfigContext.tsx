@@ -264,6 +264,35 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
       }
       const data = (await response.json()) as AppConfig;
+
+      // If the backend has no profiles configured yet, inject the built-in
+      // default profile so the wizard dropdown is never empty.
+      if (!data.inspectionProfiles || data.inspectionProfiles.length === 0) {
+        data.inspectionProfiles = [
+          {
+            id: 'prof_default',
+            name: 'GLOBAL STANDARD',
+            isDefault: true,
+            aqlCategories: [
+              { id: 'BARRIER',   name: 'BARRIER',   aqlLevel: 'AND',           evaluationMode: 'N/A' },
+              { id: 'CRITICAL',  name: 'CRITICAL',  aqlLevel: '1.5',           evaluationMode: 'CUMULATIVE' },
+              { id: 'MAJOR',     name: 'MAJOR',     aqlLevel: '2.5',           evaluationMode: 'CUMULATIVE' },
+              { id: 'MINOR',     name: 'MINOR',     aqlLevel: '4.0',           evaluationMode: 'GRANULAR' },
+              { id: 'PACKAGING', name: 'PACKAGING', aqlLevel: 'PASS/FAIL/NIL', evaluationMode: 'N/A' },
+            ],
+            defectDefinitions: [
+              { id: 'def_hole',     name: 'Hole',       categoryId: 'BARRIER' },
+              { id: 'def_tear',     name: 'Tear',       categoryId: 'BARRIER' },
+              { id: 'def_stain',    name: 'Stain',      categoryId: 'CRITICAL' },
+              { id: 'def_particle', name: 'Particle',   categoryId: 'CRITICAL' },
+              { id: 'def_dirt',     name: 'Dirt',       categoryId: 'MAJOR' },
+              { id: 'def_flow',     name: 'Flow Mark',  categoryId: 'MINOR' },
+              { id: 'def_box',      name: 'Box Damage', categoryId: 'PACKAGING' },
+            ],
+          }
+        ];
+      }
+
       setConfig(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

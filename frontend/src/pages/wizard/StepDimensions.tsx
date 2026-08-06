@@ -30,7 +30,7 @@
  */
 
 import { useState, useMemo, useEffect } from 'react';
-import { Ruler, ArrowRight, ArrowLeft, CheckCircle2, AlertTriangle, AlertCircle, Info } from 'lucide-react';
+import { Ruler, CheckCircle2, AlertTriangle, AlertCircle, Info } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastProvider';
 import { useConfig } from '../../context/ConfigContext';
 import type { ProductDimensionDef } from '../../context/ConfigContext';
@@ -40,6 +40,7 @@ export interface StepDimensionsProps {
   onBack: () => void;
   onUpdate?: (partial: Record<string, any>) => void; // Auto-save callback
   initialData?: Record<string, any>;
+  originalData?: Record<string, any> | null;
 }
 
 /** 5 measurement slots per dimension */
@@ -49,7 +50,13 @@ const SLOTS_PER_DIM = 5;
 const FIXED_DIM_LENGTH   = '__fixed_length__';
 const FIXED_DIM_PALM     = '__fixed_palm__';
 
-export function StepDimensions({ onNext, onBack, onUpdate, initialData }: StepDimensionsProps) {
+export function StepDimensions({
+  onNext,
+  onBack: _onBack,
+  onUpdate,
+  initialData = {},
+  originalData,
+}: StepDimensionsProps) {
   const { addToast } = useToast();
   const { config } = useConfig();
 
@@ -416,6 +423,11 @@ export function StepDimensions({ onNext, onBack, onUpdate, initialData }: StepDi
                         <div className={`mt-0.5 text-[9px] font-mono font-bold tracking-tighter text-rose-500 text-center leading-none ${isFail && delta !== null ? '' : 'invisible'}`}>
                           {isFail && delta !== null ? `${delta}${dim.unit}` : `0.0${dim.unit}`}
                         </div>
+                        {originalData?.dimensions?.[dim.id]?.[idx] !== undefined && String(originalData.dimensions[dim.id][idx]) !== String(val) && (
+                          <div className="mt-0.5 text-[9px] text-muted font-mono text-center leading-none">
+                            Org: {originalData.dimensions[dim.id][idx] || '—'}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

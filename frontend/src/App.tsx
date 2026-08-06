@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Sidebar } from './components/layout/Sidebar';
 import { ToastProvider } from './components/ui/ToastProvider';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import type { UserRole } from './context/AuthContext';
 import { ConfigProvider } from './context/ConfigContext';
 import { LoginPage } from './pages/LoginPage';
 import { WizardPage } from './pages/WizardPage';
@@ -31,6 +32,17 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   );
 }
 
+// Role-Based Route Wrapper
+function RoleRoute({ children, allowedRoles }: { children: ReactNode, allowedRoles: UserRole[] }) {
+  const { user } = useAuth();
+  
+  if (!user || !allowedRoles.includes(user.role)) {
+    return <Navigate to="/wizard" replace />;
+  }
+  
+  return <>{children}</>;
+}
+
 export function App() {
   return (
     <AuthProvider>
@@ -48,10 +60,26 @@ export function App() {
                     <Route path="/" element={<Navigate to="/wizard" replace />} />
                     <Route path="/wizard" element={<WizardPage />} />
                     <Route path="/history" element={<HistoryPage />} />
-                    <Route path="/approvals" element={<ApprovalsPage />} />
-                    <Route path="/analytics" element={<AnalyticsPage />} />
-                    <Route path="/config" element={<ConfigPage />} />
-                    <Route path="/system" element={<SystemPage />} />
+                    <Route path="/approvals" element={
+                      <RoleRoute allowedRoles={['EXECUTIVE', 'MANAGER', 'ADMIN']}>
+                        <ApprovalsPage />
+                      </RoleRoute>
+                    } />
+                    <Route path="/analytics" element={
+                      <RoleRoute allowedRoles={['SUPERVISOR', 'EXECUTIVE', 'MANAGER', 'ADMIN']}>
+                        <AnalyticsPage />
+                      </RoleRoute>
+                    } />
+                    <Route path="/config" element={
+                      <RoleRoute allowedRoles={['EXECUTIVE', 'MANAGER', 'ADMIN']}>
+                        <ConfigPage />
+                      </RoleRoute>
+                    } />
+                    <Route path="/system" element={
+                      <RoleRoute allowedRoles={['ADMIN']}>
+                        <SystemPage />
+                      </RoleRoute>
+                    } />
                     <Route path="*" element={<Navigate to="/wizard" replace />} />
                   </Routes>
                 </ProtectedRoute>

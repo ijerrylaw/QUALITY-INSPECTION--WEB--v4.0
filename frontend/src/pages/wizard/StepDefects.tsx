@@ -29,14 +29,9 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import {
-  ShieldCheck,
   ShieldAlert,
   AlertCircle,
-  AlertTriangle,
   Info,
-  CheckSquare,
-  ArrowLeft,
-  ArrowRight,
   Minus,
   Plus,
 } from 'lucide-react';
@@ -49,19 +44,12 @@ export interface StepDefectsProps {
   onNext: (data: any) => void;
   onBack: () => void;
   onUpdate?: (partial: Record<string, any>) => void; // Auto-save callback
+  originalData?: Record<string, any> | null;
 }
 
 type QualitativeState = 'PASS' | 'FAIL' | 'NIL';
 
 // Icon map for category icon names stored in QualityRules config
-const IconMap: Record<string, React.ElementType> = {
-  ShieldCheck,
-  ShieldAlert,
-  AlertCircle,
-  AlertTriangle,
-  Info,
-  CheckSquare,
-} as const;
 
 /** Returns true when the category uses PASS/FAIL/NIL qualitative evaluation */
 const isQualitativeAql = (aql: string | undefined): boolean =>
@@ -75,7 +63,7 @@ export const getDisplayId = (defect: { id: string; name: string }) => {
   return defect.id.toUpperCase();
 };
 
-export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDefectsProps) {
+export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: StepDefectsProps) {
   const { config, isLoading, getResolvedProfile } = useConfig();
 
   // ── Resolve InspectionProfile from profileId passed through inspectionData ─
@@ -254,15 +242,18 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
                 </h3>
                 <div className="flex items-center gap-2">
                   {/* AQL Badge */}
-                  <span className={`text-xs font-mono font-semibold uppercase tracking-wider px-2.5 py-1 rounded-md border ${
-                    activeCategory?.bg ?? 'bg-gray-500/10'
-                  } ${activeCategory?.color ?? 'text-gray-400'} ${activeCategory?.border ?? 'border-gray-500/30'}`}>
+                  <span className="bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 font-mono text-[10px] uppercase px-2 py-0.5 rounded">
                     AQL: {activeCategoryAql}
                   </span>
                   {/* Evaluation Mode Badge */}
                   {activeCategory && !isQual && (
-                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-brand-primary/10 border border-brand-primary/20 text-brand-secondary">
+                    <span className="px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 border-emerald-500/30 text-emerald-400">
                       {activeCategory.evalMode ?? activeCategory.evaluationMode ?? 'CUMULATIVE'}
+                    </span>
+                  )}
+                  {activeCategory && isQual && (
+                    <span className="px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider bg-gray-500/10 border-gray-500/30 text-gray-400">
+                      N/A
                     </span>
                   )}
                 </div>
@@ -323,6 +314,11 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
                             NIL
                           </button>
                         </div>
+                        {originalData?.defects?.[defect.id] !== undefined && String(originalData.defects[defect.id]) !== String(state) && (
+                          <div className="mt-2 text-[10px] text-muted font-mono text-center">
+                            Original: {originalData.defects[defect.id] || 'NIL'}
+                          </div>
+                        )}
                       </div>
                     );
                   }
@@ -365,6 +361,11 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
                           <Plus className="w-4 h-4" strokeWidth={2.5} />
                         </motion.button>
                       </div>
+                      {originalData?.defects?.[defect.id] !== undefined && Number(originalData.defects[defect.id]) !== count && (
+                        <div className="mt-2 text-[10px] text-muted font-mono text-center">
+                          Original: {originalData.defects[defect.id] || '0'}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -402,5 +403,7 @@ export function StepDefects({ inspectionData, onNext, onBack, onUpdate }: StepDe
     </form>
   );
 }
+
+
 
 

@@ -337,7 +337,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
             <button 
               onClick={handleAddProduct}
               disabled={!canBuildSKU || productCodes.includes(derivedSKU)}
-              className="h-12 px-8 rounded-lg bg-accent-gradient text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:brightness-110 transition-all outline-none disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              className="h-12 px-8 rounded-lg bg-canvas border border-emerald-500/50 text-emerald-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500 text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all outline-none disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
             >
               <Plus className="w-5 h-5" /> ADD PRODUCT CODE
             </button>
@@ -455,4 +455,6 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
     </div>
   );
 }
+
+
 

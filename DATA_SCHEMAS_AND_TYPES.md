@@ -56,8 +56,14 @@ export type EvaluationMode = 'CUMULATIVE' | 'GRANULAR' | 'N/A' | '';
 export interface AQLCategory {
   id: string;
   name: string;
-  aqlLevel: string; // e.g., '0.65', '1.0', '1.5', '2.5', '4.0', '6.5', 'AND', 'PASS/FAIL/NIL'
-  evaluationMode: EvaluationMode;
+  aql?: string; // Legacy field alias for aqlLevel
+  aqlLevel?: string; // e.g., '0.65', '1.0', '1.5', '2.5', '4.0', '6.5', 'AND', 'PASS/FAIL/NIL'
+  evaluationMode?: EvaluationMode;
+  evalMode?: EvaluationMode | string; // Legacy alias
+  iconName?: string;
+  color?: string;
+  bg?: string;
+  border?: string;
 }
 
 export interface DefectDefinition {
@@ -81,16 +87,29 @@ export interface InspectionProfile {
 
 ```typescript
 export interface AppConfig {
+  id: string;
+  companyName: string;
+  portalTitle: string;
+  logoImage: string | null;
+  accentColor: string;
   productCodes: string[];
   lines: { id: string; name: string }[];
-  shifts: { id: string; name: string }[];
+  shifts: { id: string; name: string; startHour: number; startMinute: number; durationHours: number }[];
+  sides: { id: string; name: string }[];
   sizes: string[];
   sampleSizes: number[];               // ISO 2859-1 global bracket sizes — stored at AppConfig root level
+  productMatrixConfig: Record<string, ProductConfig>;
+  skuMaterials: SkuOption[];
+  skuWeights: SkuOption[];
+  skuColors: SkuOption[];
+  skuTreatments: SkuOption[];
+  skuLengths: SkuOption[];
+  skuTextures: SkuOption[];
+  dimensions: ProductDimensionDef[];
+  targetWeight: { target: number; tolerance: number };
   inspectionProfiles?: InspectionProfile[]; // all profiles; categories & defects live here, NOT at root
-  productMatrixConfig?: Record<string, ProductConfig>;
-  skuMaterials?: SkuOption[];
-  skuWeights?: SkuOption[];
-  skuColors?: SkuOption[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface SkuOption {

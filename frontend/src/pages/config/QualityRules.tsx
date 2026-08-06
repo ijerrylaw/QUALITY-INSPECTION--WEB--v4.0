@@ -15,12 +15,7 @@
 import { useState } from 'react';
 import {
   ShieldCheck,
-  ShieldAlert,
-  AlertCircle,
-  AlertTriangle,
-  Info,
-  CheckSquare,
-  Lock,
+  Copy,
   Plus,
   Trash,
   Edit2,
@@ -45,14 +40,7 @@ const ISO_WHITELIST = ['AND', '0.65', '1.0', '1.5', '2.5', '4.0', '6.5', 'PASS/F
 // Evaluation Modes — DATA_SCHEMAS_AND_TYPES.md §2
 const EVAL_MODES: string[] = ['CUMULATIVE', 'GRANULAR'];
 
-const IconMap: Record<string, any> = {
-  ShieldCheck,
-  ShieldAlert,
-  AlertCircle,
-  AlertTriangle,
-  Info,
-  CheckSquare,
-};
+
 
 export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   const { config } = useConfig();
@@ -387,15 +375,6 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
             </h3>
             <p className="text-xs text-muted mt-1 font-normal normal-case">Select or create rulesets to assign to specific SKUs.</p>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={handleDuplicateProfile} className="h-9 px-4 rounded-md bg-canvas border border-gray-700 text-muted hover:text-white hover:bg-gray-800 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0">
-              DUPLICATE
-            </button>
-            <button onClick={handleAddProfile} className="h-9 px-4 rounded-md bg-canvas border border-gray-700 text-brand-secondary hover:text-white hover:bg-brand-primary/20 hover:border-brand-secondary font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0">
-              <Plus className="w-4 h-4" strokeWidth={2} />
-              <span>NEW PROFILE</span>
-            </button>
-          </div>
         </div>
         
         <div className="p-4 flex flex-wrap items-center gap-3">
@@ -440,6 +419,13 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
               <button onClick={() => { setEditingProfileId(activeProfileId); setEditProfileName(activeProfile.name); }} className="h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-white flex items-center gap-2 font-bold text-xs transition-colors outline-none">
                 <Edit2 className="w-4 h-4" /> RENAME
               </button>
+              <button onClick={handleDuplicateProfile} className="h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-white hover:bg-gray-800 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0">
+                <Copy className="w-4 h-4" /> DUPLICATE
+              </button>
+              <button onClick={handleAddProfile} className="h-9 px-4 rounded-lg bg-canvas border border-emerald-500/50 text-emerald-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0">
+                <Plus className="w-4 h-4" strokeWidth={2} />
+                <span>ADD PROFILE</span>
+              </button>
               {!activeProfile?.isDefault && (
                 <button onClick={() => handleSetDefaultProfile(activeProfileId)} className="h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-emerald-400 hover:border-emerald-500/30 flex items-center gap-2 font-bold text-xs transition-colors outline-none">
                   <Check className="w-4 h-4" /> SET AS DEFAULT
@@ -466,10 +452,10 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
             <button
               onClick={startAddingCategory}
               disabled={isAddingCategory}
-              className="h-9 px-4 rounded-md bg-canvas border border-gray-700 text-brand-secondary hover:text-white hover:bg-brand-primary/20 hover:border-brand-secondary font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0 disabled:opacity-50"
+              className="h-9 px-4 rounded-md bg-canvas border border-emerald-500/50 text-emerald-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0 disabled:opacity-50"
             >
               <Plus className="w-4 h-4" strokeWidth={2} />
-              <span>ADD</span>
+              <span>ADD CATEGORY</span>
             </button>
           </div>
 
@@ -550,13 +536,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                             )}
                           </select>
                         ) : (
-                          <span className={`font-mono text-xs px-2 py-0.5 rounded-full border ${
-                            cat.evalMode === 'N/A' 
-                              ? 'bg-gray-800/50 text-gray-500 border-gray-700' 
-                              : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                          }`}>
-                            {cat.evalMode}
-                          </span>
+                          <span className="font-mono text-sm text-primary">{cat.evalMode}</span>
                         )}
                       </td>
 
@@ -810,11 +790,11 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                       <span className="text-[10px] font-mono bg-gray-800 text-muted px-2 py-0.5 rounded-full">{catDefects.length}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs text-primary bg-gray-800/50 px-2 py-0.5 rounded border border-gray-700">AQL: {cat.aql}</span>
-                      <span className={`font-mono text-xs px-2 py-0.5 rounded-full border ${
+                      <span className="bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 font-mono text-[10px] uppercase px-2 py-0.5 rounded">AQL: {cat.aql}</span>
+                      <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider ${
                         cat.evalMode === 'N/A' 
-                          ? 'bg-gray-800/50 text-gray-500 border-gray-700' 
-                          : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                          ? 'bg-gray-500/10 border-gray-500/30 text-gray-400' 
+                          : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
                       }`}>
                         {cat.evalMode}
                       </span>
@@ -933,4 +913,10 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
     </div>
   );
 }
+
+
+
+
+
+
 

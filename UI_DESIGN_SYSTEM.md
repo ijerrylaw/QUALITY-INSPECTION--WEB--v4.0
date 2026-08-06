@@ -102,12 +102,19 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
   - Out-of-spec failing values MUST switch to `text-rose-400 bg-rose-500/5 border-rose-500/50`.
 * **Interaction**: Focus states must aggressively highlight to track rapid cursor movement (e.g., `focus:ring-1 focus:ring-brand-secondary focus:border-brand-secondary`).
 
-### 3.5 Inline Add Actions (Dashed Buttons)
+### 3.5 Primary Add Actions (Header Buttons)
+* **Purpose**: Used for creating top-level entities (e.g., `+ ADD PRODUCT CODE`, `+ ADD PROFILE`, `+ ADD CATEGORY`) that sit outside of inline forms, typically in card headers or action bars.
+* **Naming Standard**: MUST strictly use the verb `ADD [ENTITY]` to establish a universal semantic standard. Do not mix with `NEW`, `CREATE`, or `INSERT`.
+* **Aesthetic (Ghost Outline)**: MUST use Emerald Green text on a dark background, which lights up Emerald on hover. This perfectly signals "Creation/Addition", without clashing with Cyan (Reserved for Identities) or Red (Reserved for Deletion), and prevents these actions from overwhelmingly competing with massive Terminal Actions like "SAVE CONFIGURATION".
+* **Tailwind Matrix**: `bg-canvas border border-emerald-500/50 text-emerald-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500 font-bold text-xs uppercase tracking-wider transition-all`
+* **Geometry**: Usually `h-9 px-4 rounded-md` (or scaled to `h-12` if aligned with massive input blocks).
+
+### 3.6 Inline Add Actions (Dashed Buttons)
 * Standardize all inline add actions to universally say `+ ADD`.
 * Base state: `border border-dashed border-gray-700 bg-transparent text-muted text-[11px] font-semibold uppercase tracking-wider`
 * Hover state: `hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 transition-all`
 
-### 3.6 Parameter Format Selectors (Setup Grids)
+### 3.7 Parameter Format Selectors (Setup Grids)
 * **Location**: Vertically embedded inside the UOM table cell (`align-top` layout) directly beneath the unit label (e.g., `gram`, `mm`).
 * **Geometry & Styling**: Compact `<select>` control (`text-[10px] font-mono font-bold text-center border-gray-700 text-brand-secondary bg-canvas`).
 * **Options**: `0`, `0.0`, `0.00`, `0.000` representing integer through 3 decimal places.
@@ -144,8 +151,9 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
 ### 4.5 The Wizard-Facing Identity Protocol
 * **Purpose**: To provide System Administrators with an immediate visual bridge between Configuration Control and the factory floor. Any data entity that acts as a primary, selectable identity in the Quality Entry Wizard (e.g., Line IDs, Shift Names, Defect Categories, SKUs) MUST be visually highlighted in the Configuration screens so admins know exactly what the operator will see.
 * **Selectable Wizard Identities (Configuration Only)**: In the **Configuration Control** module, these identities MUST use `font-mono text-brand-secondary font-bold` (Cyan + Bold). 
-* **Selectable Wizard Identities (Entry Wizard)**: Inside the actual **Quality Entry Wizard** (factory floor execution screens), these identities MUST remain standard White text (`text-primary font-mono font-bold`). Do not carry the Cyan highlight into the wizard itself, as it causes colorful distractions for operators.
+* **Selectable Wizard Identities (Entry Wizard)**: Inside the actual **Quality Entry Wizard** (factory floor execution screens), these identities MUST remain standard White text (`text-primary font-mono font-bold`). Do not carry the Cyan highlight into the wizard itself for selectable configuration items, as it causes colorful distractions for operators.
 * **Secondary Context & Descriptive Names**: Standard readable names paired with identities MUST use `font-mono text-primary font-normal` (White + Normal) to provide context without competing for attention.
+* **Wizard Pop-up Modal Headers (Exemption)**: To maintain a clean layout in dense pop-ups, DO NOT use chips or badges for product codes and lot numbers in the modal header. They must use plain text matching the header's font size (e.g., `text-sm`). Secondary context (Product Code) uses White + Normal. Auto-generated identifiers (Full System Lot Number) use Cyan + Bold (`text-brand-secondary font-bold`) to create hierarchy without the bulk of a badge.
 * **Exemption for Data Matrices**: Numeric targets, tolerances, and data matrices (e.g., Spec limits in ProductEngine) MUST remain plain `font-mono text-primary` (White + Normal). Do NOT apply Cyan to dense numeric grids, as this will overwhelm the matrix and destroy readability. Color is reserved strictly for primary identities.
 
 ### 4.6 Metric Readouts / Aggregates
@@ -155,23 +163,51 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
 * **Value Typography**: `font-mono text-sm text-primary` (colors may shift to Danger/Warning if spec is violated).
 
 ### 4.7 Critical Output Displays (Digital Readouts)
-* **Purpose**: Used for high-visibility generated identifiers (e.g., "FULL SYSTEM LOT NUMBER", "4-DIGIT LOT NO").
+* **Purpose**: Used for high-visibility generated identifiers (e.g., "FULL SYSTEM LOT NUMBER", "4-DIGIT LOT NO") in standalone data blocks, such as the Shared Batch Metadata container. 
 * **Typography**: MUST use `JetBrains Mono` (`font-mono`) per the Strict Font Protocol, but sized up (`text-xl` or `text-2xl` tracking-widest) for maximum legibility.
-* **Geometry & Styling**: Must look distinctly separate from form inputs. Use a "terminal readout" style: `bg-gray-900 border border-brand-secondary/50 text-white shadow-inner`.
+* **Geometry & Styling**: Must look distinctly separate from form inputs. Use a "terminal readout" style: `bg-gray-900 border border-brand-secondary/50 text-white shadow-inner`. *(Note: Do NOT use this bulky style inside inline pop-up modal headers; use the plain-text exemption defined in Section 4.5).*
 
-### 4.8 Badges, Chips & Dynamic Trackers
-* **State Badges** (e.g., Warning, Setup Required): `bg-{color}-500/10 border border-{color}-500/30 text-{color}-400 text-[10px] font-bold uppercase tracking-wider`
-* **Value Chips** (e.g., Timestamps, Shift times, Dimension MIN/MAX badges): `bg-gray-800/50 border border-gray-700/50 text-muted font-mono text-[10px] uppercase`
-* **Dimension Card Header Badges**:
-  - Inline Spec: Rendered immediately after the card title in `text-muted font-mono text-xs font-normal`.
-  - Top-Right Metric Chips: `MIN` and `MAX` chips sit top right. `MIN` turns red (`bg-rose-500/10 border-rose-500/30 text-rose-400`) if below threshold. `MAX` turns red if above max threshold.
-  - Conditional Suppression: When `isMin === true` (minimum-only boundary), the `MAX` chip MUST be hidden entirely.
-* **Dynamic Composite Badges (e.g., Compliance Tracker)**
-  - **Purpose**: Large, multi-line status trackers that change semantic color state entirely based on underlying data.
-  - **Layout**: Icon on the left, stacked text on the right.
-  - **Typography**: Title is `text-[10px] uppercase font-bold text-current`, Main Value is `text-sm font-mono font-bold text-current`, optional Subtext is `text-[10px] uppercase font-bold text-current`.
+### 4.8 Badges, Chips, and Pills (Global Standard)
+To maintain absolute consistency, all small contextual overlays (badges, chips, pills) MUST adhere to the following semantic matrix. **Never invent new badge styles.**
 
-### 4.9 Drag-and-Drop Items (e.g., Kanban Cards)
+#### A. Value Chips (Data & Thresholds)
+* **Purpose**: Displaying read-only data points, thresholds, boundaries, or metadata parameters.
+* **Geometry**: Slightly squared edges (`rounded` or `rounded-md`). Padding `px-2 py-0.5`.
+* **Typography**: MUST use `font-mono text-[10px] uppercase` (Strict Data Protocol).
+* **Standard Styling**: `bg-gray-800/50 border border-gray-700/50 text-muted`.
+* **Use Cases**: Shift Times, Timestamps, Spec Target labels.
+* **Color Overrides**: 
+  - **AQL Level**: Treated as a *System Parameter Value Chip*. It uses standard Value Chip geometry and typography but is strictly colored **Indigo** (`bg-indigo-500/10 border-indigo-500/30 text-indigo-400`) to highlight it as a global configuration standard.
+  - **MIN/MAX Thresholds**: Standard styling unless the underlying value violates the threshold, in which case they transition to Danger styling (`bg-rose-500/10 border-rose-500/30 text-rose-400`).
+
+#### B. State Badges (Status & Verdicts)
+* **Purpose**: Communicating system states, outcomes, evaluation rules, or alerts.
+* **Geometry**: Fully pill-shaped (`rounded-full`). Padding `px-2 py-0.5`.
+* **Typography**: MUST use UI Chrome fonts: `font-bold uppercase tracking-wider text-[10px]` (Inter).
+* **Styling Matrix**: `bg-{color}-500/10 border border-{color}-500/30 text-{color}-400`.
+* **Use Cases & Semantic Colors**:
+  - **Evaluation Mode (Active)**: e.g., CUMULATIVE, GRANULAR. Uses **Emerald** (`emerald-500`) to denote active evaluation.
+  - **Evaluation Mode (Inactive)**: e.g., N/A. Uses **Gray** (`gray-500`).
+  - **Warnings / Setup Required**: Uses **Amber** (`amber-500`).
+  - **Failures / Rejections**: Uses **Rose** (`rose-500`).
+
+#### C. Dynamic Composite Badges (e.g., Compliance Tracker)
+* **Purpose**: Large, multi-line status trackers that change semantic color state entirely based on underlying data.
+* **Layout**: Icon on the left, stacked text on the right.
+* **Typography**: Title is `text-[10px] uppercase font-bold text-current`, Main Value is `text-sm font-mono font-bold text-current`, optional Subtext is `text-[10px] uppercase font-bold text-current`.
+
+### 4.9 Action Required / Warning State
+* **Purpose**: To provide a unified semantic track that guides the user's eye to tasks that are incomplete, misconfigured, or require immediate attention, without utilizing the "Fatal Error" semantics of Red/Rose.
+* **Semantic Color**: MUST exclusively use **Amber** (`amber-500` / `amber-400`).
+* **Implementation Examples**:
+  - Empty or incomplete setups in Config Control (e.g., "SETUP REQUIRED" badge).
+  - Call-to-action entry buttons for empty data rows (e.g., "ENTRY" buttons in Batch Entry).
+  - Validation warnings that do not halt the system but require attention (e.g., Overlapping shift hours).
+  - Partial completion trackers (e.g., 5/13 dimensions entered).
+  - Pending supervisor approval states.
+* **Strict Restriction**: Amber MUST NEVER be used for Primary Add Actions (which use Emerald) or Primary Identities (which use Cyan). It is strictly reserved for "Action Required / Warning".
+
+### 4.10 Drag-and-Drop Items (e.g., Kanban Cards)
 * **Styling**: `bg-canvas border border-gray-700`. (Must strictly follow Section 1.4 Dynamic User Data Exemption: No semantic color borders or arbitrary icons).
 * **Interaction state**: `cursor-grab hover:bg-surface-light hover:border-gray-500`.
 * **Active drag state**: `active:cursor-grabbing`.
@@ -203,3 +239,7 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
 * **Purpose**: Contextual instructions or warnings placed directly inside form flows.
 * **Geometry**: `p-3 rounded-lg border border-l-4 flex gap-3 text-sm`.
 * **State Styling**: Semantic colors based on intent. (e.g., Info: `bg-brand-secondary/5 border-brand-secondary/20 border-l-brand-secondary text-brand-secondary`).
+
+
+
+
