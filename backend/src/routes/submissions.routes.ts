@@ -28,6 +28,82 @@ import prisma from '../lib/prismaClient';
 const router = Router();
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HARDCODED GLOBAL STANDARD DEFAULT PROFILE
+// Mirrors ConfigContext.tsx getResolvedProfile() fallback.
+// Used when no profile is resolved from AppConfig or an explicit profileId.
+//
+// evaluationMode choices (per aqlEvaluator.ts):
+//   CUMULATIVE — sum all defect counts ≤ Ac; correct for zero-tolerance too
+//   GRANULAR   — each defect type individually ≤ Ac
+//   N/A        — qualitative state encoding (0=unset, 1=pass, 2=fail)
+//   ''         — informational-only row; engine skips it
+// ─────────────────────────────────────────────────────────────────────────────
+
+const HARDCODED_DEFAULT_PROFILE = {
+  id:   'prof_default',
+  name: 'GLOBAL STANDARD (DEFAULT)',
+  aqlCategories: [
+    // AND = zero tolerance: CUMULATIVE mode with {ac:0,re:1} threshold
+    { id: 'BARRIER',   name: 'BARRIER',   aqlLevel: 'AND',           evaluationMode: 'CUMULATIVE' },
+    { id: 'CRITICAL',  name: 'CRITICAL',  aqlLevel: '1.5',           evaluationMode: 'CUMULATIVE' },
+    { id: 'MAJOR',     name: 'MAJOR',     aqlLevel: '2.5',           evaluationMode: 'CUMULATIVE' },
+    { id: 'MINOR',     name: 'MINOR',     aqlLevel: '4.0',           evaluationMode: 'GRANULAR'   },
+    // PACKAGING is qualitative; '' causes engine to skip it (informational only)
+    { id: 'PACKAGING', name: 'PACKAGING', aqlLevel: 'PASS/FAIL/NIL', evaluationMode: ''           },
+  ],
+  defectDefinitions: [
+    // Engine matches defect defs to categories via currentClass === category.name || category.id
+    { id: 'def_hole',     name: 'Hole',       currentClass: 'BARRIER',   defaultClass: 'BARRIER'   },
+    { id: 'def_tear',     name: 'Tear',       currentClass: 'BARRIER',   defaultClass: 'BARRIER'   },
+    { id: 'def_stain',    name: 'Stain',      currentClass: 'CRITICAL',  defaultClass: 'CRITICAL'  },
+    { id: 'def_particle', name: 'Particle',   currentClass: 'CRITICAL',  defaultClass: 'CRITICAL'  },
+    { id: 'def_dirt',     name: 'Dirt',       currentClass: 'MAJOR',     defaultClass: 'MAJOR'     },
+    { id: 'def_flow',     name: 'Flow Mark',  currentClass: 'MINOR',     defaultClass: 'MINOR'     },
+    { id: 'def_box',      name: 'Box Damage', currentClass: 'PACKAGING', defaultClass: 'PACKAGING' },
+  ],
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENGINE-NORMALIZATION HELPERS
+// AppConfig-stored profiles use { categoryId } on defect definitions,
+// but the evaluateAQLVerdict engine expects { currentClass }.
+// These helpers produce plain objects the engine can consume without type errors.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function normalizeForEngine(profile: {
+  aqlCategories?: any[];
+  defectDefinitions?: any[];
+}): { categories: any[]; defectDefinitions: any[] } {
+  const categories = (profile.aqlCategories ?? []).map((c: any) => ({
+    id:             String(c.id            ?? ''),
+    name:           String(c.name          ?? ''),
+    aqlLevel:       String(c.aqlLevel      ?? ''),
+    evaluationMode: String(c.evaluationMode ?? ''),
+  }));
+
+  const defectDefinitions = (profile.defectDefinitions ?? []).map((d: any) => ({
+    id:           String(d.id   ?? ''),
+    name:         String(d.name ?? ''),
+    // Map either Prisma field or AppConfig JSON field to the engine's expected name
+    currentClass: String(d.currentClass ?? d.categoryId ?? ''),
+    defaultClass: String(d.defaultClass ?? d.categoryId ?? ''),
+  }));
+
+  return { categories, defectDefinitions };
+}
+
+/**
+ * A profile is usable for AQL evaluation only if at least one category
+ * has both aqlLevel and evaluationMode configured.
+ */
+function hasUsableRules(profile: any): boolean {
+  return (profile?.aqlCategories ?? []).some(
+    (c: any) => c.aqlLevel && String(c.aqlLevel).trim() !== ''
+                && c.evaluationMode && String(c.evaluationMode).trim() !== '',
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -132,53 +208,46 @@ router.post('/', async (req: Request, res: Response) => {
 
     const defectCounts = body['defects'] as Record<string, number>;
 
-    // ── 2. Resolve InspectionProfile ──────────────────────────────────────────
-    // Priority: explicit profileId > productProfileMap in AppConfig > no profile
-    let profileId = body['profileId'] as string | undefined | null;
+    // ── 2. Fetch AppConfig once — used for both profileMap and profile list ────
+    const appConfig = await prisma.appConfig.findUnique({ where: { id: '1' } });
+    const profilesList: any[] = appConfig?.inspectionProfiles
+      ? safeParseJSON<any[]>(appConfig.inspectionProfiles, [])
+      : [];
 
-    if (!profileId) {
-      // Attempt auto-resolution via AppConfig.productProfileMap
-      const appConfig = await prisma.appConfig.findUnique({ where: { id: '1' } });
-      if (appConfig?.productProfileMap) {
-        const productCode = String(body['productCode']);
-        const profileMap = safeParseJSON<Record<string, string>>(appConfig.productProfileMap, {});
-        profileId = profileMap[productCode] ?? null;
-      }
+    // ── 3. Resolve profileId ──────────────────────────────────────────────────
+    // Priority: explicit profileId in body > productProfileMap in AppConfig > null
+    let profileId = (body['profileId'] as string | undefined | null) || null;
+
+    if (!profileId && appConfig?.productProfileMap) {
+      const productCode = String(body['productCode']);
+      const profileMap  = safeParseJSON<Record<string, string>>(appConfig.productProfileMap, {});
+      profileId         = profileMap[productCode] ?? null;
     }
 
-    // ── 3. Fetch InspectionProfile and native Prisma types ─────────────────────
-    let categories: Awaited<ReturnType<typeof prisma.aQLCategory.findMany>> = [];
-    let defectDefinitions: Awaited<ReturnType<typeof prisma.defectDefinition.findMany>> = [];
+    // ── 4. Resolve profile categories and defect definitions for the engine ────
+    //
+    // Resolution order:
+    //   a) Explicit profileId → find in AppConfig.inspectionProfiles → normalize
+    //   b) Explicit profileId === 'prof_default' AND not found above → hardcoded default
+    //   c) Unknown profileId (not in list and not 'prof_default') → 404
+    //   d) No profileId at all → first AppConfig profile with usable rules (normalized)
+    //                            OR hardcoded default as final fallback
+    //
+    // Normalization ensures AppConfig JSON { categoryId } maps to engine's { currentClass }.
+    // The engine always runs with real AQL rules — verdict is never trivially PASSED.
+    // `validDbProfileId` is set separately and stays null for AppConfig-only profiles.
+
+    let categories: any[]        = [];
+    let defectDefinitions: any[] = [];
+    let evaluationProfileId: string | null = null;
 
     if (profileId) {
-      const appConfig = await prisma.appConfig.findUnique({ where: { id: '1' } });
-      const profilesList = appConfig?.inspectionProfiles 
-        ? safeParseJSON<any[]>(appConfig.inspectionProfiles, []) 
-        : [];
-        
-      let profile = profilesList.find(p => p.id === profileId);
+      // Look up in AppConfig profiles
+      let profile = profilesList.find((p: any) => p.id === profileId);
 
+      // Sentinel for the UI-configured global standard default
       if (!profile && profileId === 'prof_default') {
-        // Fallback for unsaved mock profile from UI
-        profile = {
-          id: 'prof_default',
-          aqlCategories: [
-            { id: 'BARRIER',   name: 'BARRIER',   aqlLevel: 'AND',           evaluationMode: 'N/A' },
-            { id: 'CRITICAL',  name: 'CRITICAL',  aqlLevel: '1.5',           evaluationMode: 'CUMULATIVE' },
-            { id: 'MAJOR',     name: 'MAJOR',     aqlLevel: '2.5',           evaluationMode: 'CUMULATIVE' },
-            { id: 'MINOR',     name: 'MINOR',     aqlLevel: '4.0',           evaluationMode: 'GRANULAR' },
-            { id: 'PACKAGING', name: 'PACKAGING', aqlLevel: 'PASS/FAIL/NIL', evaluationMode: 'N/A' },
-          ],
-          defectDefinitions: [
-            { id: 'def_hole', name: 'Hole', categoryId: 'BARRIER' },
-            { id: 'def_tear', name: 'Tear', categoryId: 'BARRIER' },
-            { id: 'def_stain', name: 'Stain', categoryId: 'CRITICAL' },
-            { id: 'def_particle', name: 'Particle', categoryId: 'CRITICAL' },
-            { id: 'def_dirt', name: 'Dirt', categoryId: 'MAJOR' },
-            { id: 'def_flow', name: 'Flow Mark', categoryId: 'MINOR' },
-            { id: 'def_box', name: 'Box Damage', categoryId: 'PACKAGING' },
-          ]
-        };
+        profile = HARDCODED_DEFAULT_PROFILE;
       }
 
       if (!profile) {
@@ -186,11 +255,30 @@ router.post('/', async (req: Request, res: Response) => {
         return;
       }
 
-      categories = profile.aqlCategories || [];
-      defectDefinitions = profile.defectDefinitions || [];
+      const normalized  = normalizeForEngine(profile);
+      categories        = normalized.categories;
+      defectDefinitions = normalized.defectDefinitions;
+      evaluationProfileId = String(profile.id);
     }
 
-    // ── 4. Run native AQL verdict engine ──────────────────────────────────────
+    // Safety net: no profileId was resolved, or the resolved profile has no usable rules.
+    // Use the first AppConfig profile that has valid rules, or the hardcoded default.
+    if (categories.length === 0 || !categories.some((c) => c.aqlLevel && c.evaluationMode)) {
+      const usableAppConfigProfile = profilesList.find(hasUsableRules) ?? null;
+      if (usableAppConfigProfile) {
+        const normalized  = normalizeForEngine(usableAppConfigProfile);
+        categories        = normalized.categories;
+        defectDefinitions = normalized.defectDefinitions;
+        evaluationProfileId = String(usableAppConfigProfile.id);
+      } else {
+        const normalized  = normalizeForEngine(HARDCODED_DEFAULT_PROFILE);
+        categories        = normalized.categories;
+        defectDefinitions = normalized.defectDefinitions;
+        evaluationProfileId = 'prof_default';
+      }
+    }
+
+    // ── 5. Run native AQL verdict engine ──────────────────────────────────────
     const { verdict, categoryResults } = evaluateAQLVerdict({
       sampleSize,
       categories,
@@ -198,14 +286,22 @@ router.post('/', async (req: Request, res: Response) => {
       defectCounts,
     });
 
-    // Verify if profile exists in native DB to avoid Prisma foreign key constraint errors
-    let validDbProfileId = null;
+    console.log(
+      `[POST /api/submissions] profile=${evaluationProfileId ?? 'none'} ` +
+      `sampleSize=${sampleSize} verdict=${verdict} ` +
+      `cats=${categories.length} ` +
+      `defects=${JSON.stringify(defectCounts)}`,
+    );
+
+    // ── 6. Resolve validDbProfileId — only set if profile exists in the DB table ─
+    // Prevents Prisma FK constraint errors from AppConfig-only profiles.
+    let validDbProfileId: string | null = null;
     if (profileId) {
       const existsInDb = await prisma.inspectionProfile.findUnique({ where: { id: profileId } });
       if (existsInDb) validDbProfileId = profileId;
     }
 
-    // ── 5. Insert into Database ───────────────────────────────────────────────
+    // ── 7. Insert into Database ───────────────────────────────────────────────
     const newSubmission = await prisma.submission.create({
       data: {
         productCode:         String(body['productCode']),
