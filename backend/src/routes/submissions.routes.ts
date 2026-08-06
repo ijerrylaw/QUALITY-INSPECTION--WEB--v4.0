@@ -363,3 +363,156 @@ router.post('/:id/amendments', async (req: Request, res: Response) => {
 });
 
 export default router;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AMENDMENTS ROUTER  (API_AND_INTEGRATION_SPEC.md §1 — Amendments & Approvals)
+// Mounted at /api/amendments in server.ts
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const amendmentsRouter = Router();
+
+// ── GET /api/amendments/pending ────────────────────────────────────────────
+// Returns all submissions where amendmentStatus === 'PENDING_APPROVAL',
+// including the most recent AmendmentLog for each (for the diff viewer).
+amendmentsRouter.get('/pending', async (_req: Request, res: Response) => {
+  try {
+    const pending = await prisma.submission.findMany({
+      where: { amendmentStatus: 'PENDING_APPROVAL' },
+      include: {
+        amendmentLogs: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    res.json({ amendments: pending });
+  } catch (err) {
+    console.error('[GET /api/amendments/pending]', err);
+    res.status(500).json({ error: 'Internal server error', details: String(err) });
+  }
+});
+
+// ── POST /api/amendments/:id/approve ──────────────────────────────────────
+// Commits the proposed newValues to the Submission record.
+// Sets amendmentStatus → 'APPROVED' on both the Submission and AmendmentLog.
+// The reviewer is mocked until Azure AD integration is complete.
+amendmentsRouter.post('/:id/approve', async (req: Request, res: Response) => {
+  try {
+    const submissionId = String(req.params['id']);
+
+    // 1. Find the latest pending AmendmentLog for this submission
+    const amendmentLog = await prisma.amendmentLog.findFirst({
+      where: { submissionId, status: 'PENDING_APPROVAL' },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!amendmentLog) {
+      res.status(404).json({ error: `No pending amendment found for submission '${submissionId}'.` });
+      return;
+    }
+
+    // 2. Parse the proposed newValues
+    let newValues: Record<string, unknown>;
+    try {
+      newValues = JSON.parse(amendmentLog.newValues) as Record<string, unknown>;
+    } catch {
+      res.status(400).json({ error: 'AmendmentLog newValues is not valid JSON.' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+
+    // 3. Transaction: apply newValues to the Submission + mark both as APPROVED
+    const [updatedSubmission, updatedLog] = await prisma.$transaction([
+      prisma.submission.update({
+        where: { id: submissionId },
+        data: {
+          amendmentStatus: 'APPROVED',
+          // Apply all proposed field changes from newValues
+          ...(newValues['productCode']         != null && { productCode:         String(newValues['productCode']) }),
+          ...(newValues['productionDate']       != null && { productionDate:      String(newValues['productionDate']) }),
+          ...(newValues['samplingTime']         != null && { samplingTime:        String(newValues['samplingTime']) }),
+          ...(newValues['machineId']            != null && { machineId:           String(newValues['machineId']) }),
+          ...(newValues['shift']                != null && { shift:               String(newValues['shift']) }),
+          ...(newValues['batchNumber']          != null && { batchNumber:         String(newValues['batchNumber']) }),
+          ...(newValues['size']                 != null && { size:                String(newValues['size']) }),
+          ...(newValues['sampleSize']           != null && { sampleSize:          Number(newValues['sampleSize']) }),
+          ...(newValues['dimensions']           != null && { dimensions:          typeof newValues['dimensions'] === 'string' ? newValues['dimensions'] : JSON.stringify(newValues['dimensions']) }),
+          ...(newValues['dimensionMins']        != null && { dimensionMins:       typeof newValues['dimensionMins'] === 'string' ? newValues['dimensionMins'] : JSON.stringify(newValues['dimensionMins']) }),
+          ...(newValues['defects']              != null && { defects:             typeof newValues['defects'] === 'string' ? newValues['defects'] : JSON.stringify(newValues['defects']) }),
+          ...(newValues['verdict']              != null && { verdict:             String(newValues['verdict']) }),
+          ...(newValues['totalCarton']          != null && { totalCarton:         Number(newValues['totalCarton']) }),
+          ...(newValues['gloveWeight']          != null && { gloveWeight:         parseFloat(String(newValues['gloveWeight'])) }),
+          ...(newValues['profileId']            != null && { profileId:           String(newValues['profileId']) }),
+        },
+      }),
+      prisma.amendmentLog.update({
+        where: { id: amendmentLog.id },
+        data: {
+          status:     'APPROVED',
+          reviewedBy: 'executive@oneglove.com', // Mock until Azure AD integration
+          reviewedAt: now,
+        },
+      }),
+    ]);
+
+    res.json({
+      message: 'Amendment approved and merged successfully.',
+      submission: updatedSubmission,
+      amendmentLog: updatedLog,
+    });
+  } catch (err) {
+    console.error('[POST /api/amendments/:id/approve]', err);
+    res.status(500).json({ error: 'Internal server error', details: String(err) });
+  }
+});
+
+// ── POST /api/amendments/:id/reject ───────────────────────────────────────
+// Discards the draft amendment. Sets amendmentStatus → 'REJECTED'.
+amendmentsRouter.post('/:id/reject', async (req: Request, res: Response) => {
+  try {
+    const submissionId = String(req.params['id']);
+    const body = req.body as { reason?: string };
+
+    // 1. Find the latest pending AmendmentLog
+    const amendmentLog = await prisma.amendmentLog.findFirst({
+      where: { submissionId, status: 'PENDING_APPROVAL' },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!amendmentLog) {
+      res.status(404).json({ error: `No pending amendment found for submission '${submissionId}'.` });
+      return;
+    }
+
+    const now = new Date().toISOString();
+
+    // 2. Transaction: reject both the log and the submission status
+    const [updatedSubmission, updatedLog] = await prisma.$transaction([
+      prisma.submission.update({
+        where: { id: submissionId },
+        data: { amendmentStatus: 'REJECTED' },
+      }),
+      prisma.amendmentLog.update({
+        where: { id: amendmentLog.id },
+        data: {
+          status:        'REJECTED',
+          reviewedBy:    'executive@oneglove.com', // Mock until Azure AD integration
+          reviewedAt:    now,
+          supervisorNote: body.reason?.trim() ?? amendmentLog.supervisorNote,
+        },
+      }),
+    ]);
+
+    res.json({
+      message: 'Amendment rejected.',
+      submission: updatedSubmission,
+      amendmentLog: updatedLog,
+    });
+  } catch (err) {
+    console.error('[POST /api/amendments/:id/reject]', err);
+    res.status(500).json({ error: 'Internal server error', details: String(err) });
+  }
+});

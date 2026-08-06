@@ -186,24 +186,41 @@ function DefectBreakdownPanel({
 }) {
   const { getResolvedProfile } = useConfig();
   const parsedDefects = parseDefects(sub.defects);
-  const defectEntries = Object.entries(parsedDefects).filter(([, count]) => count > 0);
+  // Filter out corrupt entries: numeric-only keys are character-position
+  // artifacts from double-serialized JSON in pre-v4.1 submissions.
+  // Real defect IDs always contain non-digit characters (e.g. "def_hole").
+  const defectEntries = Object.entries(parsedDefects).filter(
+    ([id, count]) => count > 0 && !/^\d+$/.test(id)
+  );
 
-  // Resolve InspectionProfile for name/category lookup
+  // Resolve InspectionProfile for name/category lookup.
+  // If profileId is null, pass undefined so getResolvedProfile falls back
+  // to the default profile (isDefault:true or profiles[0]).
   const profile = useMemo(() => {
-    if (!sub.profileId) return null;
-    return getResolvedProfile(sub.profileId);
+    return getResolvedProfile(sub.profileId ?? undefined);
   }, [sub.profileId, getResolvedProfile]);
 
   // Build a lookup: defectId → { name, categoryName }
+  // The InspectionProfile stores defects in a FLAT `defectDefinitions` array,
+  // each with a `categoryId` that links to an AQLCategory. We resolve the
+  // category name by cross-referencing aqlCategories.
   type DefectMeta = { name: string; categoryName: string };
   const defectLookup = useMemo((): Record<string, DefectMeta> => {
     const lookup: Record<string, DefectMeta> = {};
     if (!profile) return lookup;
-    for (const category of (profile as any).aqlCategories ?? []) {
-      for (const defect of category.defects ?? []) {
-        lookup[defect.id] = { name: defect.name, categoryName: category.name };
-      }
+
+    // Build a map: categoryId → categoryName for fast lookups
+    const categoryNameById: Record<string, string> = {};
+    for (const cat of (profile as any).aqlCategories ?? []) {
+      categoryNameById[cat.id] = cat.name;
     }
+
+    // Iterate the flat defectDefinitions array
+    for (const defect of (profile as any).defectDefinitions ?? []) {
+      const categoryName = categoryNameById[defect.categoryId] ?? 'OTHER';
+      lookup[defect.id] = { name: defect.name, categoryName };
+    }
+
     return lookup;
   }, [profile]);
 

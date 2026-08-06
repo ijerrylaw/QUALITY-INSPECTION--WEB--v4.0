@@ -19,7 +19,7 @@ import express from 'express';
 import cors from 'cors';
 import prisma from './src/lib/prismaClient';
 import configRouter from './src/routes/config.routes';
-import submissionsRouter from './src/routes/submissions.routes';
+import submissionsRouter, { amendmentsRouter } from './src/routes/submissions.routes';
 
 const app = express();
 const PORT = process.env['PORT'] ? Number(process.env['PORT']) : 4009;
@@ -53,6 +53,7 @@ app.get('/api/health', async (_req, res) => {
 // ── Native Feature Routes ─────────────────────────────────────────────────────
 app.use('/api/config', configRouter);
 app.use('/api/submissions', submissionsRouter);
+app.use('/api/amendments', amendmentsRouter);
 
 // ── 404 Fallback ──────────────────────────────────────────────────────────────
 app.use((_req, res) => {
@@ -67,4 +68,7 @@ app.listen(PORT, () => {
   console.log(`  Config:      PATCH http://localhost:${PORT}/api/config`);
   console.log(`  Submissions: POST  http://localhost:${PORT}/api/submissions`);
   console.log(`  Submissions: GET   http://localhost:${PORT}/api/submissions`);
+  console.log(`  Amendments:  GET   http://localhost:${PORT}/api/amendments/pending`);
+  console.log(`  Amendments:  POST  http://localhost:${PORT}/api/amendments/:id/approve`);
+  console.log(`  Amendments:  POST  http://localhost:${PORT}/api/amendments/:id/reject`);
 });
