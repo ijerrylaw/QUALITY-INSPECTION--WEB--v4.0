@@ -7,9 +7,8 @@
  *  POST /api/submissions
  *    Full inspection submission flow:
  *      1. Validate incoming payload against Submission schema fields.
- *      2. Resolve InspectionProfile (from explicit profileId, or via AppConfig.productProfileMap).
- *      3. Invoke the native evaluateAQLVerdict engine (aqlEvaluator.ts) with raw Prisma types.
- *      4. Persist the final Submission record (including verdict) to SQLite via Prisma.
+ *      2. Resolve InspectionProfile + evaluate verdict via resolveVerdict() (engine/resolveVerdict.ts).
+ *      3. Persist the final Submission record (including verdict) to SQLite via Prisma.
  *
  *  GET  /api/submissions
  *    Returns the 50 most recent submissions, ordered by creation date descending.
@@ -17,91 +16,23 @@
  *  GET  /api/submissions/:id
  *    Returns a single submission with its amendment logs and linked profile details.
  *
+ *  POST /api/submissions/:id/amendments
+ *    Drafts an amendment (PENDING_APPROVAL) and previews — informationally, non-blocking —
+ *    what the server would recompute the verdict as.
+ *
+ * Also exports:
+ *  - amendmentsRouter (mounted at /api/amendments) — pending queue, approve, reject.
+ *  - verdictRouter     (mounted at /api/verdict)    — read-only verdict preview, no persistence.
+ *
  * Level 1 System Precedence: AI_RULES.md & UI_DESIGN_SYSTEM.md
  * Level 2 Feature Spec: v4_optimized_blueprint.md & implementation_plan.md
  */
 
 import { Router, Request, Response } from 'express';
-import { evaluateAQLVerdict } from '../engine/aqlEvaluator';
+import { resolveVerdict, VerdictProfileNotFoundError } from '../engine/resolveVerdict';
 import prisma from '../lib/prismaClient';
 
 const router = Router();
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HARDCODED GLOBAL STANDARD DEFAULT PROFILE
-// Mirrors ConfigContext.tsx getResolvedProfile() fallback.
-// Used when no profile is resolved from AppConfig or an explicit profileId.
-//
-// evaluationMode choices (per aqlEvaluator.ts):
-//   CUMULATIVE — sum all defect counts ≤ Ac; correct for zero-tolerance too
-//   GRANULAR   — each defect type individually ≤ Ac
-//   N/A        — qualitative state encoding (0=unset, 1=pass, 2=fail)
-//   ''         — informational-only row; engine skips it
-// ─────────────────────────────────────────────────────────────────────────────
-
-const HARDCODED_DEFAULT_PROFILE = {
-  id:   'prof_default',
-  name: 'GLOBAL STANDARD (DEFAULT)',
-  aqlCategories: [
-    // AND = zero tolerance: CUMULATIVE mode with {ac:0,re:1} threshold
-    { id: 'BARRIER',   name: 'BARRIER',   aqlLevel: 'AND',           evaluationMode: 'CUMULATIVE' },
-    { id: 'CRITICAL',  name: 'CRITICAL',  aqlLevel: '1.5',           evaluationMode: 'CUMULATIVE' },
-    { id: 'MAJOR',     name: 'MAJOR',     aqlLevel: '2.5',           evaluationMode: 'CUMULATIVE' },
-    { id: 'MINOR',     name: 'MINOR',     aqlLevel: '4.0',           evaluationMode: 'GRANULAR'   },
-    // PACKAGING is qualitative; '' causes engine to skip it (informational only)
-    { id: 'PACKAGING', name: 'PACKAGING', aqlLevel: 'PASS/FAIL/NIL', evaluationMode: ''           },
-  ],
-  defectDefinitions: [
-    // Engine matches defect defs to categories via currentClass === category.name || category.id
-    { id: 'def_hole',     name: 'Hole',       currentClass: 'BARRIER',   defaultClass: 'BARRIER'   },
-    { id: 'def_tear',     name: 'Tear',       currentClass: 'BARRIER',   defaultClass: 'BARRIER'   },
-    { id: 'def_stain',    name: 'Stain',      currentClass: 'CRITICAL',  defaultClass: 'CRITICAL'  },
-    { id: 'def_particle', name: 'Particle',   currentClass: 'CRITICAL',  defaultClass: 'CRITICAL'  },
-    { id: 'def_dirt',     name: 'Dirt',       currentClass: 'MAJOR',     defaultClass: 'MAJOR'     },
-    { id: 'def_flow',     name: 'Flow Mark',  currentClass: 'MINOR',     defaultClass: 'MINOR'     },
-    { id: 'def_box',      name: 'Box Damage', currentClass: 'PACKAGING', defaultClass: 'PACKAGING' },
-  ],
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ENGINE-NORMALIZATION HELPERS
-// AppConfig-stored profiles use { categoryId } on defect definitions,
-// but the evaluateAQLVerdict engine expects { currentClass }.
-// These helpers produce plain objects the engine can consume without type errors.
-// ─────────────────────────────────────────────────────────────────────────────
-
-function normalizeForEngine(profile: {
-  aqlCategories?: any[];
-  defectDefinitions?: any[];
-}): { categories: any[]; defectDefinitions: any[] } {
-  const categories = (profile.aqlCategories ?? []).map((c: any) => ({
-    id:             String(c.id            ?? ''),
-    name:           String(c.name          ?? ''),
-    aqlLevel:       String(c.aqlLevel      ?? ''),
-    evaluationMode: String(c.evaluationMode ?? ''),
-  }));
-
-  const defectDefinitions = (profile.defectDefinitions ?? []).map((d: any) => ({
-    id:           String(d.id   ?? ''),
-    name:         String(d.name ?? ''),
-    // Map either Prisma field or AppConfig JSON field to the engine's expected name
-    currentClass: String(d.currentClass ?? d.categoryId ?? ''),
-    defaultClass: String(d.defaultClass ?? d.categoryId ?? ''),
-  }));
-
-  return { categories, defectDefinitions };
-}
-
-/**
- * A profile is usable for AQL evaluation only if at least one category
- * has both aqlLevel and evaluationMode configured.
- */
-function hasUsableRules(profile: any): boolean {
-  return (profile?.aqlCategories ?? []).some(
-    (c: any) => c.aqlLevel && String(c.aqlLevel).trim() !== ''
-                && c.evaluationMode && String(c.evaluationMode).trim() !== '',
-  );
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
@@ -120,14 +51,22 @@ const REQUIRED_STRING_FIELDS = [
   'userPrincipalName',
 ] as const;
 
-/** Safely parses a JSON string; returns fallback on failure. */
-function safeParseJSON<T>(raw: string | undefined | null, fallback: T): T {
-  if (!raw) return fallback;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
+/**
+ * Normalizes a `defects` value that may arrive as a JSON string (as stored
+ * on Submission/AmendmentLog) or already as a parsed object (as sent by the
+ * frontend in a fresh payload) into a plain Record<string, number>.
+ */
+function parseDefectsField(raw: unknown): Record<string, number> {
+  if (raw == null) return {};
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw) as Record<string, number>;
+    } catch {
+      return {};
+    }
   }
+  if (typeof raw === 'object') return raw as Record<string, number>;
+  return {};
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -207,101 +146,51 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const defectCounts = body['defects'] as Record<string, number>;
+    const requestedProfileId = (body['profileId'] as string | undefined | null) || null;
 
-    // ── 2. Fetch AppConfig once — used for both profileMap and profile list ────
-    const appConfig = await prisma.appConfig.findUnique({ where: { id: '1' } });
-    const profilesList: any[] = appConfig?.inspectionProfiles
-      ? safeParseJSON<any[]>(appConfig.inspectionProfiles, [])
-      : [];
+    // ── 2. Resolve profile + evaluate verdict via the single source of truth ───
+    let verdict: 'PASSED' | 'FAILED';
+    let categoryResults;
+    let evaluationProfileId: string | null;
+    let requestedProfileIdEcho: string | null;
 
-    // ── 3. Resolve profileId ──────────────────────────────────────────────────
-    // Priority: explicit profileId in body > productProfileMap in AppConfig > null
-    let profileId = (body['profileId'] as string | undefined | null) || null;
-
-    if (!profileId && appConfig?.productProfileMap) {
-      const productCode = String(body['productCode']);
-      const profileMap  = safeParseJSON<Record<string, string>>(appConfig.productProfileMap, {});
-      profileId         = profileMap[productCode] ?? null;
-    }
-
-    // ── 4. Resolve profile categories and defect definitions for the engine ────
-    //
-    // Resolution order:
-    //   a) Explicit profileId → find in AppConfig.inspectionProfiles → normalize
-    //   b) Explicit profileId === 'prof_default' AND not found above → hardcoded default
-    //   c) Unknown profileId (not in list and not 'prof_default') → 404
-    //   d) No profileId at all → first AppConfig profile with usable rules (normalized)
-    //                            OR hardcoded default as final fallback
-    //
-    // Normalization ensures AppConfig JSON { categoryId } maps to engine's { currentClass }.
-    // The engine always runs with real AQL rules — verdict is never trivially PASSED.
-    // `validDbProfileId` is set separately and stays null for AppConfig-only profiles.
-
-    let categories: any[]        = [];
-    let defectDefinitions: any[] = [];
-    let evaluationProfileId: string | null = null;
-
-    if (profileId) {
-      // Look up in AppConfig profiles
-      let profile = profilesList.find((p: any) => p.id === profileId);
-
-      // Sentinel for the UI-configured global standard default
-      if (!profile && profileId === 'prof_default') {
-        profile = HARDCODED_DEFAULT_PROFILE;
-      }
-
-      if (!profile) {
-        res.status(404).json({ error: `InspectionProfile '${profileId}' not found.` });
+    try {
+      const result = await resolveVerdict({
+        profileId: requestedProfileId,
+        productCode: String(body['productCode']),
+        sampleSize,
+        defectCounts,
+      });
+      verdict = result.verdict;
+      categoryResults = result.categoryResults;
+      evaluationProfileId = result.evaluationProfileId;
+      requestedProfileIdEcho = result.requestedProfileId;
+    } catch (err) {
+      if (err instanceof VerdictProfileNotFoundError) {
+        res.status(404).json({ error: err.message });
         return;
       }
-
-      const normalized  = normalizeForEngine(profile);
-      categories        = normalized.categories;
-      defectDefinitions = normalized.defectDefinitions;
-      evaluationProfileId = String(profile.id);
+      throw err;
     }
-
-    // Safety net: no profileId was resolved, or the resolved profile has no usable rules.
-    // Use the first AppConfig profile that has valid rules, or the hardcoded default.
-    if (categories.length === 0 || !categories.some((c) => c.aqlLevel && c.evaluationMode)) {
-      const usableAppConfigProfile = profilesList.find(hasUsableRules) ?? null;
-      if (usableAppConfigProfile) {
-        const normalized  = normalizeForEngine(usableAppConfigProfile);
-        categories        = normalized.categories;
-        defectDefinitions = normalized.defectDefinitions;
-        evaluationProfileId = String(usableAppConfigProfile.id);
-      } else {
-        const normalized  = normalizeForEngine(HARDCODED_DEFAULT_PROFILE);
-        categories        = normalized.categories;
-        defectDefinitions = normalized.defectDefinitions;
-        evaluationProfileId = 'prof_default';
-      }
-    }
-
-    // ── 5. Run native AQL verdict engine ──────────────────────────────────────
-    const { verdict, categoryResults } = evaluateAQLVerdict({
-      sampleSize,
-      categories,
-      defectDefinitions,
-      defectCounts,
-    });
 
     console.log(
       `[POST /api/submissions] profile=${evaluationProfileId ?? 'none'} ` +
       `sampleSize=${sampleSize} verdict=${verdict} ` +
-      `cats=${categories.length} ` +
+      `cats=${categoryResults.length} ` +
       `defects=${JSON.stringify(defectCounts)}`,
     );
 
-    // ── 6. Resolve validDbProfileId — only set if profile exists in the DB table ─
+    // ── 3. Resolve validDbProfileId — only set if profile exists in the DB table ─
     // Prevents Prisma FK constraint errors from AppConfig-only profiles.
+    // Uses requestedProfileId (the id actually asked for), not evaluationProfileId
+    // (which may point at a safety-net substitute used only for grading).
     let validDbProfileId: string | null = null;
-    if (profileId) {
-      const existsInDb = await prisma.inspectionProfile.findUnique({ where: { id: profileId } });
-      if (existsInDb) validDbProfileId = profileId;
+    if (requestedProfileIdEcho) {
+      const existsInDb = await prisma.inspectionProfile.findUnique({ where: { id: requestedProfileIdEcho } });
+      if (existsInDb) validDbProfileId = requestedProfileIdEcho;
     }
 
-    // ── 7. Insert into Database ───────────────────────────────────────────────
+    // ── 4. Insert into Database ───────────────────────────────────────────────
     const newSubmission = await prisma.submission.create({
       data: {
         productCode:         String(body['productCode']),
@@ -394,6 +283,12 @@ router.get('/:id', async (req: Request, res: Response) => {
 /**
  * Creates an AmendmentLog record and sets the Submission status to PENDING_APPROVAL.
  *
+ * Also computes an informational, non-blocking preview of what the server
+ * would recompute the verdict as (via resolveVerdict()), so a supervisor
+ * reviewing the queue later isn't surprised at approval time. If the
+ * amendment's profile can't be resolved, the draft still succeeds —
+ * recomputedVerdict/recomputedCategoryResults are simply left null.
+ *
  * Request body (JSON):
  * {
  *   "reason": "Data entry error in defect count",
@@ -428,7 +323,33 @@ router.post('/:id/amendments', async (req: Request, res: Response) => {
       return;
     }
 
-    // 2. Perform transaction: update status and insert log
+    // 2. Informational recompute preview — never blocks the draft itself.
+    const newValues = body.newValues;
+    let recomputedVerdict: string | null = null;
+    let recomputedCategoryResults: string | null = null;
+
+    try {
+      const preview = await resolveVerdict({
+        profileId: (newValues['profileId'] as string | undefined) ?? originalSubmission.profileId,
+        productCode: String(newValues['productCode'] ?? originalSubmission.productCode),
+        sampleSize: Number(newValues['sampleSize'] ?? originalSubmission.sampleSize),
+        defectCounts: parseDefectsField(newValues['defects'] ?? originalSubmission.defects),
+      });
+      recomputedVerdict = preview.verdict;
+      recomputedCategoryResults = JSON.stringify(preview.categoryResults);
+    } catch (err) {
+      if (err instanceof VerdictProfileNotFoundError) {
+        console.warn(
+          `[POST /api/submissions/:id/amendments] Recompute preview unavailable for submission ` +
+          `'${submissionId}': ${err.message}`,
+        );
+        // recomputedVerdict/recomputedCategoryResults stay null — draft still proceeds.
+      } else {
+        throw err;
+      }
+    }
+
+    // 3. Perform transaction: update status and insert log
     const transaction = await prisma.$transaction([
       prisma.submission.update({
         where: { id: submissionId },
@@ -443,6 +364,8 @@ router.post('/:id/amendments', async (req: Request, res: Response) => {
           requestedAt: new Date().toISOString(),
           supervisorNote: body.reason.trim(),
           status: 'PENDING_APPROVAL',
+          recomputedVerdict,
+          recomputedCategoryResults,
         },
       }),
     ]);
@@ -451,6 +374,7 @@ router.post('/:id/amendments', async (req: Request, res: Response) => {
       message: 'Amendment submitted successfully for approval.',
       submission: transaction[0],
       amendmentLog: transaction[1],
+      recomputedVerdict,
     });
   } catch (err) {
     console.error('[POST /api/submissions/:id/amendments]', err);
@@ -491,8 +415,11 @@ amendmentsRouter.get('/pending', async (_req: Request, res: Response) => {
 });
 
 // ── POST /api/amendments/:id/approve ──────────────────────────────────────
-// Commits the proposed newValues to the Submission record.
-// Sets amendmentStatus → 'APPROVED' on both the Submission and AmendmentLog.
+// Recomputes the verdict server-side via resolveVerdict() and persists that
+// recomputed value — the client-supplied newValues.verdict is NEVER trusted
+// for persistence. Both values are stored on the AmendmentLog for audit.
+// If the amendment's profile can't be resolved, approval hard-fails: this is
+// the one place a verdict is permanently written, so we never guess here.
 // The reviewer is mocked until Azure AD integration is complete.
 amendmentsRouter.post('/:id/approve', async (req: Request, res: Response) => {
   try {
@@ -518,9 +445,41 @@ amendmentsRouter.post('/:id/approve', async (req: Request, res: Response) => {
       return;
     }
 
+    // 3. Fetch the current submission — provides fallback values for any
+    //    field the amendment doesn't touch (an amendment may only change a subset).
+    const existingSubmission = await prisma.submission.findUnique({ where: { id: submissionId } });
+    if (!existingSubmission) {
+      res.status(404).json({ error: `Submission '${submissionId}' not found.` });
+      return;
+    }
+
+    // 4. Recompute the verdict server-side — the authoritative check.
+    let recomputed;
+    try {
+      recomputed = await resolveVerdict({
+        profileId: (newValues['profileId'] as string | undefined) ?? existingSubmission.profileId,
+        productCode: String(newValues['productCode'] ?? existingSubmission.productCode),
+        sampleSize: Number(newValues['sampleSize'] ?? existingSubmission.sampleSize),
+        defectCounts: parseDefectsField(newValues['defects'] ?? existingSubmission.defects),
+      });
+    } catch (err) {
+      if (err instanceof VerdictProfileNotFoundError) {
+        res.status(422).json({
+          error: 'Cannot verify this amendment — its inspection profile could not be resolved. ' +
+                 'Nothing was changed; resolve the profile reference before approving.',
+          details: err.message,
+        });
+        return;
+      }
+      throw err;
+    }
+
+    const clientSuppliedVerdict = newValues['verdict'] != null ? String(newValues['verdict']) : null;
     const now = new Date().toISOString();
 
-    // 3. Transaction: apply newValues to the Submission + mark both as APPROVED
+    // 5. Transaction: apply newValues to the Submission + mark both as APPROVED.
+    //    verdict is ALWAYS the server-recomputed value — newValues.verdict is
+    //    never written to the Submission, only kept for audit comparison below.
     const [updatedSubmission, updatedLog] = await prisma.$transaction([
       prisma.submission.update({
         where: { id: submissionId },
@@ -538,7 +497,7 @@ amendmentsRouter.post('/:id/approve', async (req: Request, res: Response) => {
           ...(newValues['dimensions']           != null && { dimensions:          typeof newValues['dimensions'] === 'string' ? newValues['dimensions'] : JSON.stringify(newValues['dimensions']) }),
           ...(newValues['dimensionMins']        != null && { dimensionMins:       typeof newValues['dimensionMins'] === 'string' ? newValues['dimensionMins'] : JSON.stringify(newValues['dimensionMins']) }),
           ...(newValues['defects']              != null && { defects:             typeof newValues['defects'] === 'string' ? newValues['defects'] : JSON.stringify(newValues['defects']) }),
-          ...(newValues['verdict']              != null && { verdict:             String(newValues['verdict']) }),
+          verdict:                             recomputed.verdict,
           ...(newValues['totalCarton']          != null && { totalCarton:         Number(newValues['totalCarton']) }),
           ...(newValues['gloveWeight']          != null && { gloveWeight:         parseFloat(String(newValues['gloveWeight'])) }),
           ...(newValues['profileId']            != null && { profileId:           String(newValues['profileId']) }),
@@ -550,14 +509,29 @@ amendmentsRouter.post('/:id/approve', async (req: Request, res: Response) => {
           status:     'APPROVED',
           reviewedBy: 'executive@oneglove.com', // Mock until Azure AD integration
           reviewedAt: now,
+          recomputedVerdict:         recomputed.verdict,
+          recomputedCategoryResults: JSON.stringify(recomputed.categoryResults),
         },
       }),
     ]);
+
+    if (clientSuppliedVerdict != null && clientSuppliedVerdict !== recomputed.verdict) {
+      console.warn(
+        `[POST /api/amendments/:id/approve] Verdict mismatch on submission '${submissionId}': ` +
+        `client-supplied='${clientSuppliedVerdict}' server-recomputed='${recomputed.verdict}'. ` +
+        `Persisted the server-recomputed value; both are stored on AmendmentLog '${amendmentLog.id}' for audit.`,
+      );
+    }
 
     res.json({
       message: 'Amendment approved and merged successfully.',
       submission: updatedSubmission,
       amendmentLog: updatedLog,
+      verdictRecompute: {
+        clientSupplied: clientSuppliedVerdict,
+        serverRecomputed: recomputed.verdict,
+        mismatch: clientSuppliedVerdict != null && clientSuppliedVerdict !== recomputed.verdict,
+      },
     });
   } catch (err) {
     console.error('[POST /api/amendments/:id/approve]', err);
@@ -609,6 +583,54 @@ amendmentsRouter.post('/:id/reject', async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error('[POST /api/amendments/:id/reject]', err);
+    res.status(500).json({ error: 'Internal server error', details: String(err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VERDICT ROUTER  (read-only, no persistence)
+// Mounted at /api/verdict in server.ts
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const verdictRouter = Router();
+
+// ── POST /api/verdict/preview ──────────────────────────────────────────────
+// Computes a verdict + category breakdown WITHOUT writing to the database,
+// via the same resolveVerdict() used by every persisting route. Used by
+// StepReviewSubmit.tsx (wizard review step) and HistoryFeed.tsx (historical
+// record display) so both show exactly what the server would compute.
+//
+// Unlike the persisting routes, an unresolved profileId does not hard-fail
+// here — it falls back through the normal safety net (same as "no profileId
+// supplied at all"), since this is a read-only, non-authoritative preview.
+verdictRouter.post('/preview', async (req: Request, res: Response) => {
+  try {
+    const body = req.body as Record<string, unknown>;
+
+    if (body['sampleSize'] == null || !Number.isFinite(Number(body['sampleSize']))) {
+      res.status(400).json({ error: 'sampleSize must be a number' });
+      return;
+    }
+    if (
+      body['defects'] == null ||
+      typeof body['defects'] !== 'object' ||
+      Array.isArray(body['defects'])
+    ) {
+      res.status(400).json({ error: 'defects must be a key:count object' });
+      return;
+    }
+
+    const result = await resolveVerdict({
+      profileId: (body['profileId'] as string | null | undefined) ?? null,
+      productCode: body['productCode'] as string | undefined,
+      sampleSize: Number(body['sampleSize']),
+      defectCounts: body['defects'] as Record<string, number>,
+      onUnresolvedProfile: 'fallback',
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('[POST /api/verdict/preview]', err);
     res.status(500).json({ error: 'Internal server error', details: String(err) });
   }
 });

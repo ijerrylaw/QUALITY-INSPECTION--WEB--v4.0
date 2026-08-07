@@ -347,3 +347,38 @@ by, any file changed in this refactor.
 **Status:** not fixed as part of Phase 1+2 (out of scope — unrelated file).
 Trivial fix whenever picked up: annotate as `catch (error: unknown)` and
 narrow before reading `.message` (e.g. `error instanceof Error ? error.message : String(error)`).
+
+### 5.2 Migration history drift — `prisma/migrations/` vs live `backend/dev.db`
+
+While adding the `AmendmentLog.recomputedVerdict`/`recomputedCategoryResults`
+columns (Phase 2, step 4), `npx prisma migrate dev` refused to run: it
+detected that the live `dev.db` schema has columns
+(`inspectionProfiles`, `aqlCategories`, `defectDefinitions`,
+`productMatrixConfig`, `dimensions`, `targetWeight`, `sides` on `AppConfig`)
+that the only migration file on record
+(`prisma/migrations/20260723114800_init_schema/migration.sql`, dated
+2026-07-23) does not define.
+
+**What this means in plain terms:** at some point after that initial
+migration was created, `dev.db`'s schema was evolved further — almost
+certainly via `prisma db push` (which writes directly to the database
+without recording a migration file) rather than `prisma migrate dev` — so
+the migration history on disk no longer describes how to reproduce the
+live database from scratch. Prisma's `migrate dev` command trusts the
+migration history as the source of truth, sees the live DB doesn't match
+what replaying those migrations would produce, and its only built-in fix is
+`migrate reset` (drops all data and rebuilds purely from migration files).
+
+**This predates Phase 1+2** — nothing in this session's work caused it; it
+was inherited. Worked around by using `prisma db push` (reconciles the live
+DB directly against `schema.prisma`, ignoring migration history, no data
+loss) instead of `prisma migrate dev` for the Phase 2 schema change.
+
+**Status:** not fixed. `prisma migrate dev` will keep refusing (and
+proposing a full reset) until this is reconciled — either by hand-writing a
+new migration file that captures the missing `AppConfig` columns and
+marking it applied via `prisma migrate resolve --applied`, or by accepting
+`db push` as this project's actual workflow going forward and treating the
+migrations folder as informational/stale. Worth a deliberate decision
+before the next schema change rather than hitting the same "reset or
+work around it" fork again.

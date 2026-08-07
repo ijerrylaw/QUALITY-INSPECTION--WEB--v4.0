@@ -126,13 +126,38 @@ export interface ResolveVerdictParams {
   productCode?: string;
   sampleSize: number;
   defectCounts: Record<string, number>;
+  /**
+   * How to handle an explicit profileId that doesn't resolve to any known
+   * profile:
+   *   - 'throw' (default) — surface VerdictProfileNotFoundError to the
+   *     caller. Correct for any path that persists data (submit, approve) —
+   *     we must never silently grade against a guessed profile when the
+   *     requested one can't be found.
+   *   - 'fallback' — treat it the same as "no profileId supplied" and
+   *     proceed through the normal safety net (first usable AppConfig
+   *     profile, else hardcoded default). Correct for read-only preview
+   *     paths, where a clearly-non-authoritative best-effort estimate is
+   *     more useful than a hard error (e.g. Browse History on an old
+   *     submission whose profile has since been deleted).
+   */
+  onUnresolvedProfile?: 'throw' | 'fallback';
 }
 
 export interface ResolveVerdictResult {
   verdict: 'PASSED' | 'FAILED';
   categoryResults: CategoryResult[];
-  /** The profile id actually used for evaluation, or null if none resolved. */
+  /** The profile id actually used for evaluation (post safety-net), or null if none resolved. */
   evaluationProfileId: string | null;
+  /**
+   * The profile id resolved from the explicit param or productProfileMap,
+   * BEFORE any safety-net substitution — null if neither supplied one.
+   * Distinct from evaluationProfileId because the safety net may grade
+   * against a different (fallback) profile than the one actually requested.
+   * Callers that need to know "was a real profile explicitly requested,
+   * and which one" (e.g. an FK-validity check before persisting) should use
+   * this instead of evaluationProfileId.
+   */
+  requestedProfileId: string | null;
 }
 
 /**
@@ -140,15 +165,18 @@ export interface ResolveVerdictResult {
  * POST /api/submissions):
  *   a) Explicit profileId → find in AppConfig.inspectionProfiles → normalize
  *   b) Explicit profileId === 'prof_default' AND not found above → hardcoded default
- *   c) Unknown profileId (not in list and not 'prof_default') → throws VerdictProfileNotFoundError
+ *   c) Unknown profileId (not in list and not 'prof_default') → throws VerdictProfileNotFoundError,
+ *      unless onUnresolvedProfile === 'fallback', in which case it's treated as unset.
  *   d) No profileId at all → productProfileMap[productCode] lookup (if productCode supplied), then same chain
  *   e) Safety net: no categories resolved, or resolved profile has no usable rules
  *      → first AppConfig profile with usable rules, else hardcoded default
  *
- * @throws VerdictProfileNotFoundError if an explicit, unrecognized profileId is supplied.
+ * @throws VerdictProfileNotFoundError if an explicit, unrecognized profileId is supplied
+ *         and onUnresolvedProfile is 'throw' (the default).
  */
 export async function resolveVerdict(params: ResolveVerdictParams): Promise<ResolveVerdictResult> {
   const { productCode, sampleSize, defectCounts } = params;
+  const onUnresolvedProfile = params.onUnresolvedProfile ?? 'throw';
 
   const appConfig = await prisma.appConfig.findUnique({ where: { id: '1' } });
   const profilesList: any[] = appConfig?.inspectionProfiles
@@ -161,6 +189,9 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
     const profileMap = safeParseJSON<Record<string, string>>(appConfig.productProfileMap, {});
     profileId = profileMap[productCode] ?? null;
   }
+
+  // Captured before any safety-net substitution — see ResolveVerdictResult.requestedProfileId.
+  const requestedProfileId = profileId;
 
   let categories: any[]        = [];
   let defectDefinitions: any[] = [];
@@ -175,13 +206,20 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
     }
 
     if (!profile) {
-      throw new VerdictProfileNotFoundError(profileId);
+      if (onUnresolvedProfile === 'fallback') {
+        console.warn(
+          `[resolveVerdict] profileId '${profileId}' not found — falling back to safety net (lenient mode).`,
+        );
+        // categories/defectDefinitions stay empty; the safety net below populates them.
+      } else {
+        throw new VerdictProfileNotFoundError(profileId);
+      }
+    } else {
+      const normalized  = normalizeForEngine(profile);
+      categories        = normalized.categories;
+      defectDefinitions = normalized.defectDefinitions;
+      evaluationProfileId = String(profile.id);
     }
-
-    const normalized  = normalizeForEngine(profile);
-    categories        = normalized.categories;
-    defectDefinitions = normalized.defectDefinitions;
-    evaluationProfileId = String(profile.id);
   }
 
   // Safety net: no profileId was resolved, or the resolved profile has no usable rules.
@@ -208,5 +246,5 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
     defectCounts,
   });
 
-  return { verdict, categoryResults, evaluationProfileId };
+  return { verdict, categoryResults, evaluationProfileId, requestedProfileId };
 }
