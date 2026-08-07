@@ -9,6 +9,7 @@
  *   - POST /api/submissions  -> Save AQL inspection submission & verdict
  *   - GET  /api/submissions  -> List 50 recent inspection submissions
  *   - GET  /api/submissions/:id -> Get single submission details
+ *   - POST /api/verdict/preview -> Read-only verdict preview, no persistence
  *
  * Level 1 System Precedence: AI_RULES.md & UI_DESIGN_SYSTEM.md
  * Level 2 Feature Spec: v4_optimized_blueprint.md & implementation_plan.md
@@ -19,7 +20,7 @@ import express from 'express';
 import cors from 'cors';
 import prisma from './src/lib/prismaClient';
 import configRouter from './src/routes/config.routes';
-import submissionsRouter, { amendmentsRouter } from './src/routes/submissions.routes';
+import submissionsRouter, { amendmentsRouter, verdictRouter } from './src/routes/submissions.routes';
 
 const app = express();
 const PORT = process.env['PORT'] ? Number(process.env['PORT']) : 4009;
@@ -54,6 +55,7 @@ app.get('/api/health', async (_req, res) => {
 app.use('/api/config', configRouter);
 app.use('/api/submissions', submissionsRouter);
 app.use('/api/amendments', amendmentsRouter);
+app.use('/api/verdict', verdictRouter);
 
 // ── 404 Fallback ──────────────────────────────────────────────────────────────
 app.use((_req, res) => {
@@ -71,4 +73,5 @@ app.listen(PORT, () => {
   console.log(`  Amendments:  GET   http://localhost:${PORT}/api/amendments/pending`);
   console.log(`  Amendments:  POST  http://localhost:${PORT}/api/amendments/:id/approve`);
   console.log(`  Amendments:  POST  http://localhost:${PORT}/api/amendments/:id/reject`);
+  console.log(`  Verdict:     POST  http://localhost:${PORT}/api/verdict/preview`);
 });
