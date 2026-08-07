@@ -70,8 +70,28 @@ const STEP1_REQUIRED_FIELDS: { key: string; label: string }[] = [
   { key: 'totalCarton', label: 'Total Carton' },
 ];
 
+/**
+ * GET /api/submissions returns defects/dimensions/dimensionMins as raw JSON
+ * strings (as stored in SQLite), not parsed objects — StepDefects.tsx and
+ * StepDimensions.tsx both expect already-parsed objects. Passes through
+ * values that are already objects (e.g. re-entrant local state).
+ */
+function safeParseJSON<T>(raw: unknown, fallback: T): T {
+  if (raw == null) return fallback;
+  if (typeof raw === 'object') return raw as T;
+  if (typeof raw !== 'string') return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+/** Inverse of StepDefects.tsx's QUALITATIVE_ENCODING (0=NIL, 1=PASS, 2=FAIL). */
+const QUALITATIVE_DECODING: Record<number, 'PASS' | 'FAIL' | 'NIL'> = { 0: 'NIL', 1: 'PASS', 2: 'FAIL' };
+
 export function WizardPage() {
-  const {  } = useConfig();
+  const { config, getResolvedProfile } = useConfig();
   const { addToast } = useToast();
   const [searchParams] = useSearchParams();
 
@@ -102,6 +122,9 @@ export function WizardPage() {
   // maps the Submission shape → wizard inspectionData shape.
   useEffect(() => {
     if (!amendId) return;
+    // Wait for AppConfig — resolving which defect ids belong to N/A-mode
+    // (qualitative) categories requires the profile's category list.
+    if (!config) return;
     setIsLoadingAmendment(true);
 
     fetch(`${API_BASE_URL}/api/submissions`)
@@ -113,6 +136,27 @@ export function WizardPage() {
           addToast('error', `Amendment target record "${amendId}" not found.`);
           return;
         }
+
+        const rawDefects     = safeParseJSON<Record<string, number>>(target.defects, {});
+        const dimensions     = safeParseJSON<Record<string, any>>(target.dimensions, {});
+        const dimensionMins  = safeParseJSON<Record<string, any>>(target.dimensionMins, {});
+
+        // Decode N/A-mode qualitative states back from the persisted 0/1/2
+        // encoding (inverse of StepDefects.tsx's QUALITATIVE_ENCODING) so
+        // reopening an amendment restores the operator's original PASS/FAIL/
+        // NIL toggle choices instead of defaulting every N/A-mode defect to NIL.
+        const profile = getResolvedProfile(target.profileId);
+        const qualitativeCategoryIds = new Set(
+          (profile?.aqlCategories ?? [])
+            .filter((cat) => (cat.aql ?? cat.aqlLevel ?? '').toUpperCase() === 'PASS/FAIL/NIL')
+            .map((cat) => cat.id),
+        );
+        const qualitative: Record<string, 'PASS' | 'FAIL' | 'NIL'> = {};
+        for (const def of profile?.defectDefinitions ?? []) {
+          if (!qualitativeCategoryIds.has(def.categoryId)) continue;
+          qualitative[def.id] = QUALITATIVE_DECODING[rawDefects[def.id] as number] ?? 'NIL';
+        }
+
         // Map Submission fields → wizard inspectionData fields
         const mappedData = {
           profileId:        target.profileId        ?? '',
@@ -123,9 +167,10 @@ export function WizardPage() {
           sampleSize:       target.sampleSize       ?? 0,
           totalCarton:      target.totalCarton      ?? '',
           gloveWeight:      target.gloveWeight      ?? '',
-          defects:          target.defects          ?? {},
-          dimensions:       target.dimensions       ?? {},
-          dimensionStats:   target.dimensionMins    ?? {},
+          defects:          rawDefects,
+          qualitative,
+          dimensions,
+          dimensionStats:   dimensionMins,
           effectiveDate:    target.productionDate   ?? '',
           timestamp:        target.samplingTime     ?? '',
           fullSystemLotNo:  target.batchNumber      ?? '',
@@ -144,7 +189,7 @@ export function WizardPage() {
       })
       .finally(() => setIsLoadingAmendment(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [amendId]);
+  }, [amendId, config]);
 
   // ── Validate Step 1 before allowing forward navigation ────────────────────
   const isStep1Valid = useCallback((data: Record<string, any>): boolean => {

@@ -495,3 +495,112 @@ item.
 
 **Status:** not scoped, not planned, no action taken. Placeholder for when
 the multi-tenancy phase is actually scoped.
+
+### 5.5 Amendment prefill race condition — StepMetadata.tsx overwrites real data with recomputed defaults
+
+**Severity: High.** Discovered while live-verifying Phase 2 step 8
+(`WizardPage.tsx` — decoding N/A-mode qualitative states on amendment
+prefill, session of 2026-08-07). Confirmed pre-existing: the auto-save
+effect and lot-number computation in `StepMetadata.tsx` are untouched by
+step 8's own change; the bug was inherited, just newly surfaced by testing
+amendment prefill live against a real submission (all demo/test data — see
+note below) for the first time in this project's history.
+
+**Where:** `frontend/src/pages/wizard/StepMetadata.tsx`:
+- Local field state (`profileId`, `productCode`, `size`, `lineId`,
+  `sampleSize`, `totalCarton`, `gloveWeight`, `timestamp`) initializes from
+  the `initialData` prop only inside `useState(...)` initializers (lines
+  62-92) — a one-time read at mount, with no effect that re-syncs local
+  state if `initialData` changes on a later render.
+- `fullSystemLotNo`, `lot4Digit`, `activeShift`, `effectiveDate` are
+  **never read from `initialData` at all** — they are always freshly
+  recomputed from `lineId`/`side`/`sequenceNo`/`timestamp` via a `useMemo`
+  (lines 180-252), using today's date and whatever line/side/sequence
+  local state currently holds.
+- An auto-save `useEffect` (lines 257-279) unconditionally calls
+  `onUpdate?.(...)` with all of the above on every mount and on every
+  change to any of them.
+- `WizardPage.tsx`'s `handleUpdate` (`(partial) =>
+  setInspectionData(prev => ({...prev, ...partial}))`) is a shallow merge,
+  not a replace.
+
+**Why this is a race condition, not a simple bug:** `WizardPage.tsx`'s
+amendment-prefill fetch (`GET /api/submissions`, finding the target
+record, mapping it to `inspectionData`) is asynchronous. `StepMetadata`
+mounts and renders **before** that fetch resolves, with `initialData`
+still `{}` — or, during the loading-state remount cycle, briefly
+correct-but-then-remounted again (see the
+`key={amend-${amendId}-${isLoadingAmendment}}` trick in `WizardPage.tsx`,
+intended to force a fresh mount once loading completes). Every mount of
+`StepMetadata` — including transient ones before the real data arrives —
+fires its auto-save effect immediately, pushing whatever local state it
+has (empty-string fallbacks, config/localStorage defaults, and a
+**freshly-computed `fullSystemLotNo`/`lot4Digit`/`shift` based on today's
+date**) up to `WizardPage` via the merging `handleUpdate`. If any of these
+stale pushes execute **after** the correct `setInspectionData(mappedData)`
+call from the real fetch — which they reliably do in practice — they
+silently clobber the real values. This is why it wasn't caught by
+typechecking or a quick glance: the final rendered state depends on
+promise-resolution and effect-firing order, not on any one line of
+obviously-wrong code.
+
+**Confirmed live, not just by reading code:** opened an amendment on a
+real test submission (batch `S8-AMEND-VERIFY-BATCH`, productCode
+`TEST-S8-AMEND-VERIFY`, size `L`, sampleSize `315` — demo/flow-validation
+data created this session, not real production data) via the actual
+browser UI. Captured, via temporary debug instrumentation (added and then
+fully removed before committing), the exact corrupted state that reached
+`StepMetadata`'s rendered form:
+```json
+{"profileId":"prof_default","productCode":"N035MNV-OC-24FT","lineId":"A001","size":"XS","sampleSize":125,"fullSystemLotNo":"A001A6219001", ...}
+```
+— `defects`/`qualitative`/`dimensions` (fields `StepMetadata` never
+touches) stayed correct in this same corrupted object, while every field
+`StepMetadata` itself manages (`profileId`, `productCode`, `size`,
+`lineId`, `sampleSize`, `fullSystemLotNo`) reverted to demo defaults or a
+brand-new auto-generated lot number for today's date — proving the
+merge-clobber mechanism exactly (a partial corruption limited precisely to
+the fields StepMetadata's own onUpdate payload includes).
+
+**Compounding factor:** `Submission.profileId` is `null` for every
+submission in the current (demo/test) dataset — a separate, already-known
+effect of `submissions.routes.ts`'s FK-existence check against the real
+Prisma `InspectionProfile` table (AppConfig-JSON profile ids created via
+Configuration Control, e.g. `prof_1785833175441`, never exist in that
+separate table, so `validDbProfileId` stays null on every submission — see
+§B6/§2.4). So even absent the race, `StepMetadata`'s "pre-select
+isDefault profile" effect (lines 112-118) would auto-select the current
+default profile for any amendment whose original submission didn't have a
+linked DB profile row — a related but distinct gap from the race condition
+above, and one that may need its own product decision (should amendment
+mode preserve "no profile was linked" instead of silently substituting the
+default?).
+
+**Correct fix, for whoever picks this up:**
+1. Make `fullSystemLotNo`/`lot4Digit`/`activeShift` read from
+   `initialData` when present (i.e., in amendment mode, preserve the
+   original record's lot number instead of always recomputing), falling
+   back to the current auto-compute formula only for brand-new
+   (non-amendment) entries.
+2. Guard the auto-save `useEffect` (lines 257-279) so it does not fire
+   with default/empty local state before the real `initialData` has
+   settled — e.g., skip the push entirely while `WizardPage`'s
+   `isLoadingAmendment` is true (would need to be threaded through as a
+   prop), or gate on a "hydrated" ref that's only set true after local
+   state has been confirmed to reflect a non-empty `initialData` at least
+   once.
+3. After fixing, re-verify live against a real amendment (create a fresh
+   test submission the same way this session did: `POST /api/submissions`
+   with a real profile and an N/A-mode category toggled, then open it via
+   History → Amend — this session's own `S8-AMEND-VERIFY-BATCH` repro row
+   was demo data and was deleted afterward to keep `dev.db` clean) that
+   Step 1 fields, including `fullSystemLotNo`, actually restore correctly
+   and stay stable across re-renders, not just on the very first paint.
+
+**Status:** not fixed. Logged 2026-08-07, deferred to a dedicated
+follow-up step per explicit user decision — this session's step 8 stayed
+scoped to the `WizardPage.tsx` defects/dimensions/qualitative-decode fix,
+which is verified correct in isolation (confirmed via the same debug
+trace: the `mappedData` object reaching `setInspectionData` is fully
+correct every time; the corruption happens entirely downstream in
+`StepMetadata.tsx`, not in `WizardPage.tsx`'s mapping logic).
