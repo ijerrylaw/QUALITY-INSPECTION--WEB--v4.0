@@ -55,6 +55,20 @@ type QualitativeState = 'PASS' | 'FAIL' | 'NIL';
 const isQualitativeAql = (aql: string | undefined): boolean =>
   (aql ?? '').toUpperCase() === 'PASS/FAIL/NIL';
 
+/**
+ * N/A-mode state encoding per ISO2859_MATH_ENGINE.md §2: the backend engine
+ * reads qualitative categories out of the same `defects` map as quantitative
+ * ones, with the count value encoding state instead of a raw tally.
+ */
+const QUALITATIVE_ENCODING: Record<QualitativeState, number> = { NIL: 0, PASS: 1, FAIL: 2 };
+
+/** Encodes PASS/FAIL/NIL toggle states into the 0/1/2 values the backend engine expects. */
+function encodeQualitative(states: Record<string, QualitativeState>): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(states).map(([id, state]) => [id, QUALITATIVE_ENCODING[state]]),
+  );
+}
+
 /** Formats defect IDs into clean, uppercase human-readable slugs (e.g., DEF_DIRT) */
 export const getDisplayId = (defect: { id: string; name: string }) => {
   if (!defect.id || /^def_\d+$/i.test(defect.id)) {
@@ -119,6 +133,16 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
     setQualitativeStates((prev) => ({ ...prev, [defectId]: state }));
   };
 
+  // ── Wire payload: quantitative counts + encoded qualitative states merged
+  // into one map, since the backend engine's N/A mode reads its 0/1/2 state
+  // out of the same `defects` field as CUMULATIVE/GRANULAR counts. Internal
+  // reads/writes (counters, tab badges) keep using the raw defectCounts —
+  // this merged map exists only for what gets pushed up to WizardPage.
+  const combinedDefects = useMemo<Record<string, number>>(
+    () => ({ ...defectCounts, ...encodeQualitative(qualitativeStates) }),
+    [defectCounts, qualitativeStates],
+  );
+
   // ── Totals ────────────────────────────────────────────────────────────────
   const totalQuantitativeDefects = useMemo(
     () => Object.values(defectCounts).reduce((sum, c) => sum + c, 0),
@@ -133,18 +157,18 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
   // ── Auto-save: Push defect data to WizardPage ─────────────────────────────
   useEffect(() => {
     onUpdate?.({
-      defects: defectCounts,
+      defects: combinedDefects,
       qualitative: qualitativeStates,
       totalIssues,
       profileId: inspectionData?.profileId ?? activeProfile?.id ?? '',
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defectCounts, qualitativeStates, totalIssues, activeProfile?.id]);
+  }, [combinedDefects, qualitativeStates, totalIssues, activeProfile?.id]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onNext({
-      defects: defectCounts,
+      defects: combinedDefects,
       qualitative: qualitativeStates,
       totalIssues,
       profileId: inspectionData?.profileId ?? activeProfile?.id ?? '',

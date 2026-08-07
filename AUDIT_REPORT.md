@@ -382,3 +382,79 @@ marking it applied via `prisma migrate resolve --applied`, or by accepting
 migrations folder as informational/stale. Worth a deliberate decision
 before the next schema change rather than hitting the same "reset or
 work around it" fork again.
+
+### 5.3 Real AQL profiles silently never used for grading — `aql`/`evalMode` vs `aqlLevel`/`evaluationMode` field-name mismatch
+
+**Severity: Critical.** Discovered while live-testing Phase 2 step 7
+(`git log` — session of 2026-08-07). **Confirmed pre-existing**, not caused
+by Phase 1+2: the same field-name mismatch exists verbatim in the original
+`submissions.routes.ts` code this session inherited (checked via the
+pre-refactor version of the file), so this bug predates this session
+entirely. Flagging it here rather than fixing it now — logged per an
+explicit decision to keep this session scoped to the approved Phase 1+2
+plan.
+
+**Where:** `backend/src/engine/resolveVerdict.ts` — `normalizeForEngine()`
+(reads `c.aqlLevel` / `c.evaluationMode`) and `hasUsableRules()` (same
+fields, checked on the raw un-normalized category object). Both were copied
+verbatim from the original inline logic in `submissions.routes.ts` during
+Phase 1+2 step 3 — the bug moved with the code, unchanged.
+
+**What's actually broken:** every AQL category ever saved through the real
+admin UI (`frontend/src/pages/config/QualityRules.tsx`) is stored with field
+names `aql` and `evalMode` — confirmed by reading `QualityRules.tsx`
+directly, e.g. `{ id: 'BARRIER', name: 'BARRIER', aql: 'AND', evalMode: 'N/A' }`,
+and by inspecting live data via `GET /api/config`. `normalizeForEngine()`
+only ever reads `c.aqlLevel` / `c.evaluationMode` — fields that don't exist
+on any real saved category — so every real category normalizes to
+`aqlLevel: '', evaluationMode: ''`. `resolveVerdict()`'s safety net (`no
+categories have both aqlLevel and evaluationMode` → fall back) then treats
+every real profile as unusable and silently substitutes its own internal
+`HARDCODED_DEFAULT_PROFILE` for grading, **regardless of which profile was
+actually requested.**
+
+**Confirmed live**, not just by reading code: called `POST /api/verdict/preview`
+with an explicit real `profileId` (`prof_1784996123131`, "MEDLINE") and
+defect counts of 99/99. Response:
+```json
+{ "evaluationProfileId": "prof_default", "requestedProfileId": "prof_1784996123131" }
+```
+`evaluationProfileId` (what was actually used to grade) never matches
+`requestedProfileId` (what was asked for) for any real profile — confirmed
+across all 4 real profiles present in the live `AppConfig`
+(`prof_default`/"GLOBAL STANDARD", `prof_1784996123131`/"MEDLINE",
+`prof_1785374308668`/"CARDINAL", `prof_1785833175441`/"HENRY SHEIN").
+
+**Why this is worse than a simple fallback:** `frontend/src/context/ConfigContext.tsx`'s
+`getResolvedProfile()` *does* normalize both field-name variants
+client-side, purely for display — so the wizard UI shows the operator
+exactly the categories/AQL levels/defects they configured, with no visual
+indication anything is wrong. The mismatch only bites when the *same*
+profile is re-resolved server-side for grading. Custom categories/defects
+that don't exist in the hardcoded fallback (live data has examples: a
+custom category `cat_1785806114748`/"NEW CATEGORY" with defects "Porous",
+"Thin Layer", "Thin Spot", "Donning") are invisible to grading entirely —
+tallying any of those defects has zero effect on the persisted verdict,
+because the substituted fallback profile has no matching category to count
+them against.
+
+**Correct fix, for whoever picks this up:** make `normalizeForEngine()` and
+`hasUsableRules()` accept both field-name variants, mirroring the dual-read
+pattern `ConfigContext.tsx` already uses on the frontend:
+```ts
+aqlLevel:       String(c.aqlLevel ?? c.aql ?? ''),
+evaluationMode: String(c.evaluationMode ?? c.evalMode ?? ''),
+```
+Both functions need the same treatment (`hasUsableRules` currently checks
+the raw, un-normalized category object). After fixing, re-verify: (1) a
+real profile's `evaluationProfileId` in a `/api/verdict/preview` response
+actually matches its `requestedProfileId`, (2) a submission against a
+custom category (e.g. the live "NEW CATEGORY"/"Porous" example above)
+actually affects the verdict, (3) re-run the full Phase 2 step 7/8/9/10
+frontend work against a *real* profile once this is fixed, since those
+steps were verified against the hardcoded default profile as a workaround
+for this bug and should be re-checked against real data afterward.
+
+**Status:** not fixed. Deferred to a separate follow-up session by explicit
+user decision (2026-08-07) — this session stayed scoped to the approved
+Phase 1+2 plan instead of expanding to cover it.
