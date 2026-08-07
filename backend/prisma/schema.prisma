@@ -110,6 +110,15 @@ model AmendmentLog {
   /// Optional notes/reason supplied by the Supervisor
   supervisorNote  String?
 
+  /// Server-recomputed verdict via resolveVerdict() — 'PASSED' | 'FAILED'.
+  /// Set at draft time (informational) and overwritten at approval time
+  /// (authoritative — this is what actually gets persisted to Submission.verdict).
+  /// Null on rows created before this audit trail existed.
+  recomputedVerdict          String?
+
+  /// JSON — CategoryResult[] audit breakdown backing recomputedVerdict.
+  recomputedCategoryResults  String?
+
   createdAt       DateTime    @default(now())
 
   @@index([submissionId])
