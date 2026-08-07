@@ -300,3 +300,50 @@ The currently active model for this session is **Claude Sonnet 5** (`claude-sonn
 - **Name collision:** two different files are both named `StepReviewSubmit.tsx` (`components/wizard/` — dead — and `pages/wizard/` — live), which is a genuine hazard for anyone editing "the" review-submit step without checking which one is actually routed.
 - **No test framework wired up anywhere** — the `test_*.mjs/.ps1/.json` and root `test_post.js` files are manual/ad-hoc scripts, not part of any CI or `npm test` script in either `package.json`.
 - **`backend/dev.db` is not gitignored** (only `node_modules`, `.env`, `/generated/prisma` are, per `backend/.gitignore`), which is why it shows up dirty in git status on every session — see §2.1.
+
+---
+
+## 5. Known Issues (tracked, not yet fixed)
+
+Issues discovered incidentally while executing the Phase 1+2 remediation
+(AQL verdict engine consolidation), logged here so they aren't mistaken for
+regressions introduced by that work, and aren't lost track of.
+
+### 5.1 Pre-existing typecheck error — `backend/src/routes/config.routes.ts:174:92`
+
+```
+error TS2339: Property 'message' does not exist on type '{}'.
+```
+
+**What it actually is, in plain terms:** the `PATCH /api/config` handler's
+error branch reads `error?.message` from a caught exception:
+```ts
+catch (error) {
+  res.status(500).json({ ..., details: error?.message || String(error) });
+}
+```
+TypeScript's strict mode doesn't know what shape a caught value will be (it
+could be an `Error`, a string, anything — JavaScript lets you `throw`
+literally any value), so it types `error` as `unknown` by default. Using
+`?.` (optional chaining) on an `unknown` value narrows it to "definitely not
+null/undefined" — TypeScript represents that as `{}` — but `{}` still isn't
+proven to have a `.message` property, so the type checker flags it.
+
+**This is a compile-time type-strictness complaint, not a runtime bug.**
+JavaScript itself doesn't enforce this — at runtime, `error?.message` simply
+evaluates to `undefined` if the caught value doesn't have a `.message`
+field, and the `|| String(error)` fallback already handles that case
+correctly. The endpoint works fine when actually run; `tsc --noEmit` is
+just refusing to certify it as type-safe.
+
+**Confirmed pre-existing and unrelated to Phase 1+2:** `git diff HEAD -- backend/src/routes/config.routes.ts`
+shows zero changes from this session's work, and the file was last modified
+in commit `4534bb6` (2026-07-30), a week before this refactor began. It
+first surfaced in this session's typecheck output because Phase 1+2 was the
+first time `npx tsc --noEmit -p backend` was run end-to-end as part of the
+per-file verification protocol — it was not caused by, and is not touched
+by, any file changed in this refactor.
+
+**Status:** not fixed as part of Phase 1+2 (out of scope — unrelated file).
+Trivial fix whenever picked up: annotate as `catch (error: unknown)` and
+narrow before reading `.message` (e.g. `error instanceof Error ? error.message : String(error)`).
