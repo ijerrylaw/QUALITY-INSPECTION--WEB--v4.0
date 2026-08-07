@@ -176,7 +176,14 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
   }, [productCode, size, lineId, side, sampleSize]);
 
   // ── ISO2859_MATH_ENGINE.md §4: Shift + Julian Date + Lot Assembly ─────────
-  const { effectiveDate, activeShift, lot4Digit, fullSystemLotNo } = useMemo(() => {
+  // effectiveDate/activeShift/lot4Digit depend only on `timestamp` (already
+  // correctly seeded from initialData on mount, incl. amendment prefill) plus
+  // config.shifts, so recomputing them here always reproduces the original
+  // values. fullSystemLotNo additionally weaves in `side`/`sequenceNo`, which
+  // an amendment's initialData never supplies (not persisted separately from
+  // the assembled lot string) — freezing it below avoids overwriting the real
+  // original lot number with one rebuilt from wrong side/sequence defaults.
+  const computedLot = useMemo(() => {
     // --- Shift resolution from dynamic config.shifts ---
     let currentShift = 'Off-Shift';
     let isNightRollover = false;
@@ -249,6 +256,30 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
       fullSystemLotNo: fullLot,
     };
   }, [timestamp, lineId, side, sequenceNo, config?.shifts]);
+
+  // Freeze fullSystemLotNo from initialData (amendment prefill) until the user
+  // actually edits an input that would change it — then fall through to the
+  // live recompute above, matching amendment mode's "all fields editable" intent.
+  // Compares against a fixed mount-time snapshot (not a "have I run yet" flag) —
+  // a ref-flag guard breaks under StrictMode, which invokes effects twice
+  // (mount → cleanup → mount) on the same instance in development, making a
+  // "skip only the first run" flag see its second invocation as a real change.
+  const [frozenLotNo, setFrozenLotNo] = useState<string | null>(initialData?.fullSystemLotNo || null);
+  const lotSeedRef = useRef({ lineId, side, sequenceNo, timestamp, shifts: config?.shifts });
+  useEffect(() => {
+    const seed = lotSeedRef.current;
+    const unchanged =
+      seed.lineId === lineId &&
+      seed.side === side &&
+      seed.sequenceNo === sequenceNo &&
+      seed.timestamp === timestamp &&
+      seed.shifts === config?.shifts;
+    if (unchanged) return;
+    setFrozenLotNo(null);
+  }, [lineId, side, sequenceNo, timestamp, config?.shifts]);
+
+  const { effectiveDate, activeShift, lot4Digit } = computedLot;
+  const fullSystemLotNo = frozenLotNo ?? computedLot.fullSystemLotNo;
 
   // ── Auto-save: Push all computed + local state up to parent on every change ─
   // Fires whenever any field or computed lot value changes, so WizardPage always

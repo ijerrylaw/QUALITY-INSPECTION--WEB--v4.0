@@ -100,7 +100,10 @@ export function WizardPage() {
   const amendId = searchParams.get('amend');
   const isAmendmentMode = Boolean(amendId);
   const [amendmentReason, setAmendmentReason] = useState('');
-  const [isLoadingAmendment, setIsLoadingAmendment] = useState(false);
+  // Lazy-init to true whenever an amendId is present on first render, so Step 1
+  // never mounts (and auto-saves its freshly-generated defaults) before the
+  // amendment fetch below has had a chance to even start — see §5.5.
+  const [isLoadingAmendment, setIsLoadingAmendment] = useState(isAmendmentMode);
 
   // ── Mode State ───────────────────────────────────────────────────────────
   const [entryMode, setEntryMode] = useState<EntryMode>('GUIDED');
@@ -598,14 +601,25 @@ export function WizardPage() {
 
         {/* ── Step Content Area ────────────────────────────────────────────── */}
         {(entryMode === 'GUIDED' || isAmendmentMode) ? (
-          <div key={amendId ? `amend-${amendId}-${isLoadingAmendment}` : 'new'} className="pt-6">
+          <div key={amendId ?? 'new'} className="pt-6">
             {currentStep === 1 && (
-              <StepMetadata
-                onNext={handleNextStep}
-                onUpdate={handleUpdate}
-                initialData={inspectionData}
-                originalData={originalData}
-              />
+              isAmendmentMode && isLoadingAmendment ? (
+                // Don't mount StepMetadata until the real record has loaded —
+                // it auto-saves its local defaults on every mount, which would
+                // otherwise clobber the correct prefill once it arrives (§5.5).
+                <div className="bg-surface border border-gray-800 rounded-lg p-8 flex items-center justify-center h-64">
+                  <span className="text-sm font-semibold uppercase tracking-wider text-muted font-mono animate-pulse">
+                    LOADING AMENDMENT RECORD...
+                  </span>
+                </div>
+              ) : (
+                <StepMetadata
+                  onNext={handleNextStep}
+                  onUpdate={handleUpdate}
+                  initialData={inspectionData}
+                  originalData={originalData}
+                />
+              )
             )}
             {currentStep === 2 && (
               <StepDimensions
