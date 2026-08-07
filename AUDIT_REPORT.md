@@ -458,3 +458,40 @@ for this bug and should be re-checked against real data afterward.
 **Status:** not fixed. Deferred to a separate follow-up session by explicit
 user decision (2026-08-07) — this session stayed scoped to the approved
 Phase 1+2 plan instead of expanding to cover it.
+
+### 5.4 Hardcoded default profile should become per-tenant configurable (future multi-tenancy phase)
+
+**Severity: Design note — not a bug, no action needed now.** Related to
+§5.3 but a distinct, longer-term question. Logged as a placeholder for a
+future multi-tenancy phase, not for action in this cleanup effort.
+
+**Context:** §5.3 will eventually be fixed as a narrow, contained change —
+making `resolveVerdict()` correctly read real admin-configured profiles
+(`aql`/`evalMode` fields) instead of silently falling back to a hardcoded
+default. That fix is purely about making *real* profiles work.
+
+**The separate question this does NOT address:** the hardcoded default
+profile itself (`HARDCODED_DEFAULT_PROFILE` in `backend/src/engine/resolveVerdict.ts`)
+is a code-level fallback, not something any admin configured — its name
+("GLOBAL STANDARD (DEFAULT)"), categories (BARRIER/CRITICAL/MAJOR/MINOR/PACKAGING),
+and defect list are baked into the backend source itself.
+
+**Product direction:** this app is intended to eventually serve multiple
+factories/customers beyond One Glove Group, each with their own defect
+names, product names, categories, and profile setups. Nothing about
+today's default profile — including its name, categories, or defect list —
+is meant to be universal or "correct" for other factories. The current live
+database is test/flow-validation data only; no real production inspections
+exist yet, so there's no historical-data migration concern here, just a
+forward design decision.
+
+**Implication for later:** once multi-tenancy work begins, the hardcoded
+default profile should be reconsidered — likely replaced with a
+per-tenant configurable default (something each factory sets up in their
+own Configuration Control), rather than a single global fallback baked into
+backend code. §5.3's fix makes real profiles gradable; it deliberately does
+NOT redesign what "default" means for a multi-tenant future — that's this
+item.
+
+**Status:** not scoped, not planned, no action taken. Placeholder for when
+the multi-tenancy phase is actually scoped.

@@ -13,6 +13,7 @@ To prevent context bleed, the AI MUST consult the following specialized files fo
 * **Data Shapes & Types:** Refer strictly to `DATA_SCHEMAS_AND_TYPES.md`.
 * **Calculation Logic:** Refer strictly to `ISO2859_MATH_ENGINE.md`.
 * **Backend Endpoints:** Refer strictly to `API_AND_INTEGRATION_SPEC.md`.
+* **Active Cleanup Findings & Progress Log:** Refer to `AUDIT_REPORT.md` for in-progress bug findings, fixes, and deferred design notes from the ongoing housekeeping effort.
 
 ---
 
