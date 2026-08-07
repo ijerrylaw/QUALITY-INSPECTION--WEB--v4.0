@@ -73,6 +73,10 @@ function safeParseJSON<T>(raw: string | undefined | null, fallback: T): T {
 /**
  * AppConfig-stored profiles use { categoryId } on defect definitions,
  * but the evaluateAQLVerdict engine expects { currentClass }.
+ *
+ * Categories saved via the real admin UI (QualityRules.tsx) use `aql` /
+ * `evalMode` field names, not `aqlLevel` / `evaluationMode` — mirrors the
+ * dual-read ConfigContext.tsx already does client-side for display (see §5.3).
  */
 function normalizeForEngine(profile: {
   aqlCategories?: any[];
@@ -81,8 +85,8 @@ function normalizeForEngine(profile: {
   const categories = (profile.aqlCategories ?? []).map((c: any) => ({
     id:             String(c.id             ?? ''),
     name:           String(c.name           ?? ''),
-    aqlLevel:       String(c.aqlLevel       ?? ''),
-    evaluationMode: String(c.evaluationMode ?? ''),
+    aqlLevel:       String(c.aqlLevel       ?? c.aql     ?? ''),
+    evaluationMode: String(c.evaluationMode ?? c.evalMode ?? ''),
   }));
 
   const defectDefinitions = (profile.defectDefinitions ?? []).map((d: any) => ({
@@ -98,13 +102,17 @@ function normalizeForEngine(profile: {
 
 /**
  * A profile is usable for AQL evaluation only if at least one category
- * has both aqlLevel and evaluationMode configured.
+ * has both aqlLevel and evaluationMode configured (checking both the
+ * `aqlLevel`/`evaluationMode` and `aql`/`evalMode` field-name variants —
+ * same dual-read as normalizeForEngine(), see §5.3).
  */
 function hasUsableRules(profile: any): boolean {
-  return (profile?.aqlCategories ?? []).some(
-    (c: any) => c.aqlLevel && String(c.aqlLevel).trim() !== ''
-                && c.evaluationMode && String(c.evaluationMode).trim() !== '',
-  );
+  return (profile?.aqlCategories ?? []).some((c: any) => {
+    const aqlLevel       = c.aqlLevel       ?? c.aql;
+    const evaluationMode = c.evaluationMode ?? c.evalMode;
+    return aqlLevel && String(aqlLevel).trim() !== ''
+        && evaluationMode && String(evaluationMode).trim() !== '';
+  });
 }
 
 /** Thrown when an explicit profileId doesn't resolve to any known profile. */
