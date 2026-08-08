@@ -489,6 +489,19 @@ amendmentsRouter.post('/:id/approve', async (req: Request, res: Response) => {
     const clientSuppliedVerdict = newValues['verdict'] != null ? String(newValues['verdict']) : null;
     const now = new Date().toISOString();
 
+    // 4b. Resolve a DB-safe profileId — only set if it exists in the real
+    //     InspectionProfile table. AppConfig-JSON profile ids (e.g. 'prof_default',
+    //     created via Configuration Control) never exist there — see §5.5/§B6's
+    //     documented compounding factor — so writing newValues.profileId verbatim
+    //     violates the FK constraint on Submission.profileId. Mirrors the same
+    //     validDbProfileId safety net POST /api/submissions already applies.
+    let validDbProfileId: string | null = null;
+    if (newValues['profileId'] != null) {
+      const requestedId = String(newValues['profileId']);
+      const existsInDb = await prisma.inspectionProfile.findUnique({ where: { id: requestedId } });
+      if (existsInDb) validDbProfileId = requestedId;
+    }
+
     // 5. Transaction: apply newValues to the Submission + mark both as APPROVED.
     //    verdict is ALWAYS the server-recomputed value — newValues.verdict is
     //    never written to the Submission, only kept for audit comparison below.
@@ -512,7 +525,7 @@ amendmentsRouter.post('/:id/approve', async (req: Request, res: Response) => {
           verdict:                             recomputed.verdict,
           ...(newValues['totalCarton']          != null && { totalCarton:         Number(newValues['totalCarton']) }),
           ...(newValues['gloveWeight']          != null && { gloveWeight:         parseFloat(String(newValues['gloveWeight'])) }),
-          ...(newValues['profileId']            != null && { profileId:           String(newValues['profileId']) }),
+          ...(newValues['profileId']            != null && { profileId:           validDbProfileId }),
         },
       }),
       prisma.amendmentLog.update({

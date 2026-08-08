@@ -1185,3 +1185,256 @@ stale `DimensionMinimums` type reference with the actual shape (or
 document `dimensionMins` as a legacy/misleading field name kept for
 backward compatibility), and correct the matching `schema.prisma` comment
 to match.
+
+### 5.12 Amendment approval crashes (500) whenever the amendment touches `profileId` — FK constraint violation on `Submission.update()`
+
+**Severity: High. Status: FIXED and verified live, 2026-08-08. Discovered
+during Step 11's live amendment/approval trace (below), not anticipated by
+any prior session.**
+
+**The bug:** `POST /api/amendments/:id/approve` (`submissions.routes.ts`,
+the update-data object inside the `prisma.$transaction`) wrote
+`profileId: String(newValues['profileId'])` straight into
+`prisma.submission.update()` whenever `newValues.profileId` was non-null,
+with no existence check. `Submission.profileId` is a real FK into the
+`InspectionProfile` table — confirmed empty (0 rows) via direct Prisma
+query — because actual profiles live in `AppConfig.inspectionProfiles`
+JSON (see §5.5's "compounding factor" note and §B6/§2.4). Writing any
+AppConfig-JSON profile id (e.g. `prof_default`) there violates the FK
+constraint and crashes the whole approve transaction.
+
+**Why this isn't a narrow edge case:** `newValues.profileId` gets
+populated on essentially every real amendment, not just contrived ones.
+`Submission.profileId` is `null` for all 19 baseline submissions (same
+already-known gap). Reopening any of them for amendment leaves
+`StepMetadata.tsx`'s local `profileId` state falsy, which fires its
+"pre-select the default profile" effect (`WizardPage.tsx` line ~113-118),
+populating `newValues.profileId` with a real value on submit. So the
+crash was not specific to this session's test data — it reproduces for
+essentially any amendment approved today, on any of the 19 real records.
+This makes it the actual severity-blocking finding of this pass, not a
+corner case.
+
+Contrast with `POST /api/submissions` (lines ~189-193, 216 as of §5.9),
+which already guards this exact case: it only sets `profileId` after
+confirming `prisma.inspectionProfile.findUnique(...)` finds a match,
+falling back to `null` otherwise (`validDbProfileId`). The approve
+endpoint never had that guard — a gap that predates this session; Step
+11 is what first exercised the code path live and surfaced it.
+
+**The fix:** added the identical `validDbProfileId` safety net to the
+approve endpoint, immediately before the transaction — look up
+`newValues.profileId` in `InspectionProfile` and use the resolved id only
+if it actually exists there, otherwise fall back to `null` (same
+fallback the submit/draft endpoints already produce). One file changed:
+`backend/src/routes/submissions.routes.ts` (new block before the
+`prisma.$transaction` call, and the `profileId` line inside the
+`Submission.update()` data object switched from
+`String(newValues['profileId'])` to the resolved `validDbProfileId`).
+`npx tsc --noEmit -p backend` clean (only the pre-existing §5.1
+`config.routes.ts` error remains).
+
+**Verified live (2026-08-08):** reproduced the crash first (500,
+`PrismaClientKnownRequestError: Foreign key constraint violated` at
+`submissions.routes.ts:496`, the exact line-number in the error trace
+confirming the diagnosis before any fix was written), applied the fix,
+restarted the backend (`tsx server.ts` has no watch mode — a code change
+requires a manual restart to take effect), and re-submitted the identical
+pending amendment through the Approvals Queue UI without touching
+anything else. Second attempt: `200 OK`,
+`"message":"Amendment approved and merged successfully."`, `Submission`
+row updated with `amendmentStatus: "APPROVED"`, `profileId: null` (the
+expected, already-documented fallback — not a new gap), and all amended
+fields (`defects`, `dimensions`, `verdict`) correctly persisted — see the
+full trace in the Step 11 write-up below. No other endpoint touches
+`profileId` this way, so the fix is scoped to this one call site.
+
+### 5.13 Amendment wizard's Defects step double-counts qualitative defects in "TOTAL RECORDED ISSUES" — display only, wire payload unaffected
+
+**Severity: Low (cosmetic). Status: not fixed — logged 2026-08-08,
+discovered during Step 11's live amendment trace. Not fixed because the
+user chose to log and continue rather than pause Step 11 for it.**
+
+**The bug:** reopening an amendment on a submission whose original
+qualitative (N/A-mode) defect was non-NIL shows an inflated "TOTAL
+RECORDED ISSUES" count on the amendment wizard's Defects step. Repro used
+in this session: original submission had `PACKAGING`'s `def_box` = FAIL
+(raw encoded `2`) plus 5 quantitative defects (`def_hole:2, def_dirt:2,
+def_flow:1`) — real total issues = 6, matching what the original
+submission's own Review step correctly showed. Reopening it as an
+amendment showed **8**.
+
+**Root cause:** `WizardPage.tsx`'s amendment prefill (~line 143-183)
+correctly builds a decoded `qualitative` map for the toggle UI, but also
+sets `defects: rawDefects` — the *raw*, unfiltered defects map, which
+still contains the qualitative category's raw encoded value
+(`def_box: 2`). `StepDefects.tsx` seeds its quantitative `defectCounts`
+state directly from `inspectionData?.defects` on mount
+(`useState(inspectionData?.defects ?? {})`, line ~113) with no filtering
+by category eval mode, so `def_box`'s raw `2` leaks into `defectCounts`
+as if it were a quantitative count. The summary bar then double-counts
+it: `totalQuantitativeDefects` (sums the now-polluted `defectCounts`,
+including `def_box`'s leftover `2`) *plus* `totalQualitativeFails`
+(separately counts the same defect via `qualitativeStates`) = 7 + 1 = 8.
+Toggling the qualitative defect to a different state doesn't clear the
+leftover value either — it only updates `qualitativeStates`, confirmed by
+watching the counter change from 8 → 7 (not 8 → 5) after flipping
+`def_box` FAIL→PASS during this session's live test.
+
+**Confirmed display-only — the submitted payload is correct:**
+`combinedDefects = { ...defectCounts, ...encodeQualitative(qualitativeStates) }`
+(`StepDefects.tsx` ~line 141) spreads the freshly-encoded qualitative
+state *last*, so `def_box` in the actual wire payload always reflects the
+live toggle position, not the polluted `defectCounts` leftover. Verified
+directly in this session's network trace: with `def_box` toggled to PASS,
+the draft amendment's `POST /api/submissions/:id/amendments` request body
+carried `defects.def_box: 1` (correct PASS encoding) despite the on-screen
+counter reading 7, and the approved `Submission.defects` persisted the
+same correct value. No category's per-defect display is affected either
+— `def_box` only ever renders as PACKAGING's PASS/FAIL/NIL toggle
+(`isQual` branch), never as a quantitative counter card, so the pollution
+has no other visible surface beyond this one summary number.
+
+**Likely fix, for whoever picks this up:** in `StepDefects.tsx`'s
+`defectCounts` initializer (~line 113), filter `inspectionData?.defects`
+down to only the ids belonging to non-qualitative categories before
+seeding state — mirroring the same category-eval-mode split
+`combinedDefects`/`encodeQualitative` already apply on the way out, just
+applied on the way in too.
+
+## 6. Step 11 — End-to-End Verification Pass (Phase 1+2 close-out)
+
+**Status: COMPLETE, 2026-08-08.** Per `cozy-wondering-volcano.md`'s
+Step 11 definition ("trace one full flow end-to-end ... confirming the
+verdict at each stage matches what the engine alone would produce"),
+extended beyond the plan's original AQL-only scope to also cover
+dimensions, N/A/qualitative encoding, and the audit columns added by
+§5.5-§5.11 — none of which existed when Step 11 was originally scoped.
+Full live browser trace against the real dev server (no synthetic/seeded
+data), using product `N035MNV-OC-24FT`, size `M`, sample size `13`
+(bracket thresholds: BARRIER/CRITICAL/NEW CATEGORY ac=1/re=2 @ AQL 1.0/1.5,
+MAJOR ac=1/re=2 @ AQL 2.5, MINOR ac=2/re=3 @ AQL 4.0, PACKAGING zero-tolerance
+ac=0/re=1).
+
+**1. Fresh submission covering CUMULATIVE fail, GRANULAR fail/pass, N/A
+fail, all dimensions clean** — defects `def_hole:2` (BARRIER, CUMULATIVE,
+2>ac1 → FAIL), `def_dirt:2` (MAJOR, GRANULAR, 2>ac1 → FAIL), `def_flow:1`
+(MINOR, GRANULAR, 1≤ac2 → PASS, exercising a passing GRANULAR case
+alongside the failing one), `def_box` toggled FAIL (PACKAGING, N/A). All
+35 dimension slots left at their in-spec defaults. Confirmed agreement
+across all four layers:
+   - **Wizard banner** (`StepReviewSubmit.tsx`): "ISO 2859-1 VERDICT: FAIL
+     — LOT REJECTED — 6 DEFECT(S) FOUND" (0 dimension issues).
+   - **`POST /api/verdict/preview`** response: `verdict:"FAILED"`, with
+     PACKAGING correctly rendered `passed:false` /
+     `failingDefects:[{defectName:"Box Damage",count:2,...}]` — the exact
+     N/A-FAIL-renders-as-FAIL-not-N/A case §5.8 fixed, reconfirmed here.
+   - **`POST /api/submissions`** persisted response: top-level
+     `verdict:"FAILED"`, `Submission.verdict:"FAILED"`, identical
+     `categoryResults` to the preview call.
+   - **History view**, row expanded: verdict badge FAIL, AQL Category
+     Analysis panel shows BARRIER/MAJOR FAIL, PACKAGING FAIL with "Box
+     Damage: 2" pill rendered red — matches the wizard/preview exactly.
+   - `Submission.profileId` persisted `null` despite `GLOBAL STANDARD
+     (DEFAULT)` being explicitly selected in the wizard — re-confirmed
+     the already-documented §5.5/§B6 gap still holds (the `InspectionProfile`
+     table is empty; `POST /api/submissions`'s `validDbProfileId` check
+     silently falls back to `null`). Not a Step 11 regression — pre-existing,
+     logged, and harmless here since `productProfileMap` correctly
+     reconstructs `prof_default` at recompute time regardless.
+
+**2. Isolated dimension-only-failure case — the wizard-banner-vs-persisted-verdict data point requested explicitly for the record:**
+   Second submission, same product/size/sample size, **all 6 AQL
+   categories left clean** (0 defects / NIL) so the dimension
+   contribution can't be masked by a simultaneous AQL failure. One
+   measurement pushed out of spec: **PALM THICKNESS, slot 3, set to
+   `0.050mm`** against the size `M` target of `≥0.060mm` (MIN tolerance,
+   threshold = minSpec exactly) — delta `-0.010mm`. All other 34 slots
+   left at their in-spec defaults.
+
+   | Layer | Result |
+   |---|---|
+   | Wizard's live banner (`StepReviewSubmit.tsx`) | **FAIL** — "ISO 2859-1 VERDICT: FAIL — LOT REJECTED — 1 DIMENSION ISSUE(S)" (0 defects; Defect Tabulation card's own "Verdict Impact" read PASS in isolation, confirming the FAIL came entirely from the dimension side) |
+   | Server `POST /api/verdict/preview` (AQL-only, by design per §5.9) | **`"verdict":"PASSED"`**, `failedDimensions:0`, `dimensionResults:[]` — confirmed this endpoint never evaluates dimensions at all, regardless of actual measurements (`resolveVerdict()` called without `size`/`dimensionMeasurements` params at this call site) |
+   | Server `POST /api/submissions` persisted result (dimension-aware `resolveVerdict()` per §5.9's fix) | **top-level `"verdict":"FAILED"`, `Submission.verdict:"FAILED"`**, all 6 `categoryResults` entries `passed:true` (AQL side independently clean) |
+   | History view | Verdict badge **FAIL** at the table level (confirms the persisted value round-trips correctly to display) |
+
+   **Conclusion: the wizard banner and the persisted server verdict agree
+   (both FAIL) for this dimension-only case.** The one layer that
+   *doesn't* know about the dimension failure — `/api/verdict/preview` —
+   is exactly the one §5.9 documented as intentionally left AQL-only, and
+   nothing persists from that endpoint's response alone, so its blind
+   spot never reaches the database. This directly answers the sanity
+   check flagged at the start of this session: `/api/verdict/preview` and
+   `resolveVerdict()`'s dimension-aware persisting call sites are not two
+   independently-evolved engines that could silently disagree — they are
+   the same `resolveVerdict()` function, invoked two different ways by
+   explicit, documented design. **Also confirms §5.9's original fix
+   claim still holds under a fresh, independent repro**: a dimension-only
+   failure is no longer silently swallowed into a false `PASSED` at
+   persistence time. (Also confirmed: the History view has no way to
+   surface *why* a dimension-only-failing record failed — the row's
+   verdict badge is correct, but with 0 raw defects no expand affordance
+   exists, and `DefectBreakdownPanel` has no dimension section even if
+   forced open. Not a correctness bug — dimension display in History was
+   never in scope for §5.9 — but worth noting as a real UX gap for anyone
+   picking up dimension-related work later.)
+
+**3. Combined defect + dimension amendment through approval** — amended
+submission #1 from step 1 above: flipped `PACKAGING`/`def_box` FAIL→PASS
+(defect-side edit) and pushed the fixed `GLOVE LENGTH` dimension's slot 3
+from `240` to `235mm` (below the `≥240mm` MIN target — dimension-side
+edit), in the same amendment.
+   - **Draft preview** (`POST /api/submissions/:id/amendments`):
+     `recomputedVerdict:"FAILED"` (BARRIER/MAJOR AQL fails carry over
+     unchanged), `recomputedCategoryResults` correctly shows `PACKAGING`
+     now `passed:true`, `recomputedFailedDimensions:1`,
+     `recomputedDimensionResults` correctly isolates `__fixed_length__`
+     (GLOVE LENGTH) as the sole `failed:true` entry with
+     `fails:[false,false,true,false,false]` matching the edited slot —
+     first live confirmation of these two audit columns populating
+     correctly with a defect change and a dimension change present
+     *simultaneously* (§5.9's own verification only exercised them
+     separately).
+   - **Approval** hit the §5.12 bug above (500, FK constraint violation)
+     on first attempt — fixed live mid-session, see §5.12 for the full
+     trace. Second attempt after the fix: `200 OK`,
+     `Submission.amendmentStatus:"APPROVED"`,
+     `Submission.defects.def_box:1`, `Submission.dimensions.__fixed_length__`
+     showing the amended `235` slot, `Submission.verdict:"FAILED"` — all
+     persisted correctly, matching the draft preview exactly.
+   - **History view**, post-approval: STATUS badge changed
+     ORIGINAL→AMENDED, verdict still FAIL, raw defect count changed 7→6
+     (reflecting `def_box`'s encoding flipping 2→1), AQL Category
+     Analysis panel shows PACKAGING now PASS with "Box Damage: 1" —
+     amendment correctly reflected end-to-end.
+
+**4. Regressions spot-checked in-flow (not re-tested in isolation):**
+§5.5 (amendment prefill) — Step 1 fields (profile, product, size, line,
+side, sample size, glove weight, dimensions, defects, qualitative
+toggles) all correctly repopulated on both amendment opens, no clobbering
+observed. §5.7 (verdict staleness) — banner verdict tracked every defect
+edit live and matched what was actually submitted at each stage. §5.8
+(HistoryFeed N/A rendering) — PACKAGING rendered FAIL-then-PASS correctly
+across both the original and amended states. §5.9 (dimension audit
+columns) — exercised under a new combined-edit condition not covered by
+its own original verification, still correct. No regressions found.
+
+**Two new findings surfaced by this pass, not by any prior session**:
+§5.12 (approve-endpoint FK crash — fixed live) and §5.13 (amendment
+Defects-step double-count — logged, cosmetic). Both discovered only
+because this was the first time the consolidated verdict/amendment
+system was exercised as one continuous flow rather than per-fix in
+isolation — exactly what Step 11 was for.
+
+**Test data cleanup:** both test submissions and the one amendment log
+deleted directly via Prisma after verification; `dev.db` confirmed back
+at the 19-submission / 0-amendment-log baseline (verified via direct
+count before and after cleanup).
+
+**This closes Step 11 and Phase 1+2.** All of §5.5-§5.13 are now either
+fixed-and-verified or explicitly logged for later, and the full
+consolidated system (AQL engine, dimension engine, N/A/qualitative
+encoding, amendment draft/approve recompute, audit columns) has been
+verified holding together as one continuous flow, not just as
+individually-tested fixes.
