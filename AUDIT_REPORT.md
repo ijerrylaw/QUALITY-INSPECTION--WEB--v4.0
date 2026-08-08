@@ -2568,3 +2568,276 @@ confirmed back at 19 submissions / 0 amendment logs before `git commit`.
    session's `X-User-Role` header mechanism and the `Submission.profileId`
    FK removal aren't reflected in `API_AND_INTEGRATION_SPEC.md` or
    `DATA_SCHEMAS_AND_TYPES.md` yet either.
+
+---
+
+## 11. Permission Groups (A/B/C), Self-Managed PIN Admin, Idle Expiry, Dev-Gated M365 Mock
+
+**Status: CODE CHANGES. Two commits landed this session (`152f6bd` backend,
+`9218e20` frontend), plus this doc-only append. No edits to the six core
+docs.** Full discovery → plan (approved) → one-file-per-turn → typecheck →
+live-verify → commit cycle, same discipline as §10. `dev.db` was restored to
+the 19-submission/0-amendment-log/0-PinUser baseline (confirmed via direct
+row counts) before both commits.
+
+Context for this section: real Microsoft/Entra ID login remains blocked on
+Jerry's IT manager providing real Azure credentials (Tenant ID, Client ID,
+Client Secret) — not available this session either. Everything below was
+chosen specifically because it does **not** depend on those credentials, so
+the eventual swap stays a small, isolated change. Confirmed again this
+session, directly: the System Admin page's Azure AD/SharePoint fields
+(`SystemSettings.tsx`) are for a separate, unrelated future SharePoint-sync
+feature and have zero backend wiring (no `fetch` call anywhere in that
+component) — not touched, not conflated with login.
+
+### 11.1 — Discovery findings (before any code was written)
+
+- **PIN login was 100% hardcoded, traced directly, not assumed:**
+  `AuthContext.loginWithPIN` did `if (pin !== '123456') throw`, client-side
+  only, and ignored its own `userId` parameter — every successful PIN login
+  returned the identical `{ name: 'Factory Worker', role: 'OPERATOR' }`
+  object regardless of which name was picked from `LoginPage.tsx`'s 3-entry
+  dropdown. That dropdown was decorative: no per-person identity existed
+  anywhere in the app, and `schema.prisma` had **no `User` table of any
+  kind** — auth was 100% in-memory/mock on the frontend, confirmed via
+  direct schema read.
+- **`Sidebar.tsx` and `App.tsx`'s `RoleRoute` already disagreed with each
+  other**, independent of anything Jerry asked for in this task — a
+  pre-existing bug, not something this session introduced:
+  - `RoleRoute` gated `/analytics` to
+    `['SUPERVISOR','EXECUTIVE','MANAGER','ADMIN']`; `Sidebar` gated the same
+    route's nav link to `['SUPERVISOR','MANAGER','ADMIN']` (missing
+    `EXECUTIVE` — an Executive who typed the URL directly would have
+    reached a page their own nav never showed them).
+  - `Sidebar` gated `/approvals` to `['SUPERVISOR','MANAGER','ADMIN']`;
+    `RoleRoute` gated it to `['EXECUTIVE','MANAGER','ADMIN']` — a Supervisor
+    saw an Approvals link in their sidebar that, if clicked, would have
+    bounced them straight back to `/wizard`.
+  - `Sidebar` gated `/config` to `['MANAGER','ADMIN']`, again missing
+    `EXECUTIVE`, which `RoleRoute` did allow.
+- **System Admin page has no backend surface to gate.** Read
+  `SystemSettings.tsx` directly: `handleTestConnection`/`handleSave` are
+  `setTimeout` + toast, no `fetch` call exists in the file at all. Its
+  existing `RoleRoute allowedRoles={['ADMIN']}` gate (already Group-A-only
+  before this session) is the full extent of what's gate-able today —
+  confirmed, not changed, no fake endpoint invented just to have something
+  to gate.
+- **Provider nesting matters for where idle-expiry could live:** `App.tsx`
+  wraps `AuthProvider > ConfigProvider > ToastProvider`. `AuthProvider` is a
+  parent of `ToastProvider` in the tree, so `AuthContext` itself cannot call
+  `useToast()` — idle-expiry's user-facing toast had to live in a sibling
+  component inside `ToastProvider`, not inside `AuthContext`.
+
+### 11.2 — Group mapping design
+
+Jerry's three access groups map exactly onto the six existing `UserRole`
+values already wired through `requireRole`/`RoleRoute`/`Sidebar` — no new
+role values, no schema migration for the role system itself:
+
+| Group | Roles | Real job titles (per Jerry) | Access |
+|---|---|---|---|
+| **A** | `ADMIN` | IT Admin, C-Suite, Directors | Full, incl. System Admin |
+| **B** | `EXECUTIVE`, `MANAGER` | department Managers, Executives (a level below Manager) | Full, except System Admin |
+| **C** | `SUPERVISOR`, `LEADER`, `OPERATOR` | Supervisors, Operators, Leaders/General Workers | Wizard + Inspection Records only |
+
+Group is **always derived** from `role` via a pure `PERMISSION_GROUPS`
+lookup (`backend/src/middleware/auth.ts`, mirrored in
+`frontend/src/context/AuthContext.tsx` — same "keep in sync" comment
+convention already used between those two files for `UserRole` itself). It
+is never stored on a user record, so it cannot drift independently of role.
+`role` itself is unchanged, still the thing `requireRole`/`X-User-Role`
+actually checks — `requireGroup(...)` is additive, expanding a group list to
+the equivalent role list and delegating to the existing `requireRole(...)`,
+not a replacement for it.
+
+Per Jerry's explicit instruction not to collapse real identity down to just
+the group: `User` (frontend) gained a `title: string` field (e.g. "Plant
+Director", "Line Leader") that is purely for display/audit — never read by
+any permission check — separate from the permission-relevant `role`. The
+same separation exists on the new `PinUser` table (`jobTitle` free text vs.
+`role` enum, see §11.4).
+
+One deliberate, explicit implementation of Jerry's own framing: a
+Supervisor's mock M365 identity (`usr_supervisor_001`, added this session —
+see §11.4) resolves to `role: 'SUPERVISOR'` → **Group C**, confirmed live
+(§11.6) — logging in via Microsoft does not imply elevated access, matching
+"login method and permission level are independent."
+
+**Doc drift flagged, not fixed (six core docs stay off-limits):**
+`NAVIGATION_AND_RBAC.md` §2's per-role table still lists SUPERVISOR (Level
+3) with `/analytics` access and doesn't distinguish Group B's Executive
+from a C-suite "Executive." Jerry's group model in this task explicitly
+supersedes that — Supervisors lose `/analytics`/`/approvals` under the new
+rule regardless of what the doc's original per-role table says. The code
+now matches Jerry's stated model, not the doc; the doc is unedited per
+standing instruction.
+
+### 11.3 — Backend: `requireGroup()` + `PinUser`
+
+- `backend/src/middleware/auth.ts` — additive only, `requireRole()` itself
+  untouched. Added `PermissionGroup` type, `PERMISSION_GROUPS` map, and
+  `requireGroup(...allowedGroups)` which filters `ALL_ROLES` by group
+  membership and delegates to `requireRole(...)`.
+- `backend/prisma/schema.prisma` — new `PinUser` model: `name`, `jobTitle`
+  (free text), `role` (validated in route code to one of
+  `OPERATOR`/`LEADER`/`SUPERVISOR` — the "no email"/"PIN fallback" roles
+  per `NAVIGATION_AND_RBAC.md` §2), `pinHash`/`pinSalt` (Node's built-in
+  `crypto.scryptSync`, no new dependency — PINs are never stored in
+  plaintext), `active` (soft-delete; deactivated rows are kept for audit
+  history and their PIN becomes free for reuse). Applied via
+  `prisma db push`, matching this project's existing convention (migrations
+  are already known-drifted per §5.2; every schema change since init has
+  gone through `db push`, not a new migration file).
+- `backend/src/routes/pinUsers.routes.ts` (new) — two routers from one
+  file, mirroring how `submissions.routes.ts` already exports three
+  routers from a single file:
+  - `pinUsersRouter` at `/api/pin-users`, **every route**
+    `requireGroup('A', 'B')`: `GET /` (list, active+inactive, never
+    returns `pinHash`/`pinSalt`), `POST /` (create — validates role
+    allow-list, exactly-6-digit PIN, and PIN uniqueness among active rows
+    only, 409 on collision), `PATCH /:id/deactivate`.
+  - `pinAuthRouter` at `/api/auth`, **deliberately ungated** — `POST
+    /pin-login` *is* the login step, there is no role to check yet. Scans
+    active `PinUser` rows and `verifyPin`s against each (fine at
+    floor-roster scale); returns `{ id, name, jobTitle, role }` on match,
+    401 otherwise.
+- `backend/server.ts` — both routers mounted alongside the existing four.
+
+### 11.4 — Frontend: real PIN login, group-derived routing, dev-gated M365
+
+- `frontend/src/context/AuthContext.tsx` — `User` gained `title` and
+  `loginMethod: 'M365' | 'PIN'`. `loginWithPIN(pin)` now calls the real
+  `POST /api/auth/pin-login` (no more hardcoded check, no more ignored
+  `userId` param — identity comes from the PIN itself). `loginWithM365`
+  now takes a mock-identity id and self-guards
+  (`if (!import.meta.env.DEV) throw`) as defense-in-depth beyond the UI
+  gate. `PERMISSION_GROUPS`/`getPermissionGroup`/`rolesInGroups` mirror the
+  backend's mapping for use in `Sidebar.tsx`/`App.tsx`.
+- `MOCK_M365_IDENTITIES` expanded from the old single hardcoded
+  ADMIN-always identity to five, deliberately spanning all three groups
+  (two Group A, two Group B, one Group C-via-Supervisor) — the old mock
+  made it structurally impossible to test anything but Group A through the
+  M365 path; this session's live verification (§11.6) needed all three.
+- `frontend/src/pages/LoginPage.tsx` — PIN side dropped the now-meaningless
+  3-name dropdown (identity comes from the PIN itself once PINs are real
+  and unique per person) — just the keypad. M365 side gained the mock
+  identity picker, shown only when `import.meta.env.DEV`.
+- `frontend/src/components/layout/Sidebar.tsx` + `frontend/src/App.tsx` —
+  the hardcoded, drifted role arrays described in §11.1 were replaced with
+  `rolesInGroups('A','B')` / `rolesInGroups('A')` / `rolesInGroups('A','B','C')`,
+  a single source of truth shared between nav visibility and actual route
+  gating so the two categories of bug found in §11.1 can't recur. New
+  `/pin-admin` route + "STAFF PIN ACCESS" nav item, Group A/B only.
+- `frontend/src/pages/PinAdminPage.tsx` + `frontend/src/components/pinadmin/PinAdminPanel.tsx`
+  (new) — create form (name, job title, role select constrained to the 3
+  PIN-eligible roles, 6-digit PIN) + roster table with a Deactivate action,
+  fetch pattern copied from the existing `ApprovalsQueue.tsx`
+  (`API_BASE_URL` + `authHeader(user)`). No edit/reactivate/history, per
+  Jerry's explicit "don't over-build" — create, deactivate, list only.
+
+### 11.5 — Idle expiry (PIN sessions only) and the dev-only M365 gate
+
+**Idle expiry** — `frontend/src/components/auth/IdleSessionGuard.tsx`
+(new), mounted as a sibling inside `ToastProvider` in `App.tsx` (per the
+provider-nesting finding in §11.1). No-ops unless
+`user.loginMethod === 'PIN'`; resets a timer on
+`mousedown`/`keydown`/`touchstart`/`wheel`; on fire, calls `logout()` +
+shows an info toast, which lands the user back on `/login` via the existing
+`ProtectedRoute` guard.
+
+```ts
+// Placeholder default — Jerry can tune once real floor usage patterns are observed.
+export const PIN_SESSION_IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+```
+
+**This value is explicitly a placeholder, not a settled spec** — flagged
+here per the task's own instruction, not a claim that 15 minutes is correct
+for One Glove's actual floor workflow.
+
+**Dev-only M365 gate** — the mock M365 login must never accidentally run
+once real Azure AD credentials are wired in next week. Mechanism:
+`import.meta.env.DEV` (Vite's built-in dev/prod flag, already the
+established pattern in this codebase per `ConfigContext.tsx`/
+`ProductCatalog.tsx`) is `false` in any `vite build` production bundle —
+no `.env` flag to forget at deploy time. Two layers:
+1. `LoginPage.tsx` renders the working mock-identity picker + button only
+   when `import.meta.env.DEV`; otherwise a disabled button reading
+   "Pending Azure AD configuration."
+2. `AuthContext.loginWithM365` self-guards independently
+   (`if (!import.meta.env.DEV) throw`), in case anything ever calls it
+   outside the gated UI path.
+
+**A real gap was found and fixed during this session's own verification,
+not just claimed working:** the first build attempt still leaked all five
+mock identities' names/emails/ids into the production bundle. Root cause,
+confirmed by grepping the built JS directly: `MOCK_M365_IDENTITIES` was
+defined as a plain array constant, and `LoginPage.tsx`'s
+`useState(MOCK_M365_IDENTITIES[0].id)` referenced it *unconditionally* —
+outside the `import.meta.env.DEV` ternary — so the array was genuinely
+reachable at runtime in production (just never displayed), and the minifier
+correctly left it in. Fix: the array literal itself is now defined behind
+`import.meta.env.DEV ? [...] : []` **at its own definition site**
+(`AuthContext.tsx`), and `LoginPage.tsx`'s `useState` initializer changed to
+`MOCK_M365_IDENTITIES[0]?.id ?? ''`. Re-verified after the fix — see §11.6.
+
+**Pre-go-live verification command, exact and reproducible:**
+```bash
+npm run build --workspace=frontend
+grep -c "System Administrator\|Plant Director\|QA Executive\|usr_admin_001\|usr_director_001\|usr_manager_001\|usr_exec_001\|usr_supervisor_001\|Lee Mei Ling\|Farah Aziz\|Wong Wei Ming\|Amir Hassan" frontend/dist/assets/*.js
+```
+Must return `0`. Confirmed `0` after the fix above (was `2` before).
+
+### 11.6 — Live verification, all via the real running app
+
+| Scenario | Method | Result |
+|---|---|---|
+| ADMIN (Group A) via mock M365 | Browser, real login flow | Sidebar shows all 7 items incl. `/pin-admin` and `/system` |
+| MANAGER (Group B) via mock M365 | Browser | Sidebar shows 6 items — everything except `/system` |
+| `GET /api/pin-users` — no header | `curl` | `401` `"Authentication required..."` |
+| `GET /api/pin-users` — `X-User-Role: SUPERVISOR`/`OPERATOR`/`LEADER` (Group C) | `curl` | `403` for all three |
+| `GET /api/pin-users` — `X-User-Role: EXECUTIVE`/`MANAGER`/`ADMIN` | `curl` | `200` for all three |
+| OPERATOR (Group C) via real PIN login | Browser, PIN pad → backend `/api/auth/pin-login` | Sidebar shows only Wizard + History |
+| Direct client-side nav to `/pin-admin`, `/system` while logged in as OPERATOR (Group C) | `history.pushState` + `popstate` (bypasses nav-hiding entirely, exercises `RoleRoute` itself) | Both bounce to `/wizard` |
+| Direct client-side nav to `/system` while logged in as MANAGER (Group B) | same technique | Bounces to `/wizard` |
+| Manager creates a PIN (name "Ahmad Razak", role OPERATOR, PIN `739215`) via the real Staff PIN Access screen | Browser, full form submit | `201`, appears in roster immediately |
+| New PIN logs in immediately | Browser, PIN pad | Landed on `/wizard` with Group C sidebar (2 items) |
+| Manager deactivates that PIN via the real screen | Browser, Deactivate button | Row flips to `DEACTIVATED`, action button disappears |
+| Deactivated PIN can no longer log in | `curl` `POST /api/auth/pin-login` | `401` `"Invalid PIN"` |
+| Idle expiry | Browser — logged in via PIN, timeout temporarily lowered to 5s for this one test, then genuinely left idle (no `mousedown`/`keydown`/`touchstart`/`wheel`) | Auto-logged-out back to `/login`, reproduced twice; toast is called unconditionally in the same code path as `logout()` and the toast mechanism itself was independently exercised and confirmed working throughout this session's other login flows |
+| Dev-gate | `npm run build --workspace=frontend` then grep (see §11.5) | `0` matches after the fix; dev server (`import.meta.env.DEV`) still shows the working mock picker |
+
+**One test-tooling note, consistent with §10.1's earlier finding, not a new
+issue:** the Browser pane's simulated `computer` clicks still don't
+reliably trigger this app's handlers (confirmed again this session, both on
+Framer-Motion `motion.button` elements and on plain buttons/links) —
+`javascript_tool`-dispatched real `MouseEvent('click', {bubbles:true})` was
+used throughout, same workaround as §10.1. One additional wrinkle found
+this session: dispatching several such events **synchronously in a single
+script** (e.g., all 6 PIN digits in one `javascript_tool` call) unreliably
+raced with React's state batching and produced wrong PIN submissions;
+dispatching one digit per separate tool call (matching real per-click
+latency) was reliable every time and is the pattern used for all multi-step
+flows above.
+
+**`dev.db` cleanup before both commits:** all `PinUser` rows created during
+verification (`Ahmad Razak`, plus earlier curl-smoke-test rows) deleted
+directly via SQLite before each commit; confirmed back at 19 submissions /
+0 amendment logs / 0 PinUsers both times, same discipline as §10.1's
+cleanup.
+
+### 11.7 — Still pending real Azure credentials
+
+- Real Entra ID/MSAL sign-in itself — blocked on Jerry's IT manager
+  providing Tenant ID / Client ID / Client Secret, unchanged from this
+  task's stated context.
+- When those arrive, the isolated swap is: replace `AuthContext.loginWithM365`'s
+  body with a real MSAL popup/redirect flow that resolves a role from the
+  real Azure AD group/claim data (however that ends up being modeled on
+  the Azure side) instead of `MOCK_M365_IDENTITIES`, and remove the
+  `import.meta.env.DEV` gate around it. Nothing else in this session's
+  work needs to change for that swap — `requireGroup`/`PERMISSION_GROUPS`,
+  `X-User-Role`, `RoleRoute`, `Sidebar`, and the PIN admin system are all
+  independent of *how* a role was obtained.
+- The System Admin page's Azure AD/SharePoint fields remain a fully
+  separate, not-yet-backend-wired future feature (§11 intro) — not part of
+  this swap.
