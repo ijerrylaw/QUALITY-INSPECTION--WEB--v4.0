@@ -753,44 +753,99 @@ baseline (0 amendment logs) — confirmed via direct Prisma count.
 
 ### 5.7 Amendment verdict goes stale if defects are edited after prefill — StepReviewSubmit has no way to write back into WizardPage's inspectionData
 
-**Severity: Medium. Status: not fixed — newly identified 2026-08-08 while
-scoping §5.6, logged per explicit instruction to track separately rather
-than silently imply it's covered by that fix.**
+**Severity: Medium. Status: FIXED and verified live, 2026-08-08.**
 
-**Where:** `StepReviewSubmitProps` (`frontend/src/pages/wizard/StepReviewSubmit.tsx`)
-has no `onUpdate` callback, and `WizardPage.tsx` never passes one when
-rendering `<StepReviewSubmit>` — so nothing in this file, before or after
-§5.6's fix, ever writes its computed `overallVerdict` back into
-`WizardPage.tsx`'s `inspectionData.overallVerdict`.
+Originally identified while scoping §5.6, logged separately per explicit
+instruction rather than silently implying it was covered by that fix.
+Fixed in this same session as its own dedicated task.
 
-**Why it matters:** in amendment mode, `inspectionData.overallVerdict` is
-set exactly once, at prefill time, from the original record's stored
-verdict (`WizardPage.tsx`'s amendment-fetch mapping:
-`overallVerdict: target.verdict === 'PASSED' ? 'PASS' : 'FAIL'`) — see
-§5.5. If the operator then edits defects on Step 3 before submitting the
-amendment, `inspectionData.overallVerdict` is never refreshed to reflect
-that edit. `WizardPage.tsx`'s `handleSubmit` sends this stale value
-verbatim as `newValues.verdict` in the `POST /api/submissions/:id/amendments`
-payload — and per `API_AND_INTEGRATION_SPEC.md` §1, that endpoint "does
-NOT re-evaluate the AQL verdict. The verdict in `newValues` is whatever
-the caller supplies," and `POST /api/amendments/:id/approve` likewise
-"does not recompute the AQL verdict" on approval — so a stale verdict
-computed before the operator's edit can end up **persisted** as the
-approved outcome, silently disagreeing with what Step 4 was actually
-showing on screen at submit time.
+**Original root cause:** `StepReviewSubmitProps`
+(`frontend/src/pages/wizard/StepReviewSubmit.tsx`) had no `onUpdate`
+callback, and `WizardPage.tsx` never passed one when rendering
+`<StepReviewSubmit>` — so nothing in this file, before or after §5.6's
+fix, ever wrote its computed `overallVerdict` back into `WizardPage.tsx`'s
+`inspectionData.overallVerdict`.
 
-Note this gap is orthogonal to §5.6: it exists regardless of whether
-Step 4's verdict is client-computed (before §5.6) or server-verified
-(after) — the missing link is purely the write-back into `WizardPage.tsx`'s
-shared state, not the correctness of the computation itself. For a brand
-new (non-amendment) submission the same missing write-back is harmless,
-since `POST /api/submissions` always ignores `body.verdict` and computes
-its own from `resolveVerdict()` — confirmed while investigating §5.6.
+In amendment mode, `inspectionData.overallVerdict` was set exactly once,
+at prefill time, from the original record's stored verdict
+(`WizardPage.tsx`'s amendment-fetch mapping:
+`overallVerdict: target.verdict === 'PASSED' ? 'PASS' : 'FAIL'` — see
+§5.5) and never refreshed afterward. `WizardPage.tsx`'s `handleSubmit`
+sends this value verbatim as `newValues.verdict` in the
+`POST /api/submissions/:id/amendments` payload — and per
+`API_AND_INTEGRATION_SPEC.md` §1, neither that endpoint nor
+`POST /api/amendments/:id/approve` re-evaluates it — so if the operator
+edited defects or dimensions on Steps 2/3 after prefill, a stale verdict
+computed *before* that edit could end up **persisted** as the approved
+outcome, silently disagreeing with what Step 4 actually showed on screen
+at submit time.
 
-**Correct fix, for whoever picks this up:** add an `onUpdate` prop to
-`StepReviewSubmitProps`, call it from a `useEffect` whenever the derived
-`overallVerdict` changes, and wire `onUpdate={handleUpdate}` in
-`WizardPage.tsx` where `<StepReviewSubmit>` is rendered — mirroring the
-pattern every other step component (`StepMetadata`, `StepDimensions`,
-`StepDefects`) already uses. Out of scope for §5.6 (single-file constraint,
-`WizardPage.tsx` explicitly not to be touched that turn).
+Re-confirmed before fixing (re-reading both files fresh, not relying on
+the original diagnosis): grepped `overallVerdict` across all of
+`frontend/src` — only 3 sites exist, all in `WizardPage.tsx` (the SET at
+prefill, and 2 READs). Confirmed this is **amendment-mode-only**: the
+standard (new-submission) READ (`WizardPage.tsx:327`,
+`inspectionData.overallVerdict ?? 'PASS'`) is harmless because that field
+is *always* `undefined` outside amendment mode (nothing else ever sets
+it) and `POST /api/submissions` ignores `body.verdict` entirely, always
+persisting its own independently server-computed verdict from
+`resolveVerdict()`.
+
+**The fix:** two minimal edits.
+- `frontend/src/pages/wizard/StepReviewSubmit.tsx`: added
+  `onUpdate?: (partial: Record<string, any>) => void;` to
+  `StepReviewSubmitProps` (matching `StepMetadataProps.onUpdate`'s exact
+  convention), and one small effect syncing the derived verdict up on
+  every genuine change:
+  ```ts
+  useEffect(() => {
+    if (overallVerdict) onUpdate?.({ overallVerdict });
+  }, [overallVerdict, onUpdate]);
+  ```
+  Guarded on non-null so the transient loading/error state from §5.6's
+  `/api/verdict/preview` call never overwrites a previously-known good
+  value in shared state (harmless either way, since `handleSubmit`'s
+  existing guard already blocks dispatch unless the preview succeeded —
+  but keeping `inspectionData.overallVerdict` monotonically meaningful is
+  cleaner). No infinite-loop risk: `handleUpdate`'s merge only touches
+  `overallVerdict`, leaving `profileId`/`productCode`/`defects`
+  referentially unchanged, so §5.6's fetch effect (keyed on those fields
+  plus a `defects` signature) never re-fires from this.
+- `frontend/src/pages/WizardPage.tsx`: one line,
+  `onUpdate={handleUpdate}` added to the existing `<StepReviewSubmit>`
+  call — the same prop every other step component already receives.
+
+**Verified live, end to end (2026-08-08), covering both halves of
+`overallVerdict`'s OR logic (server AQL verdict AND client dimension
+check — confirmed per explicit instruction, not just the defect path):**
+
+1. *Defect-driven flip:* created a fresh, real, all-passing submission
+   (0 defects, 0 out-of-spec dimensions) via the actual wizard UI. Opened
+   it as an amendment, edited a `Hole` defect count from 0 to 8 on Step 3
+   (BARRIER category, AQL 1.0, n=315 → `ac=7`), confirmed Step 4's verdict
+   flipped to FAIL, submitted, and inspected the
+   `POST /api/submissions/:id/amendments` request: `newValues.verdict:
+   "FAILED"` — correctly reflecting the edit, versus
+   `originalValues.verdict: "PASSED"` (the untouched original).
+2. *Dimension-driven flip:* created a second fresh all-passing submission,
+   opened it as an amendment, left defects untouched (still 0, so the
+   server's AQL verdict stays PASSED) and instead edited a Glove Length
+   dimension sample from `240` to `230` on Step 2 (below its 240mm
+   `minThreshold`), confirmed Step 4 showed "LOT REJECTED — 1 DIMENSION
+   ISSUE(S)", submitted, and inspected the request:
+   `newValues.verdict: "FAILED"` — correctly reflecting the dimension
+   failure even though the server's own independent, AQL-only
+   `recomputedVerdict` field (informational, per `resolveVerdict.ts`'s own
+   doc comment) was `"PASSED"`, since the server has no concept of
+   dimensions at all (confirmed in §5.6). This divergence between
+   `newValues.verdict` and `recomputedVerdict` is expected and correct —
+   it's exactly why dimensions must stay OR'd in client-side rather than
+   deferred to the server, and confirms the client value (not the
+   server's AQL-only cross-check) is the one that correctly drives the
+   amendment's actual outcome.
+
+Both amendments correctly routed to `PENDING_APPROVAL`. Typecheck clean
+after each of the two file edits. Cleaned up afterward: deleted both test
+`Submission` rows and their 2 `AmendmentLog` rows directly via Prisma,
+restoring `dev.db` to its 19-row baseline (0 amendment logs) — confirmed
+via direct Prisma count.

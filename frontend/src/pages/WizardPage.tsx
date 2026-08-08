@@ -642,6 +642,7 @@ export function WizardPage() {
             {currentStep === 4 && (
               <StepReviewSubmit
                 onBack={handleBackStep}
+                onUpdate={handleUpdate}
                 inspectionData={inspectionData}
                 onSubmit={handleSubmit}
               />

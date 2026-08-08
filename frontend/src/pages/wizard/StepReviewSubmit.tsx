@@ -42,6 +42,7 @@ export interface StepReviewSubmitProps {
   inspectionData: Record<string, any>;
   onSubmit: (retainContext: boolean) => void;
   onBack: () => void;
+  onUpdate?: (partial: Record<string, any>) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -110,7 +111,7 @@ interface CategoryVerdictRow {
 // COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function StepReviewSubmit({ inspectionData, onSubmit }: StepReviewSubmitProps) {
+export function StepReviewSubmit({ inspectionData, onSubmit, onUpdate }: StepReviewSubmitProps) {
   const { addToast } = useToast();
   const { getResolvedProfile } = useConfig();
 
@@ -188,6 +189,14 @@ export function StepReviewSubmit({ inspectionData, onSubmit }: StepReviewSubmitP
       : previewState.verdict === 'FAILED' || failedDimensions > 0
         ? 'FAIL'
         : 'PASS';
+
+  // Sync the computed verdict up to WizardPage so amendment payloads
+  // reflect the latest server-verified value, not a stale prefill (§5.7).
+  // Guarded on non-null so the transient loading/error state never
+  // overwrites a previously-known good value in shared state.
+  useEffect(() => {
+    if (overallVerdict) onUpdate?.({ overallVerdict });
+  }, [overallVerdict, onUpdate]);
 
   const totalDefects: number | null =
     previewState.status === 'success'
