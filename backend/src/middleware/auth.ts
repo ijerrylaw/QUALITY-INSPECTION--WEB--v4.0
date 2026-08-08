@@ -21,6 +21,37 @@ export type UserRole = 'OPERATOR' | 'LEADER' | 'SUPERVISOR' | 'EXECUTIVE' | 'MAN
 export const ALL_ROLES: UserRole[] = ['OPERATOR', 'LEADER', 'SUPERVISOR', 'EXECUTIVE', 'MANAGER', 'ADMIN'];
 
 /**
+ * Permission GROUPS (AUDIT_REPORT.md §11) — a coarser layer on top of the six
+ * real-job-title-mapped roles above, independent of login method (a
+ * Supervisor logs in via M365 like Group B does, but sits in Group C for
+ * access purposes). Keep in sync with
+ * frontend/src/context/AuthContext.tsx's PERMISSION_GROUPS.
+ *
+ *   Group A — IT Admin, C-Suite, Directors     — full access incl. System Admin
+ *   Group B — department Managers, Executives  — full access except System Admin
+ *   Group C — Supervisors, Operators, Leaders   — Wizard + Inspection Records only
+ */
+export type PermissionGroup = 'A' | 'B' | 'C';
+
+export const PERMISSION_GROUPS: Record<UserRole, PermissionGroup> = {
+  ADMIN: 'A',
+  EXECUTIVE: 'B',
+  MANAGER: 'B',
+  SUPERVISOR: 'C',
+  LEADER: 'C',
+  OPERATOR: 'C',
+};
+
+/**
+ * Express middleware factory — same 401/403 semantics as requireRole(), but
+ * expressed in terms of access GROUPS rather than individual roles.
+ */
+export function requireGroup(...allowedGroups: PermissionGroup[]) {
+  const allowedRoles = ALL_ROLES.filter((role) => allowedGroups.includes(PERMISSION_GROUPS[role]));
+  return requireRole(...allowedRoles);
+}
+
+/**
  * Express middleware factory — reads the X-User-Role request header and
  * checks it against `allowedRoles`. 401 if no role was claimed at all or the
  * claimed role isn't recognized; 403 if it's recognized but not permitted.

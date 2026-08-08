@@ -147,6 +147,39 @@ model AmendmentLog {
 // ============================================================
 
 // ============================================================
+// PIN USER
+// Self-managed PIN logins for high-turnover floor staff who don't have
+// company email/Microsoft accounts (AUDIT_REPORT.md §11). Group A/B
+// (managers) create and deactivate these; the PIN itself authenticates
+// via POST /api/auth/pin-login. `role` is restricted server-side to the
+// three PIN-eligible roles (OPERATOR/LEADER/SUPERVISOR — the "no email" /
+// "PIN fallback" roles per NAVIGATION_AND_RBAC.md §2); `jobTitle` is the
+// free-text real title, kept separate from `role` so audit trails retain
+// the real title rather than collapsing it down to the role/group.
+// ============================================================
+model PinUser {
+  id        String   @id @default(cuid())
+  name      String
+  jobTitle  String
+  /// 'OPERATOR' | 'LEADER' | 'SUPERVISOR' — enforced in route validation, not the DB
+  role      String
+
+  /// scrypt hash of the 6-digit PIN — see backend/src/lib/pin.ts
+  pinHash   String
+  /// Per-record random salt used to compute pinHash
+  pinSalt   String
+
+  /// Deactivated users are kept (not deleted) for audit history; their PIN
+  /// becomes free for reuse since uniqueness is only enforced among active rows.
+  active    Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active])
+}
+
+// ============================================================
 // APP CONFIG
 // Maps to: export interface AppConfig
 // A SINGLETON table (only one row should ever exist).

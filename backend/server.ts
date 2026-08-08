@@ -21,6 +21,7 @@ import cors from 'cors';
 import prisma from './src/lib/prismaClient';
 import configRouter from './src/routes/config.routes';
 import submissionsRouter, { amendmentsRouter, verdictRouter } from './src/routes/submissions.routes';
+import { pinUsersRouter, pinAuthRouter } from './src/routes/pinUsers.routes';
 
 const app = express();
 const PORT = process.env['PORT'] ? Number(process.env['PORT']) : 4009;
@@ -56,6 +57,8 @@ app.use('/api/config', configRouter);
 app.use('/api/submissions', submissionsRouter);
 app.use('/api/amendments', amendmentsRouter);
 app.use('/api/verdict', verdictRouter);
+app.use('/api/pin-users', pinUsersRouter);
+app.use('/api/auth', pinAuthRouter);
 
 // ── 404 Fallback ──────────────────────────────────────────────────────────────
 app.use((_req, res) => {
@@ -74,4 +77,7 @@ app.listen(PORT, () => {
   console.log(`  Amendments:  POST  http://localhost:${PORT}/api/amendments/:id/approve`);
   console.log(`  Amendments:  POST  http://localhost:${PORT}/api/amendments/:id/reject`);
   console.log(`  Verdict:     POST  http://localhost:${PORT}/api/verdict/preview`);
+  console.log(`  PIN Users:   GET   http://localhost:${PORT}/api/pin-users`);
+  console.log(`  PIN Users:   POST  http://localhost:${PORT}/api/pin-users`);
+  console.log(`  PIN Login:   POST  http://localhost:${PORT}/api/auth/pin-login`);
 });
