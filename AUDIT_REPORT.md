@@ -309,6 +309,15 @@ Issues discovered incidentally while executing the Phase 1+2 remediation
 (AQL verdict engine consolidation), logged here so they aren't mistaken for
 regressions introduced by that work, and aren't lost track of.
 
+**Phase 1+2 plan source:** the numbered "Step 1-11" execution order referenced
+throughout this section (and in commit messages/session summaries as
+"Phase 2 step N") is not written down anywhere in this repository — it lives
+in a Claude Code plan file, `C:\Users\JerryLaw\.claude\plans\cozy-wondering-volcano.md`
+("Phase 1+2: Consolidate AQL Verdict Engine + Server-Side Amendment
+Recompute"), external to this repo. Noting the exact path here since a future
+cold session (or a different machine) has no way to find it otherwise — this
+doc only ever referenced individual steps in passing, never the source.
+
 ### 5.1 Pre-existing typecheck error — `backend/src/routes/config.routes.ts:174:92`
 
 ```
@@ -849,3 +858,197 @@ after each of the two file edits. Cleaned up afterward: deleted both test
 `Submission` rows and their 2 `AmendmentLog` rows directly via Prisma,
 restoring `dev.db` to its 19-row baseline (0 amendment logs) — confirmed
 via direct Prisma count.
+
+### 5.8 HistoryFeed.tsx duplicated AQL verdict logic — wired to POST /api/verdict/preview (Phase 1+2 Step 10)
+
+**Severity: Critical (per original audit §B2). Status: FIXED and verified
+live, 2026-08-08.**
+
+Step 10 of the Phase 1+2 plan (see the plan-source note at the top of this
+section). `frontend/src/components/history/HistoryFeed.tsx`'s
+`DefectBreakdownPanel` carried its own inline copy of the ISO 2859-1
+engine (`ISO_MATRIX`, `getThreshold`, and the pass/fail determination
+inside `buildCategoryAnalysis`) — the "display-only" duplicate
+`ISO2859_MATH_ENGINE.md` §2 already documented (unlike §5.6's
+`StepReviewSubmit.tsx` copy, which was undocumented). Unlike that copy,
+this one's bracket list and matrix *values* were actually correct
+(spot-checked against `backend/src/engine/iso2859-matrix.ts` before
+touching anything — e.g. n=315/AQL 1.0 = `{ac:7,re:8}` in both). The real
+bug here was architectural (a second engine that can silently drift) plus
+one confirmed, concretely observable defect:
+
+**`buildCategoryAnalysis`'s qualitative (PASS/FAIL/NIL) branch always set
+`passed = null` and never evaluated FAIL states at all** — so any category
+with a qualitative FAIL recorded rendered a gray "N/A" badge in the
+History panel instead of red "FAIL", regardless of what the operator
+actually toggled. This was directly observed earlier in this same session
+(§5.5's live verification transcript: "PACKAGING PASS/FAIL/NIL N/A
+qualitative 2 found N/A Box Damage 2") without recognizing the cause at
+the time — traced to this exact branch once Step 10 began. The real
+engine's `N/A` mode (`defectCounts[id] === 2` → fail) has no such gap. A
+second, lower-severity discrepancy already documented in this report's
+§B2-3 (zero-tolerance checked before `evaluationMode`, marking a different
+defect set as "failing" for GRANULAR zero-tolerance categories, same
+overall outcome) is also resolved as a side effect of removing the local
+determination logic entirely.
+
+**The fix:** deleted `ISO_MATRIX`/`getThreshold` and the
+`isZeroTolerance/isPassFailNil/CUMULATIVE/GRANULAR` determination if-chain
+from `buildCategoryAnalysis`; kept the local category/defect *iteration*
+(which categories exist, which defects belong to each, their raw
+counts — still sourced from `useConfig()`'s resolved profile, since the
+UI shows non-failing defect pills too, not just the server's
+failing-only list) and the `isZeroTolerance`/`isPassFailNil`/`snapBracket`
+helpers (kept, but now purely cosmetic label/text selectors, not verdict
+math). `buildCategoryAnalysis` is now a pure join: local iteration +
+server's `POST /api/verdict/preview` response (same
+`resolveVerdict()`/`evaluateAQLVerdict()` call `StepReviewSubmit.tsx`
+already uses per §5.6), matched by `categoryId`, for `passed` and
+`threshold`. One cosmetic rule kept exactly as before: since the server's
+`CUMULATIVE` `failingDefects` is a single synthetic "category total"
+entry rather than a per-defect list, every non-zero defect pill in a
+failing `CUMULATIVE` category still renders red (matches pre-existing
+visual behavior); `GRANULAR`/`N/A` modes use the server's real per-defect
+`failingDefects` list directly — this is what fixes the qualitative badge
+bug.
+
+The fetch is lazy by construction, no extra gating needed:
+`DefectBreakdownPanel` only *mounts* when its row is expanded
+(`HistoryFeed`'s existing `if (!isExpanded) return [dataRow]` guard), so a
+plain `useEffect` inside it fires exactly once per expansion and nowhere
+else — verified live (see below) rather than assumed. Loading/error states
+render inline within the existing panel (a brief "Loading AQL analysis…"
+line, or an amber inline note on error) with graceful degradation — raw
+defect counts/pills still show without pass/fail badges, since this is a
+read-only historical view, not a submission gate (no retry button needed,
+unlike §5.6's higher-stakes wizard context).
+
+**Verified live, end to end (2026-08-08):** confirmed via the Network tab
+that loading `/history` (with all rows collapsed) triggers **zero**
+`POST /api/verdict/preview` calls — the last request after page load was
+the row-list's own `GET /api/submissions`, nothing verdict-related.
+Created a fresh test submission (sample size 13, chosen so small AQL
+thresholds are easy to exceed) with defects deliberately spanning three
+evaluation modes: `BARRIER` (CUMULATIVE, Hole=2 > ac=1 → FAIL),
+`MINOR VISUAL` (GRANULAR, Flow Mark=3 > ac=2 → FAIL), and `PACKAGING`
+(qualitative, Box Damage toggled FAIL). Expanded the row: confirmed
+exactly one new `POST /api/verdict/preview` call fired (request
+immediately following the page-load's `GET /api/submissions`, not before)
+and its response matched the rendered badges exactly — critically,
+**`PACKAGING` now rendered red "FAIL"**, not the old gray "N/A", with
+"Box Damage" shown as the failing defect — confirming the exact bug
+described above is fixed. Collapsed and re-expanded the same row: stable,
+identical correct output, no console errors or React unmounted-component
+warnings. Also expanded an older, pre-existing (not created this session)
+passing record with 5 different defects across BARRIER/CRITICAL
+VISUAL/MAJOR VISUAL/MINOR VISUAL/NEW CATEGORY — all rendered correctly
+(PASS badges, correct per-defect pills, including a GRANULAR category
+with two different non-failing defect types shown side by side) —
+confirms the fix works across real historical data, not just newly
+crafted test cases. Typecheck clean throughout. Cleaned up afterward:
+deleted the test `Submission` row directly via Prisma, restoring `dev.db`
+to its 19-row baseline (0 amendment logs) — confirmed via direct Prisma
+count.
+
+### 5.9 Amendment approval's server-side recompute is dimension-blind — a dimension-only-failing amendment can still be approved as PASSED
+
+**Severity: High. Status: not fixed — newly identified 2026-08-08 while
+scoping Step 10, discovered by directly reading (not assuming) the current
+state of `POST /api/amendments/:id/approve`. Flagged as a strong candidate
+for next priority, ahead of Phase 1+2 Step 11 (the originally-planned
+end-to-end verification pass) — this is a live, unresolved correctness
+gap in the amendment approval path itself, not a verification-coverage
+gap.**
+
+**Where:** `backend/src/routes/submissions.routes.ts`'s
+`POST /api/amendments/:id/approve` (confirmed, reading the live code
+directly, not the docs) already does the right thing architecturally: it
+calls `resolveVerdict()` server-side and **unconditionally** persists
+`verdict: recomputed.verdict` (line ~500) — the client-supplied
+`newValues.verdict` is never trusted for persistence, only kept for an
+audit-log mismatch comparison. This means §5.7's fix (keeping the client's
+displayed/submitted verdict in sync with edits) turned out to matter less
+for the *final persisted outcome* than originally understood when that fix
+was written — the approve endpoint was already going to override it with
+a fresh recompute either way. (§5.7's fix still matters for what a
+reviewer *sees* in the Approvals Queue diff before deciding, and for
+`AmendmentLog.newValues.verdict`'s own accuracy as an audit record — just
+not for what ultimately gets written to `Submission.verdict` on approval.)
+
+**The gap:** `resolveVerdict()` — and therefore this approve-time
+recompute — is **AQL-only**. It has no concept of dimension pass/fail
+anywhere (confirmed repeatedly this session: grepped all of `backend/src`
+for "dimension", zero hits; `ISO2859_MATH_ENGINE.md` documents AQL logic
+and dimension logic as two fully independent systems). `overallVerdict`
+as shown to the operator in the wizard is `serverAqlVerdict === 'FAILED'
+|| failedDimensions > 0` — the dimension half exists **only** client-side,
+computed in `StepReviewSubmit.tsx`, and is never transmitted to or
+recomputed by the approve endpoint at all.
+
+**Consequence, confirmed via this session's own §5.7 live test data:**
+drafting an amendment with a dimension-only failure (0 defects, one
+dimension edited out of spec) correctly produced
+`newValues.verdict: "FAILED"` in the draft (§5.7's fix working as
+intended) — but the draft's own `recomputedVerdict` (the approve-time
+engine's own informational preview, same `resolveVerdict()` call the
+approve endpoint uses) was `"PASSED"`, since it never saw the dimension
+data at all. **If that amendment were approved today, the approve
+endpoint would persist `Submission.verdict = 'PASSED'`** — silently
+discarding the dimension failure and overriding the client's correct
+`'FAILED'` value with its own incorrect `'PASSED'` recompute. This is not
+hypothetical or unconfirmed: the exact response proving it
+(`recomputedVerdict: "PASSED"` alongside a real, deliberately-created
+dimension failure) is already captured in §5.7's verification section
+above, from this same session — this finding is the follow-through on
+what that response actually implies for the approval path, not a new
+repro.
+
+**Why this matters more than it might first appear:** the approve
+endpoint is the *one place* a verdict is ever permanently, authoritatively
+written after initial submission (its own code comment says as much:
+"this is the one place a verdict is permanently written, so we never
+guess here" — but it does effectively guess, for dimensions, by ignoring
+them entirely rather than by any explicit decision). A supervisor
+reviewing and approving a dimension-driven-FAIL amendment in good faith,
+seeing the correct `FAILED` value in the diff viewer, would have that
+correct decision silently overwritten by the server's own recompute at
+the moment of approval.
+
+**Correct fix, for whoever picks this up:** either (a) extend
+`resolveVerdict()`'s contract (or wrap it) to accept dimension-fail data
+and fold it into the persisted verdict the same way `StepReviewSubmit.tsx`
+already does client-side (`aqlVerdict === 'FAILED' || failedDimensions > 0`),
+requiring the approve endpoint to receive `dimensionMins`/dimension-fail
+data from `newValues` (already present in the payload, just unused for
+this purpose) — the more architecturally consistent option, matching
+"never trust the client for what gets persisted"; or (b) explicitly
+special-case dimension failures as an override the approve endpoint
+respects from `newValues` while still never trusting the *AQL* portion of
+the client's verdict. Needs a product decision on which, plus a schema/data
+question: dimension fail state currently only exists as the `fails: boolean[]`
+arrays inside `dimensionMins` JSON, not a first-class summary field —
+worth deciding whether to keep deriving it inline or add a persisted
+summary column. Out of scope for Step 10 (backend/schema-level work, a
+different file and a different kind of change than the Step 10 task this
+session was scoped to).
+
+### 5.10 API_AND_INTEGRATION_SPEC.md's approve-endpoint claim is stale
+
+**Severity: Low (documentation accuracy, not a functional bug). Status:
+not fixed — logged 2026-08-08, discovered while investigating §5.9. Not
+fixed because the six core docs must not be edited by this session per
+explicit instruction; logged here instead so the discrepancy isn't lost.**
+
+`API_AND_INTEGRATION_SPEC.md` §1 currently states, for
+`POST /api/amendments/:id/approve`: "This applies the pre-stored
+`newValues` verbatim — it does **not** recompute the AQL verdict. Any
+verdict change must be explicitly included in `newValues` at
+amendment-draft time." This is no longer accurate — per §5.9 above, the
+live code recomputes server-side via `resolveVerdict()` and always
+persists that recomputed value, never `newValues.verdict` verbatim. The
+doc's claim was accurate for the pre-Phase-1+2 state described in this
+report's original §B4 finding, but Phase 1+2 Step 5 (per the plan-source
+note above) fixed exactly this, and the doc was never updated to match.
+Whoever eventually edits the six core docs should correct this line —
+and, given §5.9, should probably also caveat that the recompute is
+AQL-only pending that fix.

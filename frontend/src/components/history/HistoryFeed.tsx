@@ -19,27 +19,17 @@ import {
 import { Button } from '../ui/Button';
 import { API_BASE_URL, useConfig } from '../../context/ConfigContext';
 
-// ── Inline ISO 2859-1 AQL Engine (display-only) ──────────────────────────────
-// Mirrors backend/src/engine/iso2859-matrix.ts & aqlEvaluator.ts.
-// Pure read-only functions used exclusively for DefectBreakdownPanel rendering.
+// ── Display-only helpers ──────────────────────────────────────────────────────
+// isZeroTolerance/isPassFailNil/snapBracket are label/text helpers only — they
+// pick which threshold text to render (e.g. "Ac: 0 · zero tolerance" vs
+// "Ac ≤ X · Re ≥ Y") and the "n=X → ISO n=Y" display line. Pass/fail
+// DETERMINATION and threshold VALUES come from POST /api/verdict/preview (the
+// same resolveVerdict()/evaluateAQLVerdict() engine every persisting route
+// uses — see StepReviewSubmit.tsx §5.6) via buildCategoryAnalysis() below, not
+// from a local matrix. Mirrors backend/src/engine/iso2859-matrix.ts's bracket
+// list and snapToBracket() algorithm for this display-only purpose.
 
 const SAMPLE_SIZE_BRACKETS = [2, 3, 5, 8, 13, 20, 32, 50, 80, 125, 200, 315, 500] as const;
-
-const ISO_MATRIX: Record<string, Record<string, { ac: number; re: number }>> = {
-  '2':   { '0.65':{ac:0,re:1},'1.0':{ac:0,re:1},'1.5':{ac:0,re:1},'2.5':{ac:0,re:1},'4.0':{ac:1,re:2},'6.5':{ac:1,re:2},'10':{ac:1,re:2} },
-  '3':   { '0.65':{ac:0,re:1},'1.0':{ac:0,re:1},'1.5':{ac:0,re:1},'2.5':{ac:1,re:2},'4.0':{ac:1,re:2},'6.5':{ac:1,re:2},'10':{ac:1,re:2} },
-  '5':   { '0.65':{ac:0,re:1},'1.0':{ac:0,re:1},'1.5':{ac:1,re:2},'2.5':{ac:1,re:2},'4.0':{ac:1,re:2},'6.5':{ac:1,re:2},'10':{ac:2,re:3} },
-  '8':   { '0.65':{ac:1,re:2},'1.0':{ac:1,re:2},'1.5':{ac:1,re:2},'2.5':{ac:1,re:2},'4.0':{ac:1,re:2},'6.5':{ac:2,re:3},'10':{ac:2,re:3} },
-  '13':  { '0.65':{ac:1,re:2},'1.0':{ac:1,re:2},'1.5':{ac:1,re:2},'2.5':{ac:1,re:2},'4.0':{ac:2,re:3},'6.5':{ac:3,re:4},'10':{ac:3,re:4} },
-  '20':  { '0.65':{ac:1,re:2},'1.0':{ac:1,re:2},'1.5':{ac:1,re:2},'2.5':{ac:2,re:3},'4.0':{ac:2,re:3},'6.5':{ac:3,re:4},'10':{ac:5,re:6} },
-  '32':  { '0.65':{ac:1,re:2},'1.0':{ac:1,re:2},'1.5':{ac:2,re:3},'2.5':{ac:2,re:3},'4.0':{ac:3,re:4},'6.5':{ac:5,re:6},'10':{ac:7,re:8} },
-  '50':  { '0.65':{ac:1,re:2},'1.0':{ac:2,re:3},'1.5':{ac:2,re:3},'2.5':{ac:3,re:4},'4.0':{ac:5,re:6},'6.5':{ac:7,re:8},'10':{ac:10,re:11} },
-  '80':  { '0.65':{ac:2,re:3},'1.0':{ac:2,re:3},'1.5':{ac:3,re:4},'2.5':{ac:5,re:6},'4.0':{ac:7,re:8},'6.5':{ac:10,re:11},'10':{ac:14,re:15} },
-  '125': { '0.65':{ac:2,re:3},'1.0':{ac:3,re:4},'1.5':{ac:5,re:6},'2.5':{ac:7,re:8},'4.0':{ac:10,re:11},'6.5':{ac:14,re:15},'10':{ac:21,re:22} },
-  '200': { '0.65':{ac:3,re:4},'1.0':{ac:5,re:6},'1.5':{ac:7,re:8},'2.5':{ac:10,re:11},'4.0':{ac:14,re:15},'6.5':{ac:21,re:22},'10':{ac:30,re:31} },
-  '315': { '0.65':{ac:5,re:6},'1.0':{ac:7,re:8},'1.5':{ac:10,re:11},'2.5':{ac:14,re:15},'4.0':{ac:21,re:22},'6.5':{ac:30,re:31},'10':{ac:44,re:45} },
-  '500': { '0.65':{ac:7,re:8},'1.0':{ac:10,re:11},'1.5':{ac:14,re:15},'2.5':{ac:21,re:22},'4.0':{ac:30,re:31},'6.5':{ac:44,re:45},'10':{ac:44,re:45} },
-};
 
 function isZeroTolerance(aqlLevel: string): boolean {
   return /and/i.test(aqlLevel) || /zero.?tolerance/i.test(aqlLevel) || /^0$/.test(aqlLevel.trim());
@@ -58,12 +48,31 @@ function snapBracket(n: number): number {
   }, SAMPLE_SIZE_BRACKETS[0] as number);
 }
 
-function getThreshold(sampleSize: number, aqlLevel: string): { ac: number; re: number } {
-  if (!aqlLevel || isZeroTolerance(aqlLevel) || isPassFailNil(aqlLevel)) return { ac: 0, re: 1 };
-  const bracket = snapBracket(sampleSize);
-  const key = /^\d+$/.test(aqlLevel.trim()) ? `${aqlLevel.trim()}.0` : aqlLevel.trim();
-  return ISO_MATRIX[String(bracket)]?.[key] ?? { ac: 0, re: 1 };
+// ── POST /api/verdict/preview response shape ─────────────────────────────────
+// Mirrors backend/src/engine/aqlEvaluator.ts's exported CategoryResult/
+// FailingDefect — same type shape StepReviewSubmit.tsx (§5.6) already uses.
+
+interface ServerFailingDefect {
+  defectId: string;
+  defectName: string;
+  count: number;
+  threshold: { ac: number; re: number };
 }
+
+interface ServerCategoryResult {
+  categoryId: string;
+  categoryName: string;
+  evaluationMode: 'CUMULATIVE' | 'GRANULAR' | 'N/A' | '';
+  threshold: { ac: number; re: number };
+  totalCount: number;
+  passed: boolean;
+  failingDefects: ServerFailingDefect[];
+}
+
+type VerdictPreviewState =
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'success'; categoryResults: ServerCategoryResult[] };
 
 // ── Category analysis types & builder ────────────────────────────────────────
 
@@ -79,25 +88,33 @@ interface CategoryAnalysis {
   name: string;
   aqlLevel: string;
   evaluationMode: string;
-  threshold: { ac: number; re: number };
+  threshold: { ac: number; re: number } | null;
   totalCount: number;
-  /** true=PASS, false=FAIL, null=qualitative/informational (no verdict shown) */
+  /** true=PASS, false=FAIL, null=qualitative/informational/not-yet-available (no verdict shown) */
   passed: boolean | null;
   defectItems: DefectItem[];
 }
 
+/**
+ * Pure join: local category/defect iteration (which categories exist, which
+ * defects belong to each, their raw counts — sourced from the resolved
+ * profile) combined with the server's pass/fail DETERMINATION, keyed by
+ * categoryId. `serverResults` is null while the preview fetch is loading or
+ * has errored — categories then render with passed=null (same visual
+ * treatment as a genuinely informational category) until real data arrives.
+ */
 function buildCategoryAnalysis(
   profile: any,
   cleanDefects: Record<string, number>,
-  sampleSize: number,
+  serverResults: ServerCategoryResult[] | null,
 ): CategoryAnalysis[] {
   const categories: any[] = profile?.aqlCategories ?? [];
   const defectDefs: any[] = profile?.defectDefinitions ?? [];
+  const resultsById = new Map((serverResults ?? []).map((r) => [r.categoryId, r]));
 
   return categories.map((cat): CategoryAnalysis => {
     const aqlLevel = String(cat.aqlLevel ?? cat.aql ?? '');
     const evalMode = String(cat.evaluationMode ?? cat.evalMode ?? '');
-    const threshold = getThreshold(sampleSize, aqlLevel);
 
     // Match defect definitions to this category by id or name
     const catDefs = defectDefs.filter(
@@ -110,26 +127,22 @@ function buildCategoryAnalysis(
 
     const totalCount = defectItems.reduce((s, d) => s + d.count, 0);
 
-    let passed: boolean | null = null;
-    const failingIds = new Set<string>();
+    const serverResult = resultsById.get(String(cat.id));
+    const passed: boolean | null = serverResult ? serverResult.passed : null;
+    const threshold = serverResult?.threshold ?? null;
 
-    if (isZeroTolerance(aqlLevel)) {
-      // AND: any defect count > 0 immediately fails the category
-      passed = totalCount === 0;
-      if (!passed) defectItems.forEach((d) => failingIds.add(d.id));
-    } else if (isPassFailNil(aqlLevel)) {
-      // Qualitative — no numeric threshold applies; shown as informational only
-      passed = null;
-    } else if (evalMode === 'CUMULATIVE') {
-      passed = totalCount <= threshold.ac;
-      if (!passed) defectItems.forEach((d) => failingIds.add(d.id));
-    } else if (evalMode === 'GRANULAR') {
-      defectItems.forEach((d) => {
-        if (d.count > threshold.ac) failingIds.add(d.id);
-      });
-      passed = failingIds.size === 0;
+    const failingIds = new Set<string>();
+    if (serverResult && !serverResult.passed) {
+      if (evalMode === 'CUMULATIVE') {
+        // Server's CUMULATIVE failingDefects is one synthetic "category total"
+        // entry, not a per-defect list — mark every recorded defect in a
+        // failing CUMULATIVE category, matching the existing visual behavior.
+        defectItems.forEach((d) => failingIds.add(d.id));
+      } else {
+        // GRANULAR / N/A — server's failingDefects is a real per-defect list.
+        serverResult.failingDefects.forEach((fd) => failingIds.add(fd.defectId));
+      }
     }
-    // empty evalMode → informational; passed remains null
 
     return {
       id: String(cat.id),
@@ -295,9 +308,58 @@ function DefectBreakdownPanel({
     [sub.profileId, getResolvedProfile],
   );
 
+  // ── POST /api/verdict/preview — server-authoritative pass/fail determination ──
+  // DefectBreakdownPanel only mounts when its row is expanded (see the
+  // `if (!isExpanded) return [dataRow]` guard below), so this effect is lazy
+  // by construction — it never fires for collapsed rows, no extra gating needed.
+  const [previewState, setPreviewState] = useState<VerdictPreviewState>({ status: 'loading' });
+  const defectsSignature = useMemo(() => JSON.stringify(cleanDefects), [cleanDefects]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPreviewState({ status: 'loading' });
+
+    fetch(`${API_BASE_URL}/api/verdict/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        profileId: sub.profileId ?? null,
+        productCode: sub.productCode,
+        sampleSize: sub.sampleSize,
+        defects: cleanDefects,
+      }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          let errStr = res.statusText;
+          try {
+            const errJson = await res.json();
+            errStr = errJson?.error ?? errStr;
+          } catch (_) {}
+          throw new Error(`Server responded ${res.status}: ${errStr}`);
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setPreviewState({ status: 'success', categoryResults: data.categoryResults ?? [] });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn('[DefectBreakdownPanel] POST /api/verdict/preview failed:', msg);
+        setPreviewState({ status: 'error', message: msg });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sub.profileId, sub.productCode, sub.sampleSize, defectsSignature]);
+
   const categoryAnalysis = useMemo(
-    () => buildCategoryAnalysis(profile, cleanDefects, sub.sampleSize),
-    [profile, cleanDefects, sub.sampleSize],
+    () => buildCategoryAnalysis(profile, cleanDefects, previewState.status === 'success' ? previewState.categoryResults : null),
+    [profile, cleanDefects, previewState],
   );
 
   // Defects recorded in the submission but absent from the resolved profile
@@ -354,6 +416,14 @@ function DefectBreakdownPanel({
               {anyFail && !noProfileLinked && (
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-500/10 border border-rose-500/30 text-rose-400">
                   CATEGORY FAILED
+                </span>
+              )}
+              {previewState.status === 'loading' && (
+                <span className="text-[10px] text-muted font-mono animate-pulse">Loading AQL analysis…</span>
+              )}
+              {previewState.status === 'error' && (
+                <span className="text-[10px] text-amber-400 font-mono">
+                  AQL analysis unavailable ({previewState.message}) — showing raw defect counts only.
                 </span>
               )}
             </div>
@@ -420,7 +490,7 @@ function DefectBreakdownPanel({
                           Ac: 0  ·  zero tolerance
                         </span>
                       )}
-                      {!zeroTol && !pfNil && cat.evaluationMode && cat.evaluationMode !== '' && (
+                      {!zeroTol && !pfNil && cat.evaluationMode && cat.evaluationMode !== '' && cat.threshold && (
                         <span className="px-2 py-0.5 rounded font-mono text-[10px] bg-gray-800/50 border border-gray-700/50 text-muted">
                           Ac ≤ {cat.threshold.ac}  ·  Re ≥ {cat.threshold.re}
                         </span>
