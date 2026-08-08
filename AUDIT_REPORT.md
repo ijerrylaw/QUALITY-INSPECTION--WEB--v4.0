@@ -1438,3 +1438,1133 @@ consolidated system (AQL engine, dimension engine, N/A/qualitative
 encoding, amendment draft/approve recompute, audit columns) has been
 verified holding together as one continuous flow, not just as
 individually-tested fixes.
+
+---
+
+## 7. Pre-Seeding Audit — Step 1: Profile/Config vs. Real Production Data
+
+**Status: READ-ONLY. Nothing in this section was fixed, refactored, or
+edited — no code changes, no edits to the six core docs.** This begins a
+new, separate step sequence agreed with the user in this session, for
+pre-seeding verification before real One Glove Group production data is
+loaded. Like the Phase 1+2 "Step 1-11" plan referenced at the top of §5,
+this sequencing itself is **not written down anywhere in this repository**
+— it exists only as this session's chat context. Flagging that here so a
+future cold session isn't left guessing what "Step 1" refers to, the same
+problem §5's header already called out for the Phase 1+2 plan file.
+
+**Ground truth used below:** three real product codes and their defect
+taxonomy, extracted by the user from three clean months (May/June/July) of
+production spreadsheets — see this session's task prompt for the full
+list. Not re-derived from any file in this repo; treated as external
+input to compare the live config against.
+
+### 7.1 Scope clarification — "productMatrixConfig" is not the AQL/defect profile system
+
+The task framing that motivated this audit ("confirm whether
+`AppConfig.productMatrixConfig` has correct, matching profiles... and
+surface any silent fallback to the hardcoded default profile") conflates
+two **separate, independently-keyed** config systems that only share the
+word "product" in their names. Confirmed directly from
+`DATA_SCHEMAS_AND_TYPES.md` §3 and live code (`resolveVerdict.ts`,
+`dimensionEvaluator.ts`):
+
+| System | AppConfig field | Keyed by | Governs | Consumed by |
+|---|---|---|---|---|
+| **Dimension spec matrix** | `productMatrixConfig: Record<productCode, ProductConfig>` | `productCode` directly | Per-size physical dimension min/max specs (glove length, palm width, thickness, etc.) + weight target | `dimensionEvaluator.ts` (`resolveVerdict.ts`'s dimension half), `StepDimensions.tsx`, `BatchEntry.tsx` |
+| **AQL/defect profile system** | `productProfileMap: Record<productCode, profileId>` + `inspectionProfiles: InspectionProfile[]` | `productCode` → `profileId` → profile object | AQL categories, defect names, evaluation modes — the actual §5.3/§5.4 fallback mechanism | `resolveVerdict.ts`'s AQL half (via `aqlEvaluator.ts`) |
+
+These have **no shared code path** — `productMatrixConfig` is never
+consulted for AQL/defect grading, and `productProfileMap`/
+`inspectionProfiles` are never consulted for dimension specs. A product
+code can be perfectly configured in one and completely absent from the
+other (and, per §7.3/§7.5 below, this is exactly what's currently
+happening). **Both systems are audited below**, since both are required
+for a real product code to grade correctly end-to-end, and both turn out
+to have their own, mechanically different, silent-fallback behavior.
+
+### 7.2 Confirmation: AppConfig is DB-backed (Prisma), not a static file
+
+Verified directly, not assumed: `backend/prisma/schema.prisma`'s
+`AppConfig` model (lines 212-273) is a real Prisma singleton table
+(`id: '1'`), with `productProfileMap`, `productMatrixConfig`, and
+`inspectionProfiles` all stored as `String @default(...)` JSON-serialized
+columns. Queried the **live** `backend/dev.db` row directly via a
+throwaway read-only script (`prisma.appConfig.findUnique({where:{id:'1'}})`,
+run through the same `PrismaClient`/`@prisma/adapter-libsql` singleton
+`backend/src/lib/prismaClient.ts` uses — no separate DB connection logic
+invented for this audit) rather than reading any doc's description of what
+it should contain. The Prisma `InspectionProfile` DB table (the *other*,
+separate profile system per §2.4/§5.5/§5.12) is confirmed still empty (0
+rows) — real profiles live exclusively in the `AppConfig.inspectionProfiles`
+JSON blob, consistent with every prior finding referencing this gap.
+
+**Live `AppConfig` row content relevant to this audit (verbatim, 2026-08-08):**
+- `productCodes` (the wizard/BatchEntry product-code `<select>`'s only
+  source, confirmed in `StepMetadata.tsx:409` — a strict native `<select>`,
+  no free-text entry): `["N035MNV-OC-24FT"]` — **one entry.**
+- `productProfileMap`: `{"N025SKB-OC-24FT":"prof_default","N035MNV-OC-24FT":"prof_default","R030MNV-OC-24FT":"prof_default","N030MNV-OC-24FT":"prof_default"}`
+- `sizes`: `["XS","S","M","L","XL"]`
+- `sampleSizes`: `[13,20,32,50,80,125,200,315,500]`
+- `productMatrixConfig`: one key only, `"N035MNV-OC-24FT"` (full
+  per-size dimension/weight spec, `lastAmended: "2026-08-03T09:50:37.031Z"`)
+- `inspectionProfiles`: 4 profiles — `prof_default`/"GLOBAL STANDARD"
+  (`isDefault:true`), `prof_1784996123131`/"MEDLINE",
+  `prof_1785374308668`/"CARDINAL", `prof_1785833175441`/"HENRY SHEIN".
+
+### 7.3 Located: the profile-resolution and dimension-resolution logic
+
+**AQL/profile side** — `backend/src/engine/resolveVerdict.ts`, already
+documented extensively in §5.3 (fixed) and quoted here only for the parts
+new to this audit:
+- Lines 219-227: `profileId = params.profileId || null`, then **only if
+  still falsy**, `productProfileMap[productCode]` is consulted (line 221-224).
+- Lines 233-256: if a `profileId` (from either source) doesn't resolve to
+  a real profile object, behavior depends on the caller's
+  `onUnresolvedProfile` setting — `'throw'` (persisting routes' default) →
+  `VerdictProfileNotFoundError`; `'fallback'` (the read-only preview route)
+  → silently proceeds to the safety net with no warning logged for *this*
+  branch specifically (the one `console.warn` at line 243 only fires for
+  the different "profileId was set but not found" sub-case, not the
+  "no profileId resolved at all" case — see §7.5).
+- Lines 258-273 (the safety net): if zero categories were populated (which
+  happens whenever `profileId` never got set, i.e. no explicit id **and**
+  no `productProfileMap` hit), picks
+  `profilesList.find(hasUsableRules) ?? HARDCODED_DEFAULT_PROFILE` —
+  **first-in-array-order**, not by any relevance/match criterion.
+
+**Dimension side** — `backend/src/engine/dimensionEvaluator.ts`, new
+since §5.9, not previously audited for missing-product-code behavior:
+- Line 135: `matrixEntry = productMatrixConfig?.[productCode]` — a plain
+  object index, `undefined` if the code isn't a key.
+- Line 136: `sizeEntry = matrixEntry?.sizes?.[size]` — also `undefined`
+  when `matrixEntry` is `undefined`.
+- Lines 138-150: with no `matrixEntry`, `dynamicDimensions` falls back to
+  `globalDimensionDefs` (`AppConfig.dimensions`, 6 generic entries with
+  their own flat `minSpec`/`tolerance`).
+- Lines 92-96 (`getDimSpec`, fixed rows): with no `sizeEntry`,
+  `target = parseFloat(sizeEntry?.lengthTarget ?? '0') || 0` → **0**, and
+  `threshold = minSpec > 0 ? minSpec - tolerance : 0` → **0**, with
+  `maxThreshold` defaulting to `Infinity`. **There is no error path or
+  logging anywhere in this file** — unlike `resolveVerdict.ts`, a missing
+  product code here is unconditionally silent, with no `'throw'` mode to
+  even opt into.
+
+### 7.4 Visual category structure — 3-family vs. 5-family — NOT resolved, flagged as instructed
+
+Per the task's explicit instruction, this discrepancy is **not
+reconciled here**. What was determined instead: **the engine and schema
+impose no fixed category count or structure at all.**
+`AQLCategory[]`/`DefectDefinition[]` (`DATA_SCHEMAS_AND_TYPES.md` §2.1)
+and `evaluateAQLVerdict()` (`ISO2859_MATH_ENGINE.md` §2,
+`backend/src/engine/aqlEvaluator.ts`) iterate whatever categories a
+profile happens to contain — 3, 5, or any other number are equally valid
+to the code. So neither the "QA sheet" (3-family: AND/Barrier/Visual
+combined) nor the "Edit sheet" (5-family: AND/Barrier/CriticalVisual(1.0)/
+MajorVisual(2.5)/MinorVisual(4.0)) reading is "expected" by the engine —
+**this is a business/data-authoring decision, not a code constraint**, and
+needs to be made before any real profile is seeded, because it determines
+the shape of the profile that gets authored.
+
+**What the live `prof_default` profile actually implements today (see
+7.2's raw dump) doesn't cleanly match either reading:** 6 categories —
+BARRIER (1.0/CUMULATIVE), CRITICAL VISUAL (1.5/CUMULATIVE), MAJOR VISUAL
+(2.5/GRANULAR), MINOR VISUAL (4.0/GRANULAR), NEW CATEGORY (1.0/CUMULATIVE),
+PACKAGING (PASS/FAIL/NIL/N/A). This is closer in *shape* to the 5-family
+(Edit sheet) reading than the 3-family one, but:
+- has **no dedicated `AND`/zero-tolerance category at all** — the real
+  8-defect AND family (Cut, Embedded Particle, Knocking, Mixed Size, Mixed
+  Type, Tear, Touching, Double Glove/Dip) has no home in the live profile;
+- CRITICAL VISUAL is AQL `1.5`, not the `1.0` the Edit sheet's "Critical
+  Visual (AQL 1.0)" tier implies;
+- carries an unexplained sixth category (`NEW CATEGORY`) and a `PACKAGING`
+  category that correspond to nothing in the given real taxonomy (may be a
+  legitimate separate business need — nothing in the ground truth supplied
+  to this audit confirms or denies that, so it's flagged, not judged).
+
+**Also unresolved, flagged rather than guessed at:** the user's ground
+truth states the QA sheet treats all 30 Visual defects as **one combined
+category** for its real Pass/Fail/DPM/AQL computation, but doesn't specify
+what `evaluationMode` (CUMULATIVE vs. GRANULAR) that combined category — or
+any of the three split tiers, if the 5-family reading is chosen instead —
+actually uses in the real formulas. **This audit cannot verify the live
+profile's `evaluationMode` values against real ground truth** for that
+reason; it can only report what's currently configured (above) and note
+that the underlying QA-sheet formula detail wasn't part of the ground
+truth handed to this session.
+
+### 7.5 Silent-fallback trace (own subsection, per instruction)
+
+**Critical prerequisite finding: there are two different call sites with
+opposite `profileId` behavior, and only one of them actually exercises
+`productProfileMap` today.** Verified by reading every `resolveVerdict()`
+call site in `backend/src/routes/submissions.routes.ts` and the two
+frontend callers directly:
+
+| Call site | `profileId` sent? | Reaches `productProfileMap`? |
+|---|---|---|
+| `POST /api/submissions` (initial submit) | **Always explicit** — `StepMetadata.tsx`/`BatchEntry.tsx` both make Profile a required dropdown field, pre-filled via `config.inspectionProfiles.find(p=>p.isDefault) ?? [0]` **independent of the chosen product code** (confirmed: no effect keyed on `productCode` sets `profileId` in either file) | **No** — explicit id always short-circuits the map lookup (`resolveVerdict.ts:219-224`) |
+| `POST /api/submissions/:id/amendments`, `.../approve` | Explicit, from `newValues.profileId ?? existing.profileId` | No, same reason |
+| `POST /api/verdict/preview` called from `StepReviewSubmit.tsx` (wizard Step 4 live preview) | Explicit — `inspectionData.profileId`, same required field | No |
+| `POST /api/verdict/preview` called from `HistoryFeed.tsx`'s `DefectBreakdownPanel` (History row expand) | `sub.profileId ?? null` — and **`Submission.profileId` is `null` for every submission that has ever been persisted**, per the already-documented §5.5/§5.12 empty-`InspectionProfile`-table gap | **Yes — this is the only live call site where `productProfileMap` is actually consulted**, and it fires on every single History-row expansion |
+
+This means the exact mechanism the task set out to trace
+(`productCode → productProfileMap → profile`) is presently **live only
+through History view**, not through the submission path — the submission
+path bypasses it entirely via the always-explicit, product-code-blind
+"default profile" pre-fill. This is itself worth noting for §5.4: the
+`ISO2859_MATH_ENGINE.md` §3 claim ("Selecting a SKU triggers a lookup in
+`productProfileMap`... to auto-load the correct `InspectionProfile`") is
+**not actually wired into either submission UI** — confirmed by reading
+both files, no `productCode`-keyed effect sets `profileId` in either.
+
+**Per-product-code trace, using the live data from §7.2:**
+
+**`N025SKB-OC-24FT`**
+- `productProfileMap["N025SKB-OC-24FT"]` → `"prof_default"` — exact key match, byte-for-byte, no whitespace/casing issue found.
+- `profilesList.find(p => p.id === 'prof_default')` → **found** (the real, admin-authored "GLOBAL STANDARD" profile, not the code-only `HARDCODED_DEFAULT_PROFILE` constant — same id string, different object/provenance, see the callout below).
+- Safety net not triggered (categories populated, `BARRIER` has both `aql`/`evalMode` set).
+- **Verdict: CLEAN MATCH** — but see 7.6, the profile it cleanly matches to has almost no real defect-taxonomy content.
+- **Cannot be exercised via the submission UI at all** — this code isn't in `productCodes`, so it can't be selected in the wizard or `BatchEntry` grid today. Only reachable if a submission for it existed via direct API and was later viewed in History.
+
+**`N035MNV-OC-24FT`**
+- `productProfileMap["N035MNV-OC-24FT"]` → `"prof_default"` — exact match, same as above.
+- **Verdict: CLEAN MATCH**, same mechanism as `N025SKB-OC-24FT`.
+- The one code actually present in `productCodes` (selectable) **and** in `productMatrixConfig` (real per-size dimension specs) — the only one of the three that resolves cleanly on *both* the AQL side and the dimension side.
+
+**`N030SKB-OC-24FT`**
+- `productProfileMap["N030SKB-OC-24FT"]` → **not a key.** The map instead contains `"N030MNV-OC-24FT"` and `"R030MNV-OC-24FT"` — neither matches. Both look like corrupted copies of `N035MNV-OC-24FT` (the `035`→`030` segment was updated but `MNV` was never corrected to `SKB`; one entry additionally has `N`→`R` on the leading character). This is precisely the "near-miss, not an obvious typo" pattern the task asked to watch for, just manifesting as a wrong middle token rather than whitespace/casing.
+- `profileId` stays `null` → the `if (profileId)` block (`resolveVerdict.ts:233-256`, including its one `console.warn`) is **skipped entirely, not entered** — this case produces **zero log output of any kind**, silent even server-side.
+- Safety net (line 260) fires: `profilesList.find(hasUsableRules)` scans in array order — `prof_default` is first **and** usable, so it wins.
+- **Verdict: SILENT FALLBACK** — lands on `prof_default` today only because it happens to be first in the array and the only other 2 real codes also map there; this is a coincidence of current data, not a designed match. If `prof_default` were ever removed from `inspectionProfiles`, or a different profile were inserted earlier in the array, this code would silently start grading against a **different, unrelated** profile (e.g. `MEDLINE`) with no error and no log line anywhere.
+- Also **not selectable** in `productCodes` and **absent from `productMatrixConfig`** — same as `N025SKB-OC-24FT`, compounding the AQL-side silent fallback with a dimension-side one (below).
+
+**Dimension-matrix trace (`productMatrixConfig`), same three codes:**
+
+| Product code | `productMatrixConfig` entry? | Result |
+|---|---|---|
+| `N025SKB-OC-24FT` | No | **SILENT FALLBACK** — the two fixed dimensions (GLOVE LENGTH, PALM WIDTH — the headline rows per `ISO2859_MATH_ENGINE.md` §5 and `StepDimensions.tsx`) get `threshold=0, maxThreshold=Infinity`: a **total no-op**, no measurement can ever fail them. The 6 global dynamic dimensions (from `AppConfig.dimensions`) still apply *some* check — flat, size-blind values (e.g. glove length min 240mm regardless of size) — real thresholds, just not product/size-specific ones. |
+| `N035MNV-OC-24FT` | Yes — full per-size spec, 5 dynamic dims, recently amended (2026-08-03) | **CLEAN MATCH** |
+| `N030SKB-OC-24FT` | No | Same **SILENT FALLBACK** as `N025SKB-OC-24FT` |
+
+Unlike the AQL side, `dimensionEvaluator.ts` has **no `'throw'` option at
+all** — there is no way for a caller to request loud failure on a missing
+product code here; every unresolved case degrades silently by
+construction. No `LOUD FAILURE` case exists anywhere in the dimension
+subsystem today.
+
+### 7.6 Summary table
+
+| Product code | Profile-map match | Selectable in UI (`productCodes`) | `productMatrixConfig` entry | Category structure | Defect names present (of real 47) | AQL levels vs. ground truth | Eval modes vs. ground truth | Sample sizes (50/80/125) supported | AQL fallback behavior | Dimension fallback behavior |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **N025SKB-OC-24FT** | Exact key match → `prof_default` | **No** | **No** | 6 categories (BARRIER/CRIT VISUAL/MAJOR VISUAL/MINOR VISUAL/NEW CATEGORY/PACKAGING) — no dedicated AND family | **~3 of 47** (see 7.7) | Partial: BARRIER 1.0 ✓, CRITICAL VISUAL 1.5 ✗(should be 1.0 per Edit sheet), MAJOR 2.5 ✓, MINOR 4.0 ✓, AND missing entirely | Not verifiable — real formula not supplied | Yes (`sampleSizes` includes all 3) | **CLEAN MATCH** (to `prof_default`) | **SILENT FALLBACK** (fixed dims no-op) |
+| **N035MNV-OC-24FT** | Exact key match → `prof_default` | **Yes** (only one in list) | **Yes** (real per-size spec) | Same as above | Same as above | Same as above | Same as above | Yes | **CLEAN MATCH** | **CLEAN MATCH** |
+| **N030SKB-OC-24FT** | **No key** — wrong entries (`N030MNV…`, `R030MNV…`) present instead | **No** | **No** | Same as above (via safety net, same profile object) | Same as above | Same as above | Same as above | Yes | **SILENT FALLBACK** (zero log output) | **SILENT FALLBACK** (fixed dims no-op) |
+
+### 7.7 Defect-name cross-check detail (backs the "~3 of 47" figure above)
+
+All three real codes ultimately resolve (cleanly or via fallback) to the
+same `prof_default` profile content, so this check is done once, against
+that profile's 11 defects across 6 categories, spot-checked against the
+real 47-name taxonomy:
+
+- **Exact string matches (3):** `Porous` (live: MAJOR VISUAL), `Thin Layer`
+  (live: MAJOR VISUAL), `Flow Mark` (live: MINOR VISUAL) — genuinely
+  present in both, though the real taxonomy doesn't specify which of the
+  three Visual tiers each belongs to (see 7.4), so tier-correctness can't
+  be independently confirmed.
+- **Same name, wrong family (1):** `Tear` — exists in both, but real
+  ground truth places it in the **AND** family (zero tolerance); the live
+  profile has it under **BARRIER** (AQL 1.0, CUMULATIVE). Same word,
+  different grading rule entirely.
+- **Near-misses (compound/partial names):** live `Hole` vs. real
+  `Visible Hole` (Barrier family in ground truth; live has it under
+  BARRIER too, so category is plausible even though the name is
+  truncated); live `Stain` + `Dirt` (two separate live defects, CRITICAL
+  VISUAL and MAJOR VISUAL respectively) vs. real `Dirt/Stain` (one
+  compound Visual-family name); live `Thin Spot` vs. real
+  `Thin/Weak Spot`; live `Particle` vs. real `Embedded Particle` (real:
+  AND family; live: CRITICAL VISUAL — another cross-family mismatch, same
+  pattern as `Tear`).
+- **No correspondence in the real 47 at all:** `Donning` (live: NEW
+  CATEGORY), `Box Damage` (live: PACKAGING) — PACKAGING as a family isn't
+  represented anywhere in the given ground truth's AND/Barrier/Visual
+  structure.
+- **Missing entirely (real defects with zero live representation):** the
+  remaining ~40 of 47 real names — including all of AND except `Tear`
+  (Cut, Knocking, Mixed Size, Mixed Type, Touching, Double Glove/Dip,
+  Embedded Particle-by-that-exact-name), all 9 real Barrier names except
+  the `Hole`≈`Visible Hole` near-miss (Burst, Multiple Pinhole, Pinhole At
+  Crotch/Cuff/Finger/Finger Tip/Palm, Sagging), and ~27 of the 30 real
+  Visual names (Lump, Flocking, Former Crack, Powder Mark, Rough Surface,
+  Fish Eye, Line Mark, White Beading, Wet Glove, Shining/Oily Mark, Color
+  Spotting, Incomplete Beading, Blister Beading, Discoloration, Glove Not
+  Chlorinated, Glove Not Reverse, Overcured Glove, Rolled Cuff/Bead,
+  Creasing Glove, Sticky, Sticky Pleat, Uncured Glove, Slip Mark, Smell
+  Glove, White Patches, and more).
+- **Checked the other 3 live profiles too** (`MEDLINE`, `CARDINAL`,
+  `HENRY SHEIN`) in case `productProfileMap` should have pointed
+  elsewhere: none come closer — `MEDLINE`/`CARDINAL` have only 6 defects
+  each (a subset of `prof_default`'s set), `HENRY SHEIN` has the identical
+  11-defect set as `prof_default`. No profile currently in `AppConfig`
+  contains the real 47-name taxonomy, or anything close to it.
+
+**Bottom line: independent of the fallback-mechanism question in §7.5,
+the profile every real product code lands on today — cleanly or by
+fallback — is demo/placeholder content, not a reflection of One Glove
+Group's actual defect taxonomy.** Fixing the `productProfileMap` typos
+alone (making `N030SKB-OC-24FT` resolve "cleanly") would not fix this —
+it would just cleanly match it to the same wrong content the other two
+codes already cleanly match to.
+
+### 7.8 What this implies for §5.4 (informational only — not designed or implemented here)
+
+- §5.4 framed the open question as "should the *hardcoded* default profile
+  become per-tenant configurable." This audit surfaces a **prerequisite**
+  question: right now, "no `productProfileMap` entry for this product
+  code" and "no profile configured for this tenant yet" are
+  indistinguishable — both silently land on the same first-usable-profile
+  safety net (§7.5). A per-tenant default redesign should probably decide
+  whether a missing map entry should stay silent (today's behavior) or
+  become admin-visible (a warning badge, a config-health check, etc.),
+  especially once real multi-product seeding begins and "silently graded
+  against the wrong profile" becomes a live-data risk instead of a
+  demo-data curiosity.
+- `productMatrixConfig`'s silent fallback (§7.3, §7.5) is a **separate**
+  gap from §5.3/§5.4's AQL-side fallback — different file, different
+  mechanism (a no-op via zeroed thresholds, not a substituted profile
+  object), and **not touched by §5.3's fix at all**. Worth folding into
+  the same design conversation rather than assuming "the profile fallback
+  is fixed" also covers dimensions.
+- Seeding needs to populate **three** independently-keyed structures for
+  each real product code, not one: `productCodes` (make it selectable at
+  all), `productProfileMap` (route it to the right AQL profile), and
+  `productMatrixConfig` (give it real dimension specs). A code can be
+  perfectly correct in one and silently broken in the other two, as
+  `N025SKB-OC-24FT` and `N030SKB-OC-24FT` currently demonstrate.
+- Per §7.5's finding that `productProfileMap` is currently dead code on
+  the submission path (profile is always operator-picked, pre-filled
+  product-code-blind), whoever picks up §5.4 should also decide whether to
+  actually wire the `ISO2859_MATH_ENGINE.md` §3-documented "select SKU →
+  auto-load profile" behavior into `StepMetadata.tsx`/`BatchEntry.tsx`, or
+  formally treat operator-selected-profile-with-default-prefill as the
+  permanent intended design and correct the doc instead.
+- The 3-family-vs-5-family decision (§7.4) has to be made **before**
+  profile authoring starts, since it determines the category shape of
+  whatever real profile(s) get seeded — this is a business decision to
+  get from whoever owns the QA sheet, not something derivable from the
+  code or schema.
+- Whatever real profile eventually replaces today's placeholder content
+  needs the actual 47-name taxonomy authored from scratch (§7.7) — no
+  amount of fixing `productProfileMap` keys or `productMatrixConfig`
+  entries substitutes for that; those fixes only get a real product code
+  routed to *a* profile, not to a *correct* one.
+
+---
+
+## 8. Five Open Questions — Read-Only Investigation
+
+**Status: READ-ONLY. No code changes, no edits to the six core docs.** Five
+specific questions, each answered from the actual doc text and/or actual
+code/schema/git history — not inferred. Every claim below is cited to a
+doc section or a file/line. Two sub-questions turned out to have no
+existing answer anywhere in the repo; flagged explicitly in place rather
+than glossed over.
+
+**Caveat on `archived/` citations (§8.1, §8.4): per Jerry, everything in
+`archived/` may be outdated.** `archived/V4_MASTER_BLUEPRINT.md` is used
+below in two places as supporting evidence, not as proof of current
+intent — it's a superseded doc version by definition (that's why it's in
+`archived/`), and nothing confirms its content still reflects what's
+actually intended today. Both citations are flagged inline with this same
+caveat repeated at the point of use, so neither can be read in isolation
+as settled fact.
+
+### 8.1 — Q1: Is ISO 2859 sampling math fixed, or tenant-configurable?
+
+**`ISO2859_MATH_ENGINE.md` §1** ("ISO 2859-1 MASTER AQL LOOKUP ENGINE")
+describes bracket snapping and the threshold matrix lookup with no
+per-tenant/per-profile override language anywhere — confirmed by reading
+the full doc (93 lines) end to end; the word "tenant" does not appear in
+it at all, and "profile" appears only in §3's `productProfileMap`
+description (which selects *which AQL level* to use, not the underlying
+`ac`/`re` numbers — see below). **The doc itself never explicitly frames
+this as a "fixed vs. configurable" design decision** — it's silent on the
+question as a stated principle, not just terse about it.
+
+**The code is unambiguous, though.** `backend/src/engine/iso2859-matrix.ts:1-30`
+(file header): *"DO NOT MODIFY this file without cross-referencing against
+the official ISO 2859-1:2005 standard document. All changes must be
+reviewed and approved."* — a single `ISO_2859_MATRIX` constant
+(lines 135-372) shaped `Record<sampleSize, Record<aqlLevel, {ac, re}>>`,
+with no tenant/profile/product dimension anywhere in that shape. It is
+imported and used as-is by `aqlEvaluator.ts`/`resolveVerdict.ts` for every
+profile, every product code, every tenant (today: the only tenant).
+
+**Confirmed nothing in `AppConfig` varies the underlying numbers either:**
+- `AppConfig.sampleSizes` (live value: `[13,20,32,50,80,125,200,315,500]`,
+  §7.2) is a picklist of which sample sizes the wizard's dropdown offers —
+  `schema.prisma`'s own comment on this field: `/// JSON: number[] — valid
+  AQL sample sizes` — not a table of `ac`/`re` values.
+- Every `AQLCategory` object inside every live `inspectionProfiles` entry
+  (§7.2's raw dump) carries only an `aqlLevel`/`aql` **string selector**
+  (e.g. `"1.0"`, `"2.5"`, `"AND"`) — never a numeric `ac`/`re` override.
+  That string is looked up in the one global `ISO_2859_MATRIX`.
+
+**`archived/V4_MASTER_BLUEPRINT.md:193`** (⚠️ archived — may be outdated,
+per Jerry; cited here only as corroborating context, not as proof of
+current intent. Not one of the six core docs; `backend/prisma/schema.prisma:3`
+claims it as an origin — *"Source of Truth: V4_MASTER_BLUEPRINT.md § 4
+(Core Data Structures)"* — but that claim is itself just a code comment,
+not independent confirmation the blueprint's content is still current)
+states the intended mechanism: *"a strict customer (e.g., Ansell) to
+require tighter AQL levels (e.g., 0.65 for Barrier) for specific product
+codes, overriding the standard factory defaults (1.0)."* If still
+accurate, this would confirm what varies per profile/tenant is **which
+AQL level is assigned to a category**, not the ISO standard's own `ac`/`re`
+numbers for that level — consistent with what the code actually does
+today, but "consistent with" here means the archived doc doesn't
+contradict the code, not that the code was verified to follow it.
+
+**Answer: sampling math (bracket list + `ac`/`re` matrix) is a single,
+fixed, standards-derived constant, shared globally across every profile
+and tenant, in the *code as it exists today* — that part is directly
+verified, independent of the archived doc.** Only the AQL-level-string
+assignment per category is profile-configurable. The live
+`ISO2859_MATH_ENGINE.md` doc never states the "fixed vs. configurable"
+framing directly — that framing isn't addressed anywhere in the live doc
+text itself. The archived blueprint's matching language is noted only as
+context on possible original intent; given the outdated-content caveat
+above, it isn't treated as confirming evidence for what's *currently*
+intended.
+
+### 8.2 — Q2: Does anything already anticipate a tenant-scoped admin role?
+
+**`NAVIGATION_AND_RBAC.md` §2** (lines 17-25) — full current role list, 6
+roles: `OPERATOR` (PIN, `/wizard` `/history`), `LEADER` (PIN or M365,
+same two routes), `SUPERVISOR` (M365 w/ PIN fallback, adds `/analytics`),
+`EXECUTIVE` (M365 only, adds `/approvals` `/config`), `MANAGER` (M365
+only, same as Executive), `ADMIN` (M365 only, "All Routes including
+`/system`"). Confirmed identical in code:
+**`frontend/src/context/AuthContext.tsx:5`** —
+`export type UserRole = 'OPERATOR' | 'LEADER' | 'SUPERVISOR' | 'EXECUTIVE' | 'MANAGER' | 'ADMIN';`
+— no 7th role exists anywhere in the type system either.
+
+**Who can edit `AppConfig`/config routes today, confirmed directly:**
+`backend/src/routes/config.routes.ts:140` —
+`router.patch('/', async (req: Request, res: Response) => { ... })` — no
+middleware argument between the path and the handler, i.e. no
+auth/role-check function runs before this handler at all. This is
+consistent with (not a new finding beyond) the original audit's §B1/
+Executive-Summary-#3 finding that `backend/server.ts` never registers any
+auth middleware globally either. **Actual current enforcement is
+client-side only**: `/config` is gated to EXECUTIVE/MANAGER/ADMIN via
+`RoleRoute` in `App.tsx` (already cited in the original audit); the
+`PATCH /api/config` endpoint itself has zero server-side role check and
+will execute for any caller who reaches port 4009, regardless of role.
+
+**Every `[PLANNED]` marker in the doc, grepped exhaustively across the
+full file (3 total occurrences):** `/analytics` "partial implementation"
+(§3, line 37); Bulk CSV/Excel import on `/history` (§3, line 41); JWT
+bearer tokens "scoped by `tenantId`, `facilityId`, `lineId`, and `userId`"
+(§4, line 47, *"PLANNED — NOT YET IMPLEMENTED"*). **None of these three
+planned items names an additional role.** The JWT item describes a
+planned *auth/session mechanism* scoped to the six existing roles by
+tenant/facility/line/user, not a new role tier. §1's "Multi-Tenant &
+Organizational Hierarchy" (`Tenant → Facility → Line → Machine/Shift/Batch`)
+describes a planned **data** hierarchy, again not a role.
+
+**Answer: no tenant-scoped admin role (e.g. a `TENANT_ADMIN`/`PLATFORM_ADMIN`
+tier sitting above or across the existing `ADMIN`) is documented, planned,
+or implemented anywhere in this repo — genuinely not addressed.** The
+existing `ADMIN` role is described only as "System IT Admins" with no
+statement either way on whether it's meant to be scoped per-tenant or
+global across tenants once multi-tenancy exists; the doc never raises that
+question, because multi-tenancy itself isn't implemented at all (per the
+original audit's §B7). This part of Q2 has no existing answer — an open
+decision.
+
+### 8.3 — Q3: What does `lastAmended` actually do, and does any AppConfig versioning pattern exist?
+
+**Where it's declared:** `DATA_SCHEMAS_AND_TYPES.md` §3, `ProductConfig`
+interface: `lastAmended?: string;` (doc line ~184) — a bare type
+declaration, no described behavior in the doc text itself.
+
+**Where it's written — exactly once, unconditionally, no comparison:**
+`frontend/src/pages/config/ProductEngine.tsx:164-176`,
+`handleSaveProductConfig()`:
+```ts
+const draftWithTime = { ...expandedProductDraft, lastAmended: new Date().toISOString() };
+```
+This stamps the current time on every save, with **no read of the
+previous `lastAmended` value first** — no staleness check, no
+optimistic-concurrency comparison, no "has this changed since I opened the
+editor" guard.
+
+**Where it's read — display only, one place:** same file,
+`frontend/src/pages/config/ProductEngine.tsx:374-387` — renders a
+`Clock`-icon badge reading `UPDATED: {YYYY-MM-DD HH:MM}` next to each
+product code in the Product Engine's list view, manually formatted from
+the raw ISO string. **No other logic consumes this value anywhere** — not
+for sorting, not for filtering, not for conflict detection. Confirmed via
+a repo-wide grep for `lastAmended`: it appears in exactly 4 files total —
+`DATA_SCHEMAS_AND_TYPES.md` (type only), `ConfigContext.tsx` (the
+frontend's local mirror of the `ProductConfig` type, field declaration
+only — no runtime usage), `ProductEngine.tsx` (the write + display
+described above), and this report itself (from the prior session's §7.2).
+
+**Any AppConfig-equivalent of `AmendmentLog`?** `AmendmentLog`
+(`schema.prisma:87-135`) is a real, dedicated audit-trail model for
+`Submission` changes: `originalValues`/`newValues` JSON snapshots,
+`requestedBy`/`reviewedBy`/`requestedAt`/`reviewedAt`, `status`, plus the
+`recomputedVerdict`/`recomputedCategoryResults`/
+`recomputedFailedDimensions`/`recomputedDimensionResults` audit columns
+added in §5.9/§c4be2e8. **Grepped the full `schema.prisma` for any
+model name containing `History`, `Version`, or `Audit` — zero matches
+beyond `AmendmentLog` itself.** No `AppConfigHistory`, `ConfigVersion`,
+`ProfileAuditLog`, or anything analogous exists. `AppConfig` is a strict
+Prisma singleton (`id String @id @default("1")`) that `PATCH /api/config`
+overwrites in place (already documented in the original audit's §B5) —
+editing or deleting a profile, category, or defect leaves **zero** history
+anywhere.
+
+**Answer: `lastAmended` is a write-once-per-save, display-only timestamp
+— never compared, checked, or used for any conflict/staleness logic.**
+It also only exists on `productMatrixConfig` entries (dimension specs) —
+`inspectionProfiles` entries (the AQL/defect profiles themselves) carry no
+timestamp of any kind, confirmed by the live `inspectionProfiles` dump in
+§7.2 (no `lastAmended`/`updatedAt`/similar key on any of the 4 profile
+objects). **No versioning/history pattern exists anywhere for AppConfig
+content**, in contrast to `Submission`'s real, dedicated `AmendmentLog`
+system.
+
+### 8.4 — Q4: Was the profile/defect system ever meant to be relational tables, not JSON blobs?
+
+**`DATA_SCHEMAS_AND_TYPES.md` §2.1** (lines 68-73) documents the
+JSON-blob shape as **current fact**, stated matter-of-factly with no
+rationale given and no mention of a relational alternative:
+*"AppConfig JSON (`AppConfig.inspectionProfiles` field): Profiles are
+stored as a serialized JSON array. Field names in the JSON blob may differ
+from Prisma field names... The backend normalizes these before passing
+them to the engine."* A full-doc grep for `relational`/`normalize`/
+`normalization` returns zero hits beyond this one categoryId/currentClass
+dual-naming note — **the doc never discusses relational tables as an
+intended or rejected alternative at all.**
+
+**But the relational shape already exists in the schema, unused, not
+merely "documented as intended":**
+`backend/prisma/schema.prisma:143-155` (`InspectionProfile`),
+`:163-179` (`AQLCategory`, real FK `profileId → InspectionProfile`,
+`onDelete: Cascade`, `@@unique([profileId, name])`), `:187-200`
+(`DefectDefinition`, same FK pattern) — a fully normalized design, already
+built. Confirmed empty (0 rows) via the live-DB query in §7.2's task —
+real profile data has never once been written through these tables.
+
+**Git history (`git log --all -- backend/prisma/schema.prisma`, 6 commits
+total, oldest to newest):**
+1. `7533b12` (2026-07-23, *"Session 2A - Database Schema"*) — introduces
+   the relational `InspectionProfile`/`AQLCategory`/`DefectDefinition`
+   models (confirmed via `git show 7533b12` — these appear as new `+`
+   lines in this commit; this is the original schema).
+2. `823ccf1` (2026-07-28, commit message literally just *"20260728"*, no
+   descriptive text) — adds `aqlCategories`, `defectDefinitions`, **and**
+   `inspectionProfiles` as three parallel `String @default("[]")` JSON
+   columns directly on `AppConfig`, **all three in the same commit**,
+   five days after the relational tables already existed — confirmed via
+   `git show 823ccf1 -- backend/prisma/schema.prisma`.
+3. `4534bb6` (2026-07-30, *"feat: refactor docs architecture and update
+   wizard/config UI components"*) — adds only `productMatrixConfig`
+   (a 1-line diff, confirmed via `git show --stat`);
+   `aqlCategories`/`defectDefinitions`/`inspectionProfiles` untouched.
+4. No commit since (`208f39d`, `c4be2e8`, `e3cd705`) touches these fields
+   at all.
+
+**No commit message across any of the 6 commits explains the decision**
+to add a second, JSON-blob-based system alongside the already-existing
+relational one, or states an intent to abandon the relational tables.
+
+**The closest thing to an explanation found, and it predates all Prisma
+work — ⚠️ archived, may be outdated, per Jerry; treat as historical color,
+not a settled account of intent:** `archived/V4_MASTER_BLUEPRINT.md`
+(`schema.prisma:3` claims it as source of truth, but that's a code
+comment, not independent confirmation the blueprint still reflects
+current thinking) lines 100-140 define `AQLCategory`/`DefectDefinition`/
+`InspectionProfile` as standalone TypeScript interfaces (the shape that
+became the relational Prisma models) **and, separately, in the same
+document**, embed `defectDefinitions: DefectDefinition[]`,
+`aqlCategories?: AQLCategory[]`, and `inspectionProfiles?: InspectionProfile[]`
+directly on its own `AppConfig` interface (blueprint lines 130-140) —
+i.e., if this archived doc is still an accurate record, **the blueprint
+itself specified both shapes, unreconciled, before either was ever
+implemented.** Given the outdated-content caveat, this is offered as a
+plausible historical trace, not as a confirmed root cause.
+
+**Answer: no explicit intent statement exists anywhere in the live docs,
+code, or commit history — this is genuinely open, not inferable one way
+or the other.** What's independently confirmed from `git log`/`git show`
+alone, with no dependency on the archived doc: the relational shape was
+built first (Session 2A, `7533b12`) and has sat completely unused since; a
+parallel JSON-blob shape was added five days later (`823ccf1`) with no
+recorded rationale in that commit or any other. The archived blueprint's
+own unreconciled dual-shape (above) is a *possible* explanation for where
+that ambiguity originated, offered with the caveat that the archived
+doc's reliability as a record of current intent is itself unconfirmed.
+Whether the JSON-blob approach was a deliberate simplification or the
+relational tables are simply an abandoned false start is **not stated
+anywhere reliable in this repo** — flagged as an open question for Jerry,
+not answered here.
+
+### 8.5 — Q5: Does any config-editing UI for defect names/AQL already exist?
+
+**Yes — a live, fully wired one, not something to build from zero.**
+`frontend/src/pages/ConfigPage.tsx:54-56,303-311` imports and renders
+`QualityRules` (alongside `FactorySetup` and `ProductEngine`) at `/config`
+(already established as live/routed in the original audit's §2.3).
+
+**`frontend/src/pages/config/QualityRules.tsx:1-13`** (its own header
+doc comment): *"Phase 3: Configuration Control - Quality Rules. Provides
+interfaces to manage: 1. Inspection Profiles (CRUD, Default) 2. Defect
+Category Setup — AQL level & Evaluation Mode per category (CUMULATIVE /
+GRANULAR / N/A) 3. ISO Sample Sizes... 4. Defect Management Kanban Board
+(per profile, drag-and-drop)."* This is not aspirational documentation of
+a stub — confirmed by direct comparison that this component's
+`defaultProfiles` seed data (lines 49-71: `prof_default`/"GLOBAL STANDARD",
+with `def_hole`/`def_tear`/`def_stain`/`def_particle`/`def_dirt`/
+`def_flow`/`def_box`) matches the live `inspectionProfiles` content
+queried directly from `dev.db` in §7.2 almost exactly (down to the exact
+defect IDs) — **this component is the actual tool that produced the live
+config already audited in §7**, not a disconnected mock.
+
+Real CRUD handlers present in the file: `handleAddProfile` (line 116),
+`handleDuplicateProfile` (131), `handleSetDefaultProfile` (145),
+`handleMoveCategory` (210), `handleRemoveCategory` (269),
+`handleAddDefect` (297), `handleDeleteDefect` (320), `handleMoveDefect`
+(327) — full add/remove/reorder for both categories and defects, plus an
+`ISO_WHITELIST` (line 39: `['AND', '0.65', '1.0', '1.5', '2.5', '4.0',
+'6.5', 'PASS/FAIL/NIL']`) and `EVAL_MODES` (line 41:
+`['CUMULATIVE', 'GRANULAR']`) constraining category edits to valid
+values.
+
+**The dead `ConfigDashboard.tsx`** (already flagged unreachable in the
+original audit's §2.5/B8) does have a "Defect Definitions" tab
+(`frontend/src/components/config/ConfigDashboard.tsx:15-24,76-104`) with
+a `defect.class` `<select defaultValue=...>` per row — but beyond the
+whole component being unimported/dead, **this specific control is
+non-functional even on paper**: line 24 is
+`const [defects] = useState(INITIAL_DEFECTS);` — no setter is destructured
+at all, so there is no code path by which a class change could ever be
+persisted into state, dead component or not.
+
+**Answer: `QualityRules.tsx` is a complete, live, functioning
+defect-name/AQL-category-editing UI already reachable at `/config` for
+EXECUTIVE/MANAGER/ADMIN.** The seeding/authoring work implied by §7's
+findings (populating the real 47-defect taxonomy, deciding the 3-vs-5
+Visual family structure, fixing `productProfileMap`/`productMatrixConfig`
+entries) can be done **through this existing UI** — it does not require
+new editing UI to be built. `ConfigDashboard.tsx`'s defect tab is dead
+code and would need real state wiring even if resurrected, so it isn't a
+usable second option.
+
+### 8.6 — Summary: what remains genuinely open
+
+Of the five questions, **four have concrete, evidence-backed answers from
+live docs/code/git history alone, independent of `archived/`**
+(§8.1's code-verified matrix behavior, §8.2, §8.3, §8.4's `git log`
+findings, §8.5). The two `archived/V4_MASTER_BLUEPRINT.md` citations
+(§8.1, §8.4) are corroborating color only, flagged per Jerry's note that
+`archived/` content may be outdated — neither question's core answer
+depends on the archived doc being accurate. **Two specific sub-points have
+no existing answer anywhere in this repo, archived or otherwise,** and are
+open decisions for Jerry, not inferred here:
+1. **(Q2)** Whether a future tenant-scoped admin role/tier is intended at
+   all, and if so whether it sits above, alongside, or replaces the
+   existing `ADMIN` role — nothing in `NAVIGATION_AND_RBAC.md` or the
+   codebase raises this question, let alone answers it.
+2. **(Q4)** Whether the JSON-blob profile/defect storage shape was a
+   deliberate design decision or the relational Prisma tables represent an
+   abandoned first attempt that was never formally retired — no commit
+   message, doc, or code comment (live or archived) states either
+   position with any confirmed reliability.
+
+---
+
+## 9. Status Check — Auth Fix, Known-Issues Refresh, Relational-vs-Blob Effort
+
+**Status: READ-ONLY. No code changes, no edits to the six core docs.**
+Every claim below is from directly reading the live code in this pass, not
+from memory of prior sessions or trust in old doc labels.
+
+### ⚠️ Business-model correction — read this before B7 or §5.4
+
+**This app is SINGLE-TENANT-PER-DEPLOYMENT, not shared-instance
+multi-tenant.** Each company that buys this app gets its own separate
+installation and its own separate database — never a shared instance with
+data walls between customers. This corrects the assumption underlying the
+original audit's **B7** ("Multi-tenancy reality check") and the framing of
+**§5.4** below: both measured this app against a shared-instance
+architecture (one running app, many customers, `tenantId` columns,
+cross-tenant query scoping) that is **not the actual target model**. Under
+single-tenant-per-deployment, `tenantId` scoping, cross-company auth
+isolation, and a shared-instance data model are not needed — ever — because
+isolation is already achieved structurally, by each company simply running
+their own install. The `Tenant → Facility → Line → Machine` hierarchy
+described in `NAVIGATION_AND_RBAC.md` §1 and the "eventually serve multiple
+factories/customers" framing in §5.4 should be read through this
+correction going forward.
+
+**This does not touch the config-route auth gap below (§9.1)** — that's
+about role-based access *within* one company's own install (an OPERATOR
+vs. an ADMIN hitting the same backend), which matters identically under
+single-tenant-per-deployment as it would under any other model.
+
+**Not acted on now, per instruction** — this correction is logged here so
+it's on record; reflecting it into `NAVIGATION_AND_RBAC.md`/B7's own text
+is deferred to Phase 8's doc-update pass, not done in this session.
+
+### 9.1 — Auth-fix status (highest priority)
+
+**Directly checked, not assumed: the fix was never applied. Zero backend
+authentication or authorization middleware exists anywhere in this
+codebase, on any route, as of this pass.**
+
+- **`backend/server.ts:25-30`** — the entire global middleware stack is
+  `app.use(cors())` and `app.use(express.json({limit:'5mb'}))`. No
+  auth/session/token middleware is registered before the four route
+  mounts (`/api/config`, `/api/submissions`, `/api/amendments`,
+  `/api/verdict`, lines 55-58).
+- **Every individual route registration takes exactly two arguments —
+  path and handler — with no middleware function between them.** Checked
+  all of them directly:
+  - `backend/src/routes/config.routes.ts:95` (`router.get('/', ...)`),
+    `:140` (`router.patch('/', ...)`)
+  - `backend/src/routes/submissions.routes.ts:106` (`router.post('/', ...)`),
+    `:235` (`router.get('/', ...)`), `:256` (`router.get('/:id', ...)`),
+    `:303` (`router.post('/:id/amendments', ...)`), `:407`
+    (`amendmentsRouter.get('/pending', ...)`), `:434`
+    (`amendmentsRouter.post('/:id/approve', ...)`), `:571`
+    (`amendmentsRouter.post('/:id/reject', ...)`), `:633`
+    (`verdictRouter.post('/preview', ...)`)
+- **No auth middleware file exists to register even if someone forgot to
+  wire it in** — `Glob` for `backend/src/**/*auth*` and
+  `backend/src/middleware/**` both return zero results. There's nothing
+  half-built; this was never started.
+
+**Answer: no, the fix was never applied.** `PATCH /api/config`,
+`POST /api/amendments/:id/approve`, and every other mutating endpoint
+remain reachable by any HTTP client that can hit port 4009, with no role
+check of any kind — identical to the original audit's B1 finding. RBAC
+continues to be enforced **only** client-side, via `RoleRoute` in
+`frontend/src/App.tsx` (unchanged since the original audit; not
+re-verified line-by-line in this pass since nothing in this session
+touched it, but nothing suggests it changed either — a UI-only guard is
+trivially bypassed by any direct API call regardless). **Per instruction,
+not fixed in this pass — this is the top open item in this report,
+carried forward as ranked item #1 below.**
+
+### 9.2 — Known Issues refresh (§5.1 – §5.13)
+
+Each item re-checked against live code in this pass. Where a fix is
+credited to a specific commit, that commit was confirmed via `git log`/
+`git show`, not inferred from the doc's own prior narrative.
+
+| § | Issue | Doc's old label | **Current status** |
+|---|---|---|---|
+| 5.1 | `config.routes.ts:174` `error?.message` on `unknown` — typecheck error | not fixed | **STILL OPEN**, unchanged. Re-read the exact line directly: `res.status(500).json({ error: '...', details: error?.message \|\| String(error) });` — identical to the original finding. Trivial, low-urgency, unrelated to anything else in this pass. |
+| 5.2 | Migration history drift (`dev.db` vs. recorded migrations) | not fixed | **STILL OPEN**, unchanged and slightly worse in scope than when logged. `backend/prisma/migrations/` still contains only `20260723114800_init_schema` + `migration_lock.toml` — confirmed via direct directory listing. Every schema change since (AmendmentLog recompute columns, `AmendmentLog.recomputedFailedDimensions`/`recomputedDimensionResults`) was applied via `prisma db push`, per §5.9's own note — the drift has grown, not shrunk. Still an open decision, not a regression. |
+| 5.3 | `resolveVerdict.ts` only read `aqlLevel`/`evaluationMode`, never `aql`/`evalMode` — real profiles silently ungraded | not fixed (deferred 2026-08-07) | **ALREADY RESOLVED.** `git log` shows commit `30385e5` — *"fix: read aql/evalMode field-name variants in resolveVerdict (§5.3)"* — explicitly fixing this by number. Confirmed independently by reading the live `normalizeForEngine()`/`hasUsableRules()` in `resolveVerdict.ts` directly (lines 90-91, 113-114): both already do `c.aqlLevel ?? c.aql` / `c.evaluationMode ?? c.evalMode`, exactly the fix the doc's own "Correct fix" section recommended. **The doc's "not fixed" status label was simply never updated after the fix landed** — this is the clearest example of doc/code drift found in this pass. This is also, separately, why §7's audit found `N025SKB-OC-24FT`/`N035MNV-OC-24FT` resolving *cleanly* to the real `prof_default` profile rather than falling back — that clean resolution depends on this exact fix. |
+| 5.4 | Hardcoded default profile should become per-tenant configurable | design note, deferred to "the multi-tenancy phase" | **SUPERSEDED in its original framing** by the business-model correction above — there is no shared-instance "multi-tenancy phase" coming, so "per-tenant configurable" as literally stated no longer applies. **A narrower question survives, reframed:** each single-tenant install still ships with `HARDCODED_DEFAULT_PROFILE` baked into `resolveVerdict.ts` source code (not admin-editable) as the zero-state fallback, used only when *no* AppConfig-configured profile has usable rules yet. Since `QualityRules.tsx` already supports admin-driven profile CRUD including "Set Default" (`handleSetDefaultProfile`, confirmed in §8.5), the remaining gap is narrow and low-stakes: a brand-new install's very first bootstrapping default is code-level, not admin-configurable, until an admin sets up a real profile through the UI. Not the cross-tenant-conflict risk originally framed — a much smaller, single-install "first-run default" question. |
+| 5.5 | Amendment prefill race condition (`StepMetadata.tsx`) | FIXED, verified 2026-08-08 | **ALREADY RESOLVED, confirmed still holding.** Re-read `StepMetadata.tsx` directly: `lastPopulatedRef` (line 121), `frozenLotNo`/`lotSeedRef` snapshot pattern (lines 267-268) — the exact fix mechanism described in the original write-up — all still present, unchanged. |
+| 5.6 | `StepReviewSubmit.tsx` duplicated AQL engine, wrong thresholds | FIXED, verified 2026-08-08 | **ALREADY RESOLVED, independently reconfirmed** — this session's own §7.5 read `StepReviewSubmit.tsx`'s `POST /api/verdict/preview` call directly (explicit `profileId` from `inspectionData`) as part of tracing the profile-fallback mechanism; the server-call wiring described in §5.6 is still live. |
+| 5.7 | Amendment verdict stale after post-prefill edits | FIXED, verified 2026-08-08 | **ALREADY RESOLVED, confirmed still holding.** Re-read `StepReviewSubmit.tsx` directly: the `useEffect(() => { if (overallVerdict) onUpdate?.({ overallVerdict }); }, [overallVerdict, onUpdate])` sync (lines 197-199) is still present, unchanged. |
+| 5.8 | `HistoryFeed.tsx` duplicated AQL engine, N/A-mode badge bug | FIXED, verified 2026-08-08 | **ALREADY RESOLVED, independently reconfirmed** — this session's own §7.5 read `HistoryFeed.tsx`'s `DefectBreakdownPanel` calling `POST /api/verdict/preview` with `profileId: sub.profileId ?? null` directly; the server-delegated determination described in §5.8 is still live. |
+| 5.9 | Amendment approval / initial submit dimension-blind | FIXED, verified 2026-08-08 | **ALREADY RESOLVED, confirmed still holding** — this session's §9.1 read of the approve endpoint (lines 469-476) and §7.3's earlier read of `resolveVerdict.ts` both confirm `size`/`dimensionMeasurements` are still wired into all three persisting call sites, with the `aqlVerdict === 'FAILED' \|\| failedDimensions > 0` fold intact. **Cross-reference, not a regression:** §7.3/§7.5 subsequently found a *different*, unrelated silent-fallback gap in the same dimension subsystem — missing `productMatrixConfig` entries silently zero out the two fixed-dimension thresholds for `N025SKB-OC-24FT`/`N030SKB-OC-24FT`. That's a data-completeness gap this fix doesn't address and was never meant to; §5.9's own fix (dimensions get evaluated *when data exists*) is unaffected and correctly resolved on its own terms. |
+| 5.10 | `API_AND_INTEGRATION_SPEC.md`'s approve-endpoint doc claim is stale | not fixed (doc edit forbidden) | **STILL OPEN, unchanged.** The six core docs remain off-limits in every session to date, including this one — the doc still incorrectly implies the approve endpoint applies `newValues.verdict` verbatim. Low urgency (doc accuracy, not a functional bug), unchanged since logged. |
+| 5.11 | `Submission.dimensionMins` schema comment/doc type reference stale | not fixed (doc edit forbidden) | **STILL OPEN, unchanged.** Re-read `schema.prisma`'s comment directly (during this session's §8.4 investigation): still reads `// DimensionMinimums: { thickness: number; length: number }`, still doesn't match the actual full-stats-object shape the field stores. Unchanged, low urgency. |
+| 5.12 | Amendment approval 500s on `profileId` FK violation | FIXED, verified 2026-08-08 | **ALREADY RESOLVED, confirmed still holding.** Re-read the approve endpoint directly (this session, lines 492-503, 528): the `validDbProfileId` guard (`prisma.inspectionProfile.findUnique` existence check before writing) is present and unchanged, and `Submission.update()`'s `profileId` field uses the resolved `validDbProfileId`, not a raw `String(newValues['profileId'])`. |
+| 5.13 | Amendment Defects step double-counts qualitative defects in display total | not fixed (cosmetic, logged) | **STILL OPEN, unchanged.** Re-read `StepDefects.tsx:113-115` directly: `defectCounts` is still seeded via `useState<Record<string,number>>(inspectionData?.defects ?? {})` with no category-eval-mode filtering — the exact unfiltered-seed pattern originally described. Display-only, cosmetic, confirmed unchanged. |
+
+**Net count: 6 STILL OPEN (5.1, 5.2, 5.10, 5.11, 5.13, plus the newly
+reframed remainder of 5.4), 6 ALREADY RESOLVED and independently
+reconfirmed still holding (5.3, 5.5, 5.6, 5.7, 5.8, 5.9, 5.12 — that's
+actually 7, see note), 1 SUPERSEDED-in-its-original-framing (5.4).** Note
+on the count: 5.4 is counted once, under SUPERSEDED, not double-counted
+under STILL OPEN — its narrow reframed remainder is real but categorically
+different from the other STILL OPEN items (a design nicety, not a bug).
+**The single most important correction in this refresh is §5.3**: it was
+fixed by commit `30385e5` but the doc never stopped saying "not fixed,"
+which — if trusted at face value — would have misdirected anyone reading
+this report into re-investigating or re-fixing an already-solved problem.
+
+### 9.3 — Relational tables vs. JSON blob: effort/tradeoffs (lightweight first pass, not a recommendation)
+
+**Current persistence pattern, confirmed directly:** there is exactly
+**one** write path for profile/category/defect data today.
+`QualityRules.tsx` mutates a plain JS array in local React state
+(`handleAddProfile`, `handleRemoveCategory`, `handleAddDefect`, etc., all
+cited in §8.5) → calls `onChange(data)` → `ConfigPage.tsx`'s
+`handleFactoryChange` (`ConfigPage.tsx:152-154`) merges it into one
+`draftConfig` object → `handleSave()` (`ConfigPage.tsx:127-136`) fires a
+**single** `PATCH /api/config` with the entire `draftConfig` — including
+the whole `inspectionProfiles` array — as one JSON body. The backend
+re-serializes that whole array back into the `inspectionProfiles` string
+column in one `prisma.appConfig.upsert()` call. There are no per-entity
+endpoints (no `POST /api/profiles`, no `PATCH /api/profiles/:id/categories/:catId`,
+etc.) — the entire profile system is a single whole-blob overwrite, both
+ways.
+
+**Option A — revive the relational tables (`InspectionProfile`/
+`AQLCategory`/`DefectDefinition`):**
+- **Schema:** the tables themselves are already well-formed (proper FKs,
+  `onDelete: Cascade`, `@@unique([profileId, name])` on `AQLCategory` —
+  `schema.prisma:143-200`, confirmed in §8.4) — no schema redesign needed,
+  just actual usage.
+- **`resolveVerdict.ts`:** would need real rework, not a small patch.
+  Today it does one `prisma.appConfig.findUnique` + `JSON.parse` +
+  in-memory `Array.find()` (`resolveVerdict.ts:214-256`). Moving to
+  relational storage means replacing that with real Prisma relational
+  queries (`prisma.inspectionProfile.findUnique({where:{id}, include:{aqlCategories:true, defectDefinitions:true}})`-shaped
+  calls) at every resolution branch — the explicit-id lookup, the
+  `productProfileMap` branch, and the safety-net "first usable profile"
+  scan (which today is a synchronous array scan and would become a real
+  query, e.g. needing an `isDefault`-first ordering or a dedicated query).
+  `normalizeForEngine()`'s dual-field-name handling (`aql`/`evalMode` vs.
+  `aqlLevel`/`evaluationMode`) would likely still be needed unless the
+  write side is also migrated cleanly, since the Prisma `AQLCategory`
+  model's own columns are already named `aqlLevel`/`evaluationMode` (no
+  `aql`/`evalMode` aliasing at the schema level) — so a clean migration
+  would let this normalization step be *dropped* for relationally-sourced
+  data, but only once nothing writes the `aql`/`evalMode` shape anymore.
+- **`QualityRules.tsx`:** the larger lift. Every one of its 8+ CRUD
+  handlers (§8.5's list: `handleAddProfile`, `handleDuplicateProfile`,
+  `handleSetDefaultProfile`, `handleMoveCategory`, `handleRemoveCategory`,
+  `handleAddDefect`, `handleDeleteDefect`, `handleMoveDefect`) currently
+  mutates local array state with no network call per action — moving to
+  relational tables means either (a) converting each into a real,
+  immediate REST call against new per-entity endpoints that don't exist
+  yet (a full CRUD API surface: create/rename/delete profile, category,
+  defect, each independently), which changes the save model from
+  "draft-then-batch-PATCH" to "save-as-you-go," a real UX/architecture
+  change, not just a backend swap; or (b) keeping today's
+  draft-then-batch-save UX and having the backend **diff** the incoming
+  whole-profile JSON against the current relational rows on `PATCH
+  /api/config` (or a new endpoint) and translate that into
+  upserts/deletes server-side — less frontend disruption, but real new
+  backend diffing logic that doesn't exist in any form today.
+- **Other consumers to update:** `ConfigContext.tsx`'s
+  `getResolvedProfile()` (client-side display resolution, mentioned in
+  §5.3/§B3) currently reads the same JSON-blob shape — would need its own
+  update if the frontend ever reads profiles from a real API instead of
+  the `GET /api/config` blob, though it could plausibly keep reading a
+  server-formatted JSON shape even if the backend's storage changes
+  underneath, decoupling this from the storage decision itself.
+
+**Option B — keep the JSON blob, remove the dead relational tables:**
+- Much smaller: drop the 3 unused Prisma models
+  (`InspectionProfile`/`AQLCategory`/`DefectDefinition`) and their
+  relation on `Submission.profileId` (currently a real FK, `schema.prisma:66-68`,
+  `profileId String?` + `profile InspectionProfile? @relation(...)`) —
+  one migration, no application-code changes required to
+  `QualityRules.tsx` or `resolveVerdict.ts`, since both already work
+  entirely against the JSON blob today.
+- **Direct side benefit:** if `Submission.profileId` stops being an
+  enforced FK (becomes a plain nullable string, storing whatever profile
+  id was in effect at submit time as an opaque historical reference),
+  the entire class of bug §5.12 had to guard against — writing an
+  AppConfig-JSON profile id into a column with a real FK constraint into
+  an empty relational table — becomes structurally impossible rather than
+  patched. The `validDbProfileId` existence-check guards in both
+  `POST /api/submissions` and the approve endpoint (§9.2's 5.12 entry)
+  could be simplified or removed entirely under this option, since there
+  would be nothing left to validate against.
+
+**Migration risk for the data currently in the JSON blob, if Option A is
+chosen:** low, given current volume. The live `inspectionProfiles` blob
+holds exactly 4 profiles (`prof_default`, `MEDLINE`, `CARDINAL`,
+`HENRY SHEIN` — confirmed in §7.2), a few dozen categories/defects total —
+a one-time, mechanical migration script (parse JSON → Prisma `create()`
+calls) is low-effort and low-risk purely on data-volume grounds. Two real
+wrinkles, both already documented elsewhere in this report, not new:
+(1) the `aql`/`evalMode` vs. `aqlLevel`/`evaluationMode` field-name
+inconsistency (§5.3) and the `categoryId` vs. `currentClass` dual-naming
+(`DATA_SCHEMAS_AND_TYPES.md` §2.1) would need to be reconciled *during*
+the migration script, not just at read time; (2) **zero existing
+`Submission` rows reference any profile via FK today** — every submission
+in the live dataset has `profileId: null` (confirmed repeatedly: §5.5,
+§5.12, §7.2's raw `Submission` dump) — so there is no
+orphaned-FK/broken-history risk on the migration; historical submissions
+simply have nothing to remap.
+
+**No recommendation given, per instruction — this is scoping detail for
+Jerry's decision, not a proposed direction.**
+
+### 9.4 — DECISION LOGGED: Visual category structure resolved (5 families)
+
+**§7.4/§7.6's "3-family vs. 5-family" open question is now resolved by
+Jerry.** Visual defects grade as **three separate severity tiers**, not
+one combined category:
+
+- **Critical Visual** — AQL 1.0
+- **Visual Major** — AQL 2.5
+- **Visual Minor** — AQL 4.0
+
+Combined with the two families already unambiguous from the ground truth
+(**AND** / Accept No Defect — zero tolerance, and **Barrier**), the real
+profile structure is **5 families total**: AND, Barrier, Critical Visual,
+Visual Major, Visual Minor. This resolves the discrepancy §7.4 explicitly
+declined to reconcile (the "QA sheet" 's combined-Visual reading is not
+the one being implemented).
+
+**No schema or code change is implied by this note alone** — it only
+closes the open question so future profile-authoring work (still pending,
+per ranked item #2 below) starts from the right assumption instead of
+guessing between two documented-but-unresolved readings. Recorded here,
+not implemented: the live `prof_default`/`MEDLINE`/`CARDINAL`/
+`HENRY SHEIN` profiles still don't reflect this structure or the real
+47-defect taxonomy (§7.6/§7.7) — that authoring work is unchanged in scope
+by this decision, just now unblocked on the structural question.
+
+---
+
+## Ranked Open Items (as of this pass)
+
+Priority order reflects what blocks what, not effort or preference —
+decisions on all of these remain Jerry's.
+
+1. **Backend auth middleware never applied (§9.1).** Every mutating
+   endpoint, including config writes and amendment approval, is open to
+   any caller with no role check. This is a within-single-install gap
+   (ADMIN vs. OPERATOR), unaffected by the multi-tenancy correction above
+   — still the single highest-severity open item in this report.
+2. **Real defect taxonomy and product/profile config were never seeded**
+   (§7) — `productCodes`, `productProfileMap`, and `productMatrixConfig`
+   are each incomplete or wrong for 2 of the 3 real product codes, and the
+   live profile content itself is placeholder data unrelated to the real
+   47-defect taxonomy. Blocks any real production use regardless of what
+   else gets fixed.
+3. **3-family-vs-5-family Visual category structure (§7.4/§7.6) is an
+   unmade decision that blocks #2** — profile authoring can't start
+   correctly until this is decided.
+4. **Relational-tables-vs-JSON-blob decision (§8.4/§9.3)** — not urgent on
+   its own (both are structurally sound as they stand — the relational
+   tables are just unused; the JSON blob works but has no CRUD API), but
+   worth deciding before any new profile-editing capability is built on
+   top of one or the other, to avoid building twice.
+5. **Tenant-scoped admin role question (§8.2/§8.6)** — now lower-stakes
+   given the single-tenant-per-deployment correction above (no
+   cross-tenant access-control gap exists to close), but the underlying
+   "does ADMIN need a tier above it within one install" question is still
+   open if that's ever wanted.
+6. **Housekeeping items** (§9.2's STILL OPEN list: 5.1 typecheck error,
+   5.2 migration-history drift, 5.10/5.11 stale doc text, 5.13 cosmetic
+   double-count, 5.4's narrowed first-run-default question) — all
+   low-urgency, none blocking, none newly discovered as more severe than
+   originally logged.
+7. **Doc corrections owed once the six core docs are back in scope**
+   (Phase 8, not now): the multi-tenancy correction above needs to land in
+   `NAVIGATION_AND_RBAC.md`/B7; §5.3's now-stale "not fixed" label needs
+   correcting in this report itself; §5.10/§5.11's doc-accuracy items;
+   and `AI_RULES.md`'s stale model-ID table (original audit's §B9).
+
+---
+
+## 10. Code Change Pass — Auth Middleware, Visual-Tier Decision, Relational Table Removal
+
+**Status: CODE CHANGES. Two commits landed this session
+(`2a05d51` Part 1, `c32a1b1` Part 3), plus this doc-only append. No edits
+to the six core docs.** Each part below follows the discovery → plan →
+one-file-per-turn → typecheck → live-verify → commit cycle; `dev.db` was
+restored to the 19-submission/0-amendment-log baseline before each of the
+two code commits (confirmed via direct Prisma row counts both times, not
+assumed).
+
+**Ranked-items update (supersedes §9's list above, not edited in place —
+same non-destructive pattern as §9.2's §5.3 correction):** ranked items
+**#1** (auth middleware) and part of **#4** (relational-vs-blob decision)
+from §9's closing list are now resolved by this section. §9's list is left
+as-is above as the historical record of what this pass started from.
+
+### 10.1 — Part 1: Backend auth middleware — RESOLVED
+
+Full design rationale already recorded in the approved plan and is not
+repeated here; this is the implementation-and-verification record.
+
+**What shipped** (commit `2a05d51`):
+- `backend/src/middleware/auth.ts` (new) — `requireRole(...allowedRoles)`,
+  a middleware factory reading the `X-User-Role` request header and
+  checking it against a per-route allow-list. Missing header → `401`;
+  unrecognized role string → `401`; recognized-but-not-permitted → `403`.
+- Wired into 5 backend routes: `PATCH /api/config` and
+  `POST /api/amendments/:id/approve`/`reject` (EXECUTIVE, MANAGER, ADMIN
+  only, per `NAVIGATION_AND_RBAC.md` §2's `/config`/`/approvals` gates);
+  `POST /api/submissions` and `POST /api/submissions/:id/amendments`
+  (all 6 roles, matching `/wizard`'s "all roles" gate).
+  `GET /api/config`, the other `GET` routes, and
+  `POST /api/verdict/preview` deliberately left ungated — non-mutating,
+  and `GET /api/config` specifically is needed by every role just to
+  render pages, not `/config`-page-specific.
+- `frontend/src/context/AuthContext.tsx` gained `authHeader(user)`, wired
+  into the 5 corresponding mutating `fetch()` call sites across
+  `WizardPage.tsx` (×2), `BatchEntry.tsx`, `ConfigPage.tsx`, and
+  `ApprovalsQueue.tsx`. `ProductCatalog.tsx`'s own `PATCH /api/config`
+  call was deliberately left unwired — it's dead code (unreachable, per
+  the original audit's §2.5).
+
+**Explicitly not real cryptographic auth, stated plainly (again) here:**
+the header is a client-claimed role with no session/JWT/signature behind
+it — matching the mock-auth maturity of the rest of this app's login
+flows (`NAVIGATION_AND_RBAC.md` §4 still marks token-based sessions
+`[PLANNED — NOT YET IMPLEMENTED]`). What changed is narrow and real: a
+caller can no longer mutate data while claiming **no** identity at all,
+and a caller claiming a role outside the route's allow-list is rejected
+server-side, independent of whatever the React `RoleRoute` UI gate shows.
+
+**Live verification, all via the real running app (not simulated),
+covering every scenario the task specified:**
+
+| Scenario | Method | Endpoint(s) | Result |
+|---|---|---|---|
+| No `X-User-Role` header at all | `curl` | `PATCH /api/config`, `POST /api/amendments/:id/approve` | `401`, `"Authentication required: no user role provided."` |
+| `X-User-Role: OPERATOR` | `curl` | same two, plus `.../reject` | `403`, `"Role 'OPERATOR' is not permitted to perform this action."` |
+| `X-User-Role: SUPERADMIN` (unrecognized) | `curl` | `PATCH /api/config` | `401`, `"Unrecognized role: 'SUPERADMIN'."` |
+| `X-User-Role: ADMIN` | `curl` | `PATCH /api/config` | `200` |
+| `X-User-Role: EXECUTIVE` | `curl` | `.../reject` (nonexistent id) | Passed the auth gate, reached real business logic — `404` `"No pending amendment found"`, not `401`/`403` |
+| **ADMIN, real UI** | Browser — mock M365 login → `/config` → the existing dev-tool dirty-state trigger → **Save Configuration** | `PATCH /api/config` | `200`, confirmed via network trace including the `X-User-Role: ADMIN` header (implied by the preceding CORS preflight `OPTIONS` succeeding, since a custom header is what triggers a preflight at all) |
+| **OPERATOR, real UI** | Browser — PIN `123456` login → full wizard click-through → **Submit Lot** | `POST /api/submissions` | `201 Created`, real submission persisted and verdict server-computed correctly |
+
+**One test-tooling note, not an application bug:** the Browser pane's
+simulated mouse clicks did not reliably trigger onClick handlers on this
+app's `motion.button` (Framer Motion) elements and React Router `<Link>`s
+in this preview environment specifically — confirmed via
+`getBoundingClientRect`/`elementFromPoint` that click coordinates were
+landing exactly on the right element each time, yet no state change
+followed. Switched to dispatching real `MouseEvent('click', {bubbles:true})`
+via `javascript_tool` at the same DOM nodes for the rest of this
+session's browser verification — this is not a shortcut around the app's
+logic (the dispatched event runs through the exact same React handler a
+real click would), just a different event-injection mechanism to work
+around what appears to be a Browser-pane/Framer-Motion interaction quirk,
+unrelated to anything this session changed.
+
+**`dev.db` cleanup before commit:** one test submission created during
+OPERATOR verification (`cmskfi1z60000awc4v0xxf6aw`) deleted directly via
+Prisma; confirmed back at 19 submissions / 0 amendment logs before
+`git commit`.
+
+### 10.2 — Part 2: Visual-tier decision — see §9.4
+
+Recorded as **§9.4** above (kept there rather than duplicated here, since
+it's a documentation-only decision note, not a code change, and §9.4 sits
+naturally alongside §9.3's relational-tables discussion it partially
+unblocks). No code or schema change was implied or made by this decision
+alone.
+
+### 10.3 — Part 3: Relational table removal — RESOLVED
+
+Full design already recorded in the approved plan; this is the
+implementation-and-verification record. Commit `c32a1b1`.
+
+**Discovery turned up one thing the original §8.4/§9.3 pass hadn't
+catalogued:** confirmed via a fresh schema grep that `Submission.profile`
+was the only relation into `InspectionProfile` from outside the three
+models themselves — matching the plan's assumption — but the
+**typechecker**, not the schema grep, subsequently caught two more
+code-level dependencies neither discovery pass had surfaced:
+`aqlEvaluator.ts` imported `AQLCategory`/`DefectDefinition` **types**
+(not queries) directly from the generated Prisma client for its function
+signatures, and `GET /api/submissions/:id` had an
+`include: { profile: { include: {...} } }` clause. Both are exactly the
+kind of thing the plan's own "confirm nothing else references them via a
+repo-wide grep" verification step was there to catch — it did, via the
+compiler rather than the grep.
+
+**What shipped:**
+- `schema.prisma`: removed `InspectionProfile`/`AQLCategory`/
+  `DefectDefinition` entirely; `Submission.profileId` is now a plain
+  nullable `String` with no relation. Applied via `prisma db push` (per
+  instruction — never `migrate dev`, given §5.2's already-drifted
+  migration history).
+- `submissions.routes.ts`: both `validDbProfileId` guards (in
+  `POST /api/submissions` and the approve endpoint) replaced with a new
+  `isKnownProfileId()` helper — **chose to keep a sanity check rather
+  than drop validation entirely** (the option the plan explicitly left
+  open): checks the requested id against `AppConfig.inspectionProfiles`
+  JSON keys (or the `'prof_default'` sentinel) instead of a DB `findUnique`,
+  logs a `console.warn` and stores `null` on a miss rather than hard-failing
+  — same degrade-gracefully behavior as before, just checking against the
+  system that's actually authoritative now. Also removed the newly-found
+  broken `include: { profile: {...} } }` clause from `GET /api/submissions/:id`.
+- `aqlEvaluator.ts`: replaced the Prisma-client type import with local
+  `AQLCategory`/`DefectDefinition` interfaces matching
+  `DATA_SCHEMAS_AND_TYPES.md` §2.1's actual AppConfig-JSON shape — the
+  shape the function has always actually received at runtime (via
+  `resolveVerdict.ts`'s `normalizeForEngine()`), which the old Prisma-typed
+  signature never really described correctly in the first place (masked
+  by `any[]`-typed variables one level up).
+- `check_db.ts`/`check_db.js` (ad-hoc dev scripts, not part of any
+  build/test pipeline): one broken line each fixed — direct, mechanical
+  fallout of the model removal, not scope creep.
+
+**An unanticipated, genuinely positive side effect, confirmed live, not
+assumed:** `Submission.profileId` now persists as the real profile id
+(e.g. `"prof_default"`) instead of always being `null`. Previously, the
+FK-existence check queried the permanently-empty `InspectionProfile`
+table, so it **always** failed and silently degraded to `null` for every
+real submission ever made (the "compounding factor" documented in
+§5.5/§5.12). The new check queries the system that actually has the real
+profiles in it, so it actually finds them.
+
+**Live verification, real UI, real data, full amendment lifecycle:**
+1. Fresh submission via the real wizard (ADMIN session, product
+   `N035MNV-OC-24FT`) → `POST /api/submissions` → `201`, response body
+   confirmed `"profileId":"prof_default"` (not `null`) and
+   `verdict:"PASSED"` server-computed correctly against the live
+   `AppConfig.inspectionProfiles` data — proving `/api/verdict/preview`'s
+   own read path also survived the schema change intact.
+2. Amended that same submission through History → "Amend Record" → real
+   amendment wizard → `POST /api/submissions/:id/amendments` → `201`.
+3. Approved it through the real Approvals Queue UI → "Review Diff" →
+   "Approve & Merge" → `POST /api/amendments/:id/approve` → **`200 OK`**
+   — **this is the exact endpoint §5.12's FK-constraint crash originally
+   hit.** Response confirmed `amendmentStatus:"APPROVED"`,
+   `profileId:"prof_default"` persisted through the merge, and
+   `recomputedVerdict:"PASSED"` computed correctly by the now
+   JSON-blob-sanity-checked `resolveVerdict()` path.
+4. **§5.12's crash scenario is now structurally impossible, not just
+   newly guarded** — there is no FK left in the schema for a bad
+   `profileId` to violate, regardless of what guard code does or doesn't
+   run.
+
+**`npx tsc --noEmit -p backend` clean** after every file (only the
+pre-existing, unrelated §5.1 `config.routes.ts` error remains — confirmed
+unchanged by this pass). **`dev.db` cleanup before commit:** the test
+submission and its one amendment log deleted directly via Prisma;
+confirmed back at 19 submissions / 0 amendment logs before `git commit`.
+
+### 10.4 — Updated ranked items (supersedes §9's list for items #1 and #4)
+
+1. ~~Backend auth middleware never applied~~ — **RESOLVED, §10.1.**
+2. **Real defect taxonomy and product/profile config were never seeded**
+   (§7) — unchanged, still the top remaining blocker for real production
+   use. Now unblocked on the structural question (§9.4 resolved the
+   3-vs-5-family decision), but the actual authoring work is untouched by
+   this session.
+3. ~~3-family-vs-5-family Visual category structure~~ — **RESOLVED,
+   §9.4.** 5 families: AND, Barrier, Critical Visual, Visual Major,
+   Visual Minor.
+4. ~~Relational-tables-vs-JSON-blob decision~~ — **RESOLVED, §10.3.**
+   Chose removal (Option B). The relational tables no longer exist;
+   `AppConfig.inspectionProfiles` JSON is now the sole, unambiguous
+   source of truth for profile data, with no dead alternative sitting
+   next to it.
+5. **Tenant-scoped admin role question (§8.2/§8.6)** — unchanged, still
+   open, still lower-stakes given the single-tenant-per-deployment
+   correction (§9).
+6. **Housekeeping items** (§9.2's STILL OPEN list) — unchanged: 5.1
+   typecheck error, 5.2 migration-history drift, 5.10/5.11 stale doc
+   text, 5.13 cosmetic double-count, 5.4's narrowed first-run-default
+   question.
+7. **Doc corrections owed once the six core docs are back in scope**
+   (Phase 8) — unchanged from §9's list, plus one addition: this
+   session's `X-User-Role` header mechanism and the `Submission.profileId`
+   FK removal aren't reflected in `API_AND_INTEGRATION_SPEC.md` or
+   `DATA_SCHEMAS_AND_TYPES.md` yet either.
