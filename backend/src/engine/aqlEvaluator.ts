@@ -25,9 +25,27 @@ import {
   isZeroToleranceAQL,
 } from './iso2859-matrix';
 
-// Import native Prisma model types — these are the v4.0 source of truth
-// per schema.prisma (AQLCategory.evaluationMode, DefectDefinition.currentClass)
-import type { AQLCategory, DefectDefinition } from '../../generated/prisma/client';
+/**
+ * AQLCategory / DefectDefinition — mirror DATA_SCHEMAS_AND_TYPES.md §2.1's
+ * AppConfig-JSON shape. Previously imported from the generated Prisma
+ * client, but that relational InspectionProfile/AQLCategory/DefectDefinition
+ * table set was removed (AUDIT_REPORT.md §9.3 Option B / §10 Part 3) — real
+ * profile/category/defect data has only ever lived in
+ * AppConfig.inspectionProfiles JSON, normalized to this shape by
+ * resolveVerdict.ts's normalizeForEngine() before reaching this function.
+ */
+export interface AQLCategory {
+  id: string;
+  name: string;
+  aqlLevel: string;
+  evaluationMode: string;
+}
+
+export interface DefectDefinition {
+  id: string;
+  name: string;
+  currentClass: string;
+}
 
 export type { AQLThreshold, SampleSizeBracket };
 
@@ -155,20 +173,23 @@ export interface VerdictResult {
 
 /**
  * Input parameters for evaluateAQLVerdict.
- * Uses native Prisma model types directly from generated/prisma so the engine
- * stays in lock-step with schema.prisma without a hand-rolled DTO layer.
+ * Uses the local AQLCategory/DefectDefinition types above (normalized
+ * AppConfig-JSON shape) so the engine stays in lock-step with
+ * DATA_SCHEMAS_AND_TYPES.md §2.1 without a hand-rolled DTO layer.
  */
 export interface EvaluateAQLVerdictParams {
   /** Operator-recorded sample size. Will be bracket-snapped internally. */
   sampleSize: number;
   /**
-   * All AQL categories from the active InspectionProfile.
-   * Source: prisma.inspectionProfile.findUnique({ include: { aqlCategories: true } })
+   * All AQL categories from the active profile.
+   * Source: resolveVerdict.ts's normalizeForEngine(), reading
+   * AppConfig.inspectionProfiles JSON.
    */
   categories: AQLCategory[];
   /**
-   * All defect definitions from the active InspectionProfile.
-   * Source: prisma.inspectionProfile.findUnique({ include: { defectDefinitions: true } })
+   * All defect definitions from the active profile.
+   * Source: resolveVerdict.ts's normalizeForEngine(), reading
+   * AppConfig.inspectionProfiles JSON.
    */
   defectDefinitions: DefectDefinition[];
   /**
@@ -186,7 +207,7 @@ export interface EvaluateAQLVerdictParams {
 /**
  * Native v4.0 AQL verdict engine.
  *
- * Iterates every AQLCategory in the active InspectionProfile, resolves its
+ * Iterates every AQLCategory in the active profile, resolves its
  * ISO 2859-1 threshold via getAQLThresholds(), and applies the category's
  * evaluationMode logic. A single failing category fails the whole lot.
  *
@@ -207,7 +228,7 @@ export interface EvaluateAQLVerdictParams {
  * This function is PURE — no I/O, no side effects. Persistence is handled
  * exclusively by the route layer (submissions.routes.ts).
  *
- * @param params - {@link EvaluateAQLVerdictParams} with native Prisma types.
+ * @param params - {@link EvaluateAQLVerdictParams}.
  * @returns {@link VerdictResult} — strictly typed verdict + per-category audit trail.
  */
 export function evaluateAQLVerdict(params: EvaluateAQLVerdictParams): VerdictResult {

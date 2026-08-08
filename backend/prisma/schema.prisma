@@ -63,9 +63,13 @@ model Submission {
   gloveWeight         Float?
 
   // --- Profile Reference ---
-  /// Foreign key to InspectionProfile (nullable — uses default profile if null)
+  /// Opaque historical reference to whichever AppConfig.inspectionProfiles[]
+  /// entry was in effect at submit time. No enforced referential integrity —
+  /// real profiles live in AppConfig's JSON blob, not a relational table
+  /// (see AUDIT_REPORT.md §8.4/§9.3). The FK relation to a dedicated
+  /// InspectionProfile table was removed deliberately — see §9.3 Option B /
+  /// §10 Part 3.
   profileId           String?
-  profile             InspectionProfile? @relation(fields: [profileId], references: [id])
 
   // --- Relations ---
   amendmentLogs       AmendmentLog[]
@@ -135,72 +139,12 @@ model AmendmentLog {
 }
 
 // ============================================================
-// INSPECTION PROFILE
-// Maps to: export interface InspectionProfile
-// A named ruleset that defines AQL categories and which defects apply.
-// Multiple profiles allow per-client AQL overrides (e.g., Ansell profile).
+// InspectionProfile / AQLCategory / DefectDefinition models removed
+// (AUDIT_REPORT.md §9.3 Option B / §10 Part 3) — they sat fully unused
+// (0 rows) since real profile/category/defect data has only ever lived
+// in AppConfig.inspectionProfiles JSON. See AUDIT_REPORT.md §8.4/§9.3 for
+// the effort/tradeoff analysis behind this decision.
 // ============================================================
-model InspectionProfile {
-  id                  String              @id @default(cuid())
-  name                String              @unique
-  isDefault           Boolean             @default(false)
-
-  // --- Relations ---
-  aqlCategories       AQLCategory[]
-  defectDefinitions   DefectDefinition[]
-  submissions         Submission[]
-
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
-}
-
-// ============================================================
-// AQL CATEGORY
-// Maps to: export interface AQLCategory
-// A single category within an InspectionProfile (e.g., 'Major Visual',
-// 'Barrier Defects'). Stores its own AQL level and evaluation mode.
-// ============================================================
-model AQLCategory {
-  id              String            @id @default(cuid())
-  name            String
-  /// AQL level string: '0.65', '1.0', '1.5', '2.5', 'AND (Zero Tolerance)', etc.
-  aqlLevel        String
-  /// Evaluation strategy: 'CUMULATIVE' | 'GRANULAR' | 'N/A' | ''
-  evaluationMode  String            @default("")
-
-  profileId       String
-  profile         InspectionProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
-
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-
-  @@unique([profileId, name])
-  @@index([profileId])
-}
-
-// ============================================================
-// DEFECT DEFINITION
-// Maps to: export interface DefectDefinition
-// A single defect type (e.g., 'Pinhole At Crotch') with a class assignment
-// that can be overridden per InspectionProfile without touching global config.
-// ============================================================
-model DefectDefinition {
-  id              String            @id @default(cuid())
-  name            String
-  /// The factory-wide default class: 'BARRIER' | 'MAJOR_VISUAL' | 'MINOR_VISUAL' etc.
-  defaultClass    String
-  /// The class as overridden for this specific profile (starts equal to defaultClass)
-  currentClass    String
-
-  profileId       String
-  profile         InspectionProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
-
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-
-  @@unique([profileId, name])
-  @@index([profileId])
-}
 
 // ============================================================
 // APP CONFIG

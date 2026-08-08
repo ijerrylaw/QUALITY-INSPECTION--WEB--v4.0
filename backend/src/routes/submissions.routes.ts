@@ -14,7 +14,10 @@
  *    Returns the 50 most recent submissions, ordered by creation date descending.
  *
  *  GET  /api/submissions/:id
- *    Returns a single submission with its amendment logs and linked profile details.
+ *    Returns a single submission with its amendment logs. `profileId` is an
+ *    opaque reference (see AUDIT_REPORT.md §9.3/§10 Part 3) — no relational
+ *    profile record is hydrated; resolve it against AppConfig.inspectionProfiles
+ *    client-side if needed, same as ConfigContext.tsx's getResolvedProfile().
  *
  *  POST /api/submissions/:id/amendments
  *    Drafts an amendment (PENDING_APPROVAL) and previews — informationally, non-blocking —
@@ -68,6 +71,29 @@ function parseJSONObjectField<T = unknown>(raw: unknown): Record<string, T> {
   }
   if (typeof raw === 'object') return raw as Record<string, T>;
   return {};
+}
+
+/**
+ * Sanity-checks a profileId against AppConfig.inspectionProfiles JSON —
+ * the actual source of truth for real profiles now that the relational
+ * InspectionProfile table has been removed (AUDIT_REPORT.md §9.3 Option B /
+ * §10 Part 3: it sat at 0 rows always, real profiles only ever lived in
+ * this JSON blob). Not a foreign key — there's nothing left to enforce —
+ * just a same-request check so an obviously-wrong id (typo, stale
+ * reference, deleted profile) degrades to null with a log line instead of
+ * being stored as if it were valid. `'prof_default'` is accepted even when
+ * absent from the array, matching resolveVerdict.ts's own hardcoded-default
+ * sentinel handling.
+ */
+async function isKnownProfileId(profileId: string): Promise<boolean> {
+  if (profileId === 'prof_default') return true;
+  const appConfig = await prisma.appConfig.findUnique({ where: { id: '1' }, select: { inspectionProfiles: true } });
+  try {
+    const profiles = JSON.parse(appConfig?.inspectionProfiles ?? '[]') as Array<{ id?: string }>;
+    return profiles.some((p) => p.id === profileId);
+  } catch {
+    return false;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -183,14 +209,18 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
       `defects=${JSON.stringify(defectCounts)}`,
     );
 
-    // ── 3. Resolve validDbProfileId — only set if profile exists in the DB table ─
-    // Prevents Prisma FK constraint errors from AppConfig-only profiles.
+    // ── 3. Resolve validDbProfileId — sanity-check against AppConfig JSON ────────
+    // No FK to violate anymore (§9.3 Option B / §10 Part 3) — this is a
+    // same-request sanity check, not referential integrity enforcement.
     // Uses requestedProfileId (the id actually asked for), not evaluationProfileId
     // (which may point at a safety-net substitute used only for grading).
     let validDbProfileId: string | null = null;
     if (requestedProfileIdEcho) {
-      const existsInDb = await prisma.inspectionProfile.findUnique({ where: { id: requestedProfileIdEcho } });
-      if (existsInDb) validDbProfileId = requestedProfileIdEcho;
+      if (await isKnownProfileId(requestedProfileIdEcho)) {
+        validDbProfileId = requestedProfileIdEcho;
+      } else {
+        console.warn(`[POST /api/submissions] profileId '${requestedProfileIdEcho}' not found in AppConfig.inspectionProfiles — storing null.`);
+      }
     }
 
     // ── 4. Insert into Database ───────────────────────────────────────────────
@@ -261,9 +291,6 @@ router.get('/:id', async (req: Request, res: Response) => {
       where: { id: submissionId },
       include: {
         amendmentLogs: { orderBy: { createdAt: 'asc' } },
-        profile: {
-          include: { aqlCategories: true, defectDefinitions: true },
-        },
       },
     });
 
@@ -490,17 +517,19 @@ amendmentsRouter.post('/:id/approve', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN
     const clientSuppliedVerdict = newValues['verdict'] != null ? String(newValues['verdict']) : null;
     const now = new Date().toISOString();
 
-    // 4b. Resolve a DB-safe profileId — only set if it exists in the real
-    //     InspectionProfile table. AppConfig-JSON profile ids (e.g. 'prof_default',
-    //     created via Configuration Control) never exist there — see §5.5/§B6's
-    //     documented compounding factor — so writing newValues.profileId verbatim
-    //     violates the FK constraint on Submission.profileId. Mirrors the same
-    //     validDbProfileId safety net POST /api/submissions already applies.
+    // 4b. Resolve a sanity-checked profileId — no FK to violate anymore
+    //     (§9.3 Option B / §10 Part 3: the relational InspectionProfile table
+    //     was removed, it sat at 0 rows always). Checked against
+    //     AppConfig.inspectionProfiles JSON instead, mirroring the same
+    //     isKnownProfileId() sanity check POST /api/submissions already applies.
     let validDbProfileId: string | null = null;
     if (newValues['profileId'] != null) {
       const requestedId = String(newValues['profileId']);
-      const existsInDb = await prisma.inspectionProfile.findUnique({ where: { id: requestedId } });
-      if (existsInDb) validDbProfileId = requestedId;
+      if (await isKnownProfileId(requestedId)) {
+        validDbProfileId = requestedId;
+      } else {
+        console.warn(`[POST /api/amendments/:id/approve] profileId '${requestedId}' not found in AppConfig.inspectionProfiles — storing null.`);
+      }
     }
 
     // 5. Transaction: apply newValues to the Submission + mark both as APPROVED.

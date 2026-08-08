@@ -1,8 +1,8 @@
 import prisma from './src/lib/prismaClient';
 
 async function run() {
-  const profiles = await prisma.inspectionProfile.findMany();
-  console.log("Profiles in DB:", profiles.map((p: any) => p.id));
+  // InspectionProfile table removed (AUDIT_REPORT.md §9.3 Option B / §10 Part 3)
+  // — real profiles only ever lived in AppConfig.inspectionProfiles JSON.
   const appConfig = await prisma.appConfig.findUnique({ where: { id: '1' }});
   console.log("AppConfig inspectionProfiles field:", appConfig?.inspectionProfiles);
   process.exit(0);
