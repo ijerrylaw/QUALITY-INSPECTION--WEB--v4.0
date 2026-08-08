@@ -2,14 +2,16 @@
  * @file StepReviewSubmit.tsx
  * @description Step 4 of the Smart Quality Inspection Wizard — Review & Submit.
  *
- * MATH ENGINE INTEGRATION (Turn 5):
- * Implements ISO 2859-1 verdict evaluation per ISO2859_MATH_ENGINE.md:
- * - Bracket Snapping: sample size → nearest ISO bracket (§1)
- * - AQL Lookup: ac/re thresholds per aqlLevel × sample size bracket (§1)
- * - Zero Tolerance: AND category locks to { ac: 0, re: 1 } (§1)
- * - CUMULATIVE Mode: sum all defects in category, compare to ac (§2)
- * - GRANULAR Mode: each defect checked independently, any > ac fails (§2)
- * - PASS/FAIL/NIL: any FAIL qualitative state fails the category (§2)
+ * SERVER-VERIFIED VERDICT (Step 9):
+ * AQL verdict computation is delegated to POST /api/verdict/preview — the
+ * same resolveVerdict()/evaluateAQLVerdict() single source of truth used by
+ * every persisting route (backend/src/engine/resolveVerdict.ts,
+ * backend/src/engine/aqlEvaluator.ts) — instead of a duplicate client-side
+ * copy of the AQL matrix and evaluation logic. Dimension pass/fail has no
+ * server-side equivalent anywhere in this codebase (ISO2859_MATH_ENGINE.md
+ * documents AQL verdict logic and physical dimension evaluation as two
+ * independent systems), so failedDimensions stays a local computation and
+ * is OR'd with the server's AQL verdict for the final overallVerdict.
  *
  * UI_DESIGN_SYSTEM.md compliance:
  * - Hero Verdict Banner (§5.1): p-6 rounded-xl border with semantic bg/border.
@@ -19,7 +21,7 @@
  * - All buttons: font-bold text-xs uppercase tracking-wider h-12.
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   CheckCircle2,
   XCircle,
@@ -28,9 +30,12 @@ import {
   Ruler,
   ShieldAlert,
   Info,
+  Loader2,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastProvider';
-import { useConfig } from '../../context/ConfigContext';
+import { useConfig, API_BASE_URL } from '../../context/ConfigContext';
 import type { AQLCategory } from '../../context/ConfigContext';
 
 export interface StepReviewSubmitProps {
@@ -40,136 +45,64 @@ export interface StepReviewSubmitProps {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ISO 2859-1 MASTER AQL LOOKUP ENGINE  (ISO2859_MATH_ENGINE.md §1)
+// Display-only mirror of backend/src/engine/iso2859-matrix.ts's
+// SAMPLE_SIZE_BRACKETS and aqlEvaluator.ts's snapToBracket() (nearest
+// bracket, tie → larger, per ISO2859_MATH_ENGINE.md §1). NOT used for
+// verdict computation — that is server-authoritative via
+// POST /api/verdict/preview. Used only for the "ISO Bracket: X" and
+// per-category "n=X" display text, matching the same "display-only inline
+// copy" pattern ISO2859_MATH_ENGINE.md §2 documents for HistoryFeed.tsx.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Standard ISO 2859-1 sample size brackets */
-const ISO_BRACKETS = [13, 20, 32, 50, 80, 125, 200, 315, 500, 800, 1250];
+const DISPLAY_ISO_BRACKETS = [2, 3, 5, 8, 13, 20, 32, 50, 80, 125, 200, 315, 500] as const;
 
-/**
- * Bracket Snapping — snap arbitrary sample size to nearest standard ISO bracket.
- * ISO2859_MATH_ENGINE.md §1: "engine MUST snap to the nearest standard ISO bracket"
- */
-function snapToIsoBracket(n: number): number {
-  if (n <= 0) return ISO_BRACKETS[0];
-  for (const bracket of ISO_BRACKETS) {
-    if (n <= bracket) return bracket;
-  }
-  return ISO_BRACKETS[ISO_BRACKETS.length - 1];
+function snapToDisplayBracket(n: number): number {
+  const rounded = Math.max(2, Math.round(n));
+  return DISPLAY_ISO_BRACKETS.reduce<number>((best, candidate) => {
+    const distCandidate = Math.abs(candidate - rounded);
+    const distBest = Math.abs(best - rounded);
+    if (distCandidate < distBest || (distCandidate === distBest && candidate > best)) {
+      return candidate;
+    }
+    return best;
+  }, DISPLAY_ISO_BRACKETS[0]);
 }
 
-/** AQL Threshold matrix: aqlLevel → bracket → { ac, re } */
-const AQL_MATRIX: Record<string, Record<number, { ac: number; re: number }>> = {
-  '0.65': {
-    13: { ac: 0, re: 1 },
-    20: { ac: 0, re: 1 },
-    32: { ac: 0, re: 1 },
-    50: { ac: 0, re: 1 },
-    80: { ac: 1, re: 2 },
-    125: { ac: 1, re: 2 },
-    200: { ac: 2, re: 3 },
-    315: { ac: 3, re: 4 },
-    500: { ac: 5, re: 6 },
-    800: { ac: 7, re: 8 },
-    1250: { ac: 10, re: 11 },
-  },
-  '1.0': {
-    13: { ac: 0, re: 1 },
-    20: { ac: 0, re: 1 },
-    32: { ac: 0, re: 1 },
-    50: { ac: 1, re: 2 },
-    80: { ac: 1, re: 2 },
-    125: { ac: 2, re: 3 },
-    200: { ac: 3, re: 4 },
-    315: { ac: 5, re: 6 },
-    500: { ac: 7, re: 8 },
-    800: { ac: 10, re: 11 },
-    1250: { ac: 14, re: 15 },
-  },
-  '1.5': {
-    13: { ac: 0, re: 1 },
-    20: { ac: 0, re: 1 },
-    32: { ac: 1, re: 2 },
-    50: { ac: 1, re: 2 },
-    80: { ac: 2, re: 3 },
-    125: { ac: 3, re: 4 },
-    200: { ac: 5, re: 6 },
-    315: { ac: 7, re: 8 },
-    500: { ac: 10, re: 11 },
-    800: { ac: 14, re: 15 },
-    1250: { ac: 21, re: 22 },
-  },
-  '2.5': {
-    13: { ac: 0, re: 1 },
-    20: { ac: 1, re: 2 },
-    32: { ac: 1, re: 2 },
-    50: { ac: 2, re: 3 },
-    80: { ac: 3, re: 4 },
-    125: { ac: 5, re: 6 },
-    200: { ac: 7, re: 8 },
-    315: { ac: 10, re: 11 },
-    500: { ac: 14, re: 15 },
-    800: { ac: 21, re: 22 },
-    1250: { ac: 21, re: 22 },
-  },
-  '4.0': {
-    13: { ac: 1, re: 2 },
-    20: { ac: 1, re: 2 },
-    32: { ac: 2, re: 3 },
-    50: { ac: 3, re: 4 },
-    80: { ac: 5, re: 6 },
-    125: { ac: 7, re: 8 },
-    200: { ac: 10, re: 11 },
-    315: { ac: 14, re: 15 },
-    500: { ac: 21, re: 22 },
-    800: { ac: 21, re: 22 },
-    1250: { ac: 21, re: 22 },
-  },
-  '6.5': {
-    13: { ac: 1, re: 2 },
-    20: { ac: 2, re: 3 },
-    32: { ac: 3, re: 4 },
-    50: { ac: 5, re: 6 },
-    80: { ac: 7, re: 8 },
-    125: { ac: 10, re: 11 },
-    200: { ac: 14, re: 15 },
-    315: { ac: 21, re: 22 },
-    500: { ac: 21, re: 22 },
-    800: { ac: 21, re: 22 },
-    1250: { ac: 21, re: 22 },
-  },
-};
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/verdict/preview response shape — mirrors
+// backend/src/engine/aqlEvaluator.ts's exported CategoryResult/FailingDefect.
+// ─────────────────────────────────────────────────────────────────────────────
 
-interface AQLThresholds {
-  ac: number;
-  re: number;
-  bracket: number;
+interface VerdictFailingDefect {
+  defectId: string;
+  defectName: string;
+  count: number;
+  threshold: { ac: number; re: number };
 }
 
-/**
- * ISO2859_MATH_ENGINE.md §1 — getAQLThresholds
- * Returns acceptance (ac) and rejection (re) counts for a given AQL level and sample size.
- * AND locks to { ac: 0, re: 1 }. PASS/FAIL/NIL returns null (evaluated separately).
- */
-function getAQLThresholds(sampleSize: number, aqlLevel: string): AQLThresholds | null {
-  const aql = (aqlLevel ?? '').toUpperCase();
-  if (aql === 'AND') return { ac: 0, re: 1, bracket: snapToIsoBracket(sampleSize) };
-  if (aql === 'PASS/FAIL/NIL') return null;
-
-  const bracket = snapToIsoBracket(sampleSize);
-  const row = AQL_MATRIX[aqlLevel]?.[bracket];
-  if (!row) return { ac: 0, re: 1, bracket };
-  return { ...row, bracket };
+interface VerdictCategoryResult {
+  categoryId: string;
+  categoryName: string;
+  evaluationMode: 'CUMULATIVE' | 'GRANULAR' | 'N/A' | '';
+  threshold: { ac: number; re: number };
+  totalCount: number;
+  passed: boolean;
+  failingDefects: VerdictFailingDefect[];
 }
 
-/** Per-category verdict result */
-interface CategoryVerdict {
+type VerdictPreviewState =
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'success'; verdict: 'PASSED' | 'FAILED'; categoryResults: VerdictCategoryResult[] };
+
+/** Per-category display row, derived from VerdictCategoryResult + local profile labels. */
+interface CategoryVerdictRow {
   categoryName: string;
   aql: string;
   evalMode: string;
   defectCount: number;
-  thresholds: AQLThresholds | null;
-  result: 'PASS' | 'FAIL' | 'N/A';
+  thresholds: { ac: number; re: number; bracket: number } | null;
+  result: 'PASS' | 'FAIL';
   reason?: string;
 }
 
@@ -182,106 +115,114 @@ export function StepReviewSubmit({ inspectionData, onSubmit }: StepReviewSubmitP
   const { getResolvedProfile } = useConfig();
 
   const [retainContext, setRetainContext] = useState<boolean>(true);
+  const [previewState, setPreviewState] = useState<VerdictPreviewState>({ status: 'loading' });
+  const [retryTick, setRetryTick] = useState(0);
 
-  // ── Resolve active InspectionProfile ─────────────────────────────────────
+  // ── Resolve active InspectionProfile (display labels only — verdict math is server-side) ──
   const activeProfile = useMemo(
     () => getResolvedProfile(inspectionData?.profileId),
     [getResolvedProfile, inspectionData?.profileId]
   );
 
   const aqlCategories: AQLCategory[] = activeProfile?.aqlCategories ?? [];
-  const defectDefinitions = activeProfile?.defectDefinitions ?? [];
   const sampleSize: number = inspectionData?.sampleSize ?? 125;
+  const defectsSignature = JSON.stringify(inspectionData?.defects ?? {});
 
-  // ── ISO 2859-1 Verdict Engine (ISO2859_MATH_ENGINE.md §2) ─────────────────
-  const { overallVerdict, categoryVerdicts, totalDefects, failedDimensions } = useMemo(() => {
-    const defectCounts: Record<string, number> = inspectionData?.defects ?? {};
-    const qualStates: Record<string, string> = inspectionData?.qualitative ?? {};
-    const dimStats: Record<string, any> = inspectionData?.dimensionStats ?? {};
+  // ── POST /api/verdict/preview — server-authoritative AQL verdict ──────────
+  useEffect(() => {
+    let cancelled = false;
+    setPreviewState({ status: 'loading' });
 
-    // 1. Dimension failures
-    let failedDims = 0;
-    Object.values(dimStats).forEach((dim: any) => {
-      if (dim?.fails?.some((f: boolean) => f === true)) failedDims++;
-    });
-
-    // 2. Per-category AQL evaluation
-    const catVerdicts: CategoryVerdict[] = aqlCategories.map((cat) => {
-      const catAql = cat.aql ?? cat.aqlLevel ?? '';
-      const evalMode = (cat.evalMode ?? cat.evaluationMode ?? 'CUMULATIVE') as string;
-      const catDefects = defectDefinitions.filter((d: any) => d.categoryId === cat.id);
-
-      // PASS/FAIL/NIL qualitative evaluation
-      if (catAql.toUpperCase() === 'PASS/FAIL/NIL') {
-        const failCount = catDefects.filter((d: any) => qualStates[d.id] === 'FAIL').length;
-        return {
-          categoryName: cat.name,
-          aql: catAql,
-          evalMode: 'QUALITATIVE',
-          defectCount: failCount,
-          thresholds: null,
-          result: failCount > 0 ? 'FAIL' : 'PASS',
-          reason: failCount > 0 ? `${failCount} FAIL state(s) recorded` : undefined,
-        };
-      }
-
-      const thresholds = getAQLThresholds(sampleSize, catAql);
-      if (!thresholds) {
-        return {
-          categoryName: cat.name, aql: catAql, evalMode, defectCount: 0,
-          thresholds: null, result: 'N/A' as const,
-        };
-      }
-
-      let defectCount = 0;
-      let result: 'PASS' | 'FAIL' = 'PASS';
-      let reason: string | undefined;
-
-      if (evalMode.toUpperCase() === 'GRANULAR') {
-        // GRANULAR: each individual defect type checked independently (§2)
-        for (const d of catDefects) {
-          const c = defectCounts[d.id] ?? 0;
-          defectCount += c;
-          if (c > thresholds.ac) {
-            result = 'FAIL';
-            reason = `${d.name}: ${c} > ac(${thresholds.ac})`;
-            break;
-          }
+    fetch(`${API_BASE_URL}/api/verdict/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        profileId: inspectionData?.profileId ?? null,
+        productCode: inspectionData?.productCode,
+        sampleSize,
+        defects: inspectionData?.defects ?? {},
+      }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          let errStr = res.statusText;
+          try {
+            const errJson = await res.json();
+            errStr = errJson?.error ?? errStr;
+          } catch (_) {}
+          throw new Error(`Server responded ${res.status}: ${errStr}`);
         }
-      } else {
-        // CUMULATIVE: sum all defects in category (§2)
-        defectCount = catDefects.reduce((sum, d: any) => sum + (defectCounts[d.id] ?? 0), 0);
-        if (defectCount >= thresholds.re) {
-          result = 'FAIL';
-          reason = `Sum ${defectCount} ≥ re(${thresholds.re})`;
-        }
-      }
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setPreviewState({ status: 'success', verdict: data.verdict, categoryResults: data.categoryResults ?? [] });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn('[StepReviewSubmit] POST /api/verdict/preview failed:', msg);
+        setPreviewState({ status: 'error', message: msg });
+      });
 
-      return {
-        categoryName: cat.name,
-        aql: catAql,
-        evalMode: evalMode.toUpperCase() === 'CUMULATIVE' ? 'CUMULATIVE' : evalMode,
-        defectCount,
-        thresholds,
-        result,
-        reason,
-      };
-    });
-
-    const totalDefs = catVerdicts.reduce((sum, cv) => sum + cv.defectCount, 0);
-    const anyFail = catVerdicts.some((cv) => cv.result === 'FAIL') || failedDims > 0;
-    const overall: 'PASS' | 'FAIL' = anyFail ? 'FAIL' : 'PASS';
-
-    return {
-      overallVerdict: overall,
-      categoryVerdicts: catVerdicts,
-      totalDefects: totalDefs,
-      failedDimensions: failedDims,
+    return () => {
+      cancelled = true;
     };
-  }, [inspectionData, aqlCategories, defectDefinitions, sampleSize]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inspectionData?.profileId, inspectionData?.productCode, sampleSize, defectsSignature, retryTick]);
+
+  // ── Physical dimension failures — no server equivalent, stays local ───────
+  const failedDimensions = useMemo(() => {
+    const dimStats: Record<string, any> = inspectionData?.dimensionStats ?? {};
+    let failed = 0;
+    Object.values(dimStats).forEach((dim: any) => {
+      if (dim?.fails?.some((f: boolean) => f === true)) failed++;
+    });
+    return failed;
+  }, [inspectionData?.dimensionStats]);
+
+  // ── Derive render-facing verdict values from server state + dimensions ────
+  const overallVerdict: 'PASS' | 'FAIL' | null =
+    previewState.status !== 'success'
+      ? null
+      : previewState.verdict === 'FAILED' || failedDimensions > 0
+        ? 'FAIL'
+        : 'PASS';
+
+  const totalDefects: number | null =
+    previewState.status === 'success'
+      ? previewState.categoryResults.reduce((sum, cr) => sum + cr.totalCount, 0)
+      : null;
+
+  const categoryVerdicts: CategoryVerdictRow[] =
+    previewState.status === 'success'
+      ? previewState.categoryResults.map((cr) => {
+          const localCat = aqlCategories.find((c) => c.id === cr.categoryId);
+          return {
+            categoryName: cr.categoryName,
+            aql: localCat?.aql ?? localCat?.aqlLevel ?? '—',
+            evalMode: cr.evaluationMode === 'N/A' ? 'QUALITATIVE' : cr.evaluationMode,
+            defectCount: cr.totalCount,
+            thresholds: { ac: cr.threshold.ac, re: cr.threshold.re, bracket: snapToDisplayBracket(sampleSize) },
+            result: cr.passed ? ('PASS' as const) : ('FAIL' as const),
+            reason: cr.passed
+              ? undefined
+              : cr.failingDefects.map((fd) => `${fd.defectName}: ${fd.count} > ac(${fd.threshold.ac})`).join('; '),
+          };
+        })
+      : [];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (previewState.status !== 'success') {
+      addToast(
+        'error',
+        previewState.status === 'error'
+          ? 'Cannot submit — verdict computation failed. Please retry.'
+          : 'Please wait for verdict computation to finish before submitting.'
+      );
+      return;
+    }
     addToast('success', `Inspection ${inspectionData?.fullSystemLotNo ?? ''} submitted successfully.`);
     onSubmit(retainContext);
   };
@@ -291,29 +232,62 @@ export function StepReviewSubmit({ inspectionData, onSubmit }: StepReviewSubmitP
 
       {/* ── Hero Verdict Banner — UI_DESIGN_SYSTEM.md §5.1 ──────────────────── */}
       <div className={`p-6 rounded-xl border flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm ${
-        overallVerdict === 'PASS'
-          ? 'bg-emerald-500/10 border-emerald-500/30'
-          : 'bg-rose-500/10 border-rose-500/30'
+        previewState.status === 'loading'
+          ? 'bg-surface border-gray-700/50'
+          : previewState.status === 'error'
+            ? 'bg-amber-500/5 border-amber-500/30'
+            : overallVerdict === 'PASS'
+              ? 'bg-emerald-500/10 border-emerald-500/30'
+              : 'bg-rose-500/10 border-rose-500/30'
       }`}>
         <div className="flex items-center gap-4">
-          {overallVerdict === 'PASS' ? (
+          {previewState.status === 'loading' ? (
+            <Loader2 className="w-10 h-10 text-muted shrink-0 animate-spin" strokeWidth={2} />
+          ) : previewState.status === 'error' ? (
+            <AlertTriangle className="w-10 h-10 text-amber-400 shrink-0" strokeWidth={2} />
+          ) : overallVerdict === 'PASS' ? (
             <CheckCircle2 className="w-10 h-10 text-emerald-400 shrink-0" strokeWidth={2} />
           ) : (
             <XCircle className="w-10 h-10 text-rose-400 shrink-0" strokeWidth={2} />
           )}
           <div>
-            <h2 className={`text-2xl font-bold uppercase tracking-wide ${
-              overallVerdict === 'PASS' ? 'text-emerald-400' : 'text-rose-400'
-            }`}>
-              ISO 2859-1 VERDICT: {overallVerdict}
-            </h2>
-            <p className={`text-xs font-bold uppercase tracking-wider mt-1 ${
-              overallVerdict === 'PASS' ? 'text-emerald-500/70' : 'text-rose-500/70'
-            }`}>
-              {overallVerdict === 'PASS'
-                ? 'LOT MEETS ACCEPTABLE QUALITY LIMITS'
-                : `LOT REJECTED — ${failedDimensions > 0 ? `${failedDimensions} Dimension Issue(s)` : ''} ${totalDefects > 0 ? `${totalDefects} Defect(s) Found` : ''}`.trim()}
-            </p>
+            {previewState.status === 'loading' ? (
+              <h2 className="text-2xl font-bold uppercase tracking-wide text-muted animate-pulse">
+                COMPUTING ISO 2859-1 VERDICT…
+              </h2>
+            ) : previewState.status === 'error' ? (
+              <>
+                <h2 className="text-2xl font-bold uppercase tracking-wide text-amber-400">
+                  VERDICT UNAVAILABLE
+                </h2>
+                <p className="text-xs font-bold uppercase tracking-wider mt-1 text-amber-500/70">
+                  {previewState.message}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setRetryTick((t) => t + 1)}
+                  className="mt-3 h-8 px-4 rounded-lg bg-amber-500/20 border border-amber-500/50 text-amber-400 hover:bg-amber-500/30 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" strokeWidth={2} />
+                  RETRY
+                </button>
+              </>
+            ) : (
+              <>
+                <h2 className={`text-2xl font-bold uppercase tracking-wide ${
+                  overallVerdict === 'PASS' ? 'text-emerald-400' : 'text-rose-400'
+                }`}>
+                  ISO 2859-1 VERDICT: {overallVerdict}
+                </h2>
+                <p className={`text-xs font-bold uppercase tracking-wider mt-1 ${
+                  overallVerdict === 'PASS' ? 'text-emerald-500/70' : 'text-rose-500/70'
+                }`}>
+                  {overallVerdict === 'PASS'
+                    ? 'LOT MEETS ACCEPTABLE QUALITY LIMITS'
+                    : `LOT REJECTED — ${failedDimensions > 0 ? `${failedDimensions} Dimension Issue(s)` : ''} ${(totalDefects ?? 0) > 0 ? `${totalDefects} Defect(s) Found` : ''}`.trim()}
+                </p>
+              </>
+            )}
           </div>
         </div>
 
@@ -340,7 +314,7 @@ export function StepReviewSubmit({ inspectionData, onSubmit }: StepReviewSubmitP
               { label: 'PRODUCT', value: `${inspectionData?.productCode ?? '—'} (${inspectionData?.size ?? '—'})` },
               { label: 'LINE', value: inspectionData?.lineId ?? '—' },
               { label: 'SHIFT', value: inspectionData?.shift ?? '—' },
-              { label: 'SAMPLE SIZE', value: `${sampleSize} Pcs (ISO Bracket: ${snapToIsoBracket(sampleSize)})` },
+              { label: 'SAMPLE SIZE', value: `${sampleSize} Pcs (ISO Bracket: ${snapToDisplayBracket(sampleSize)})` },
               { label: 'TOTAL CARTON', value: inspectionData?.totalCarton ?? '—' },
               { label: 'GLOVE WEIGHT', value: inspectionData?.gloveWeight ? `${inspectionData.gloveWeight}g` : '—' },
             ].map(({ label, value }) => (
@@ -382,16 +356,20 @@ export function StepReviewSubmit({ inspectionData, onSubmit }: StepReviewSubmitP
             DEFECT TABULATION
           </h3>
           <div className="flex-1 flex flex-col items-center justify-center py-4">
-            <div className={`text-4xl font-mono font-bold mb-2 ${totalDefects > 0 ? 'text-rose-400' : 'text-primary'}`}>
-              {totalDefects}
+            <div className={`text-4xl font-mono font-bold mb-2 ${
+              totalDefects === null ? 'text-muted' : totalDefects > 0 ? 'text-rose-400' : 'text-primary'
+            }`}>
+              {totalDefects === null ? '—' : totalDefects}
             </div>
             <span className="text-[10px] uppercase text-muted font-bold tracking-widest text-center">
               Total Defects<br />Recorded
             </span>
             <div className="w-full mt-6 flex items-center justify-between bg-canvas rounded-lg border border-gray-800 p-3 shadow-inner">
               <span className="text-xs text-muted font-bold uppercase tracking-wider">Verdict Impact</span>
-              <span className={`text-lg font-mono font-bold ${totalDefects > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                {totalDefects > 0 ? 'FAIL' : 'PASS'}
+              <span className={`text-lg font-mono font-bold ${
+                totalDefects === null ? 'text-muted' : totalDefects > 0 ? 'text-rose-400' : 'text-emerald-400'
+              }`}>
+                {totalDefects === null ? 'PENDING' : totalDefects > 0 ? 'FAIL' : 'PASS'}
               </span>
             </div>
           </div>
@@ -418,7 +396,7 @@ export function StepReviewSubmit({ inspectionData, onSubmit }: StepReviewSubmitP
                   </span>
                 )}
                 <span className="text-[10px] font-mono text-muted">Count: {cv.defectCount}</span>
-                <span className={`ml-auto text-xs font-mono font-bold ${cv.result === 'PASS' ? 'text-emerald-400' : cv.result === 'FAIL' ? 'text-rose-400' : 'text-gray-500'}`}>
+                <span className={`ml-auto text-xs font-mono font-bold ${cv.result === 'PASS' ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {cv.result}
                 </span>
                 {cv.reason && (
@@ -427,6 +405,18 @@ export function StepReviewSubmit({ inspectionData, onSubmit }: StepReviewSubmitP
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ── Submission Blocked Notice ────────────────────────────────────── */}
+      {previewState.status !== 'success' && (
+        <div className="p-3 rounded-lg border border-amber-500/30 border-l-4 border-l-amber-500 bg-amber-500/5 flex items-center gap-3">
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" strokeWidth={2} />
+          <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
+            {previewState.status === 'loading'
+              ? 'Submission is blocked until the verdict finishes computing.'
+              : 'Submission is blocked — verdict computation failed. Retry above before submitting.'}
+          </span>
         </div>
       )}
 
@@ -453,4 +443,3 @@ export function StepReviewSubmit({ inspectionData, onSubmit }: StepReviewSubmitP
     </form>
   );
 }
-

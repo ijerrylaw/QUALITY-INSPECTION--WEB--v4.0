@@ -631,3 +631,166 @@ baseline (`AmendmentLog` back to 0 rows) — confirmed both via direct
 Prisma count and in the browser (History: 19 rows, no trace of the test
 lot; Approvals Queue: "NO PENDING APPROVALS"). Typecheck clean throughout;
 no debug instrumentation left in the committed code.
+
+### 5.6 StepReviewSubmit.tsx duplicated AQL verdict logic, with wrong threshold values — wired to POST /api/verdict/preview
+
+**Severity: High. Status: FIXED and verified live, 2026-08-08.**
+
+**Where:** `frontend/src/pages/wizard/StepReviewSubmit.tsx` (Step 4 —
+Review & Submit) had its own inline copy of ISO 2859-1 bracket-snapping,
+AQL matrix, and per-category verdict evaluation, computed synchronously in
+a `useMemo`. This was a duplicate of logic already consolidated on the
+backend into a single source of truth
+(`backend/src/engine/aqlEvaluator.ts` + `backend/src/engine/resolveVerdict.ts`),
+used by every persisting route.
+
+**Discovery:** the intended replacement, `POST /api/verdict/preview`,
+turned out to **already exist and be fully implemented** — mounted at
+`/api/verdict` in `backend/server.ts`, calling the exact same
+`resolveVerdict()` used by `POST /api/submissions` and
+`POST /api/submissions/:id/amendments`. It was simply unused: no frontend
+file called it, despite its own doc comment claiming it was already used
+by `StepReviewSubmit.tsx` and `HistoryFeed.tsx`. It is also undocumented
+in `API_AND_INTEGRATION_SPEC.md`'s endpoint list (§1) — noted here since
+that doc must not be edited this session.
+
+**A real, previously-undetected data bug was found and confirmed live
+while verifying the fix**, not just a theoretical duplication risk: the
+old client-side `AQL_MATRIX` had `{ac: 5, re: 6}` for AQL level `'1.0'` at
+sample size `315`. The backend's `ISO_2859_MATRIX`
+(`backend/src/engine/iso2859-matrix.ts`) — derived directly from ISO
+2859-1's Poisson acceptance-probability formula, with each cell's
+derivation documented inline (e.g. `λ=3.150, Pa(Ac=5)=90.1% → Ac=7,
+Pa=98.6%`) — has `{ac: 7, re: 8}` for that exact cell. Live-tested: 6
+`Hole` defects recorded against a BARRIER category (AQL 1.0, n=315). Under
+the old client math, `6 >= re(6)` → the wizard would have shown **FAIL**.
+Under the new server-verified math, `6 <= ac(7)` → correctly **PASS**,
+matching the same-request `POST /api/submissions` response's independently
+server-computed `verdict: "PASSED"` exactly. This means the wizard's
+Step 4 preview could show a verdict opposite to what the server actually
+persists — the exact class of bug `/api/verdict/preview`'s own doc
+comment says it exists to prevent ("so both show exactly what the server
+would compute").
+
+Two lower-severity, confirmed-but-less-consequential divergences in the
+same old client copy, both eliminated by deleting it in favor of the
+server call rather than needing separate fixes:
+- Bracket list: `ISO2859_MATH_ENGINE.md` §1's canonical list is `[2, 3, 5,
+  8, 13, 20, 32, 50, 80, 125, 200, 315, 500]` (matches the backend's
+  `SAMPLE_SIZE_BRACKETS` exactly); the old client's `ISO_BRACKETS` was
+  `[13, 20, 32, 50, 80, 125, 200, 315, 500, 800, 1250]` — missing 2/3/5/8,
+  with an erroneous 800/1250 not in the standard.
+- Snap algorithm: the doc requires "nearest standard bracket, ties go to
+  the larger" (same as the backend's `snapToBracket()`); the old client's
+  `snapToIsoBracket()` instead always rounded **up** to the first bracket
+  `>= n`. Not reachable through the current UI (the Sample Size dropdown
+  only offers exact standard-bracket values from `config.sampleSizes`, so
+  old and new algorithms always agreed in practice) — confirmed
+  analytically instead, e.g. `n=90`: old → 125, new (correct) → 80.
+
+**Not part of this fix — a separate, pre-existing system, confirmed
+deliberately out of scope:** dimension pass/fail (`inspectionData.dimensionStats`
+→ `failedDimensions`) has no server-side equivalent anywhere in this
+codebase (confirmed by grep across all of `backend/src`).
+`ISO2859_MATH_ENGINE.md` documents AQL verdict logic (§1-2) and physical
+dimension evaluation (§5) as two independent systems; `failedDimensions`
+stays a local computation, OR'd with the server's AQL verdict for the
+final `overallVerdict` — same combination logic as before, just with the
+AQL half now server-sourced instead of duplicated.
+
+**The fix:** `StepReviewSubmit.tsx` now calls `POST /api/verdict/preview`
+in a `useEffect` (payload: `{profileId, productCode, sampleSize, defects}`
+— `inspectionData.defects` already carries N/A-mode qualitative states as
+0/1/2-encoded values, no transform needed), tracked via a
+`{status: 'loading'|'error'|'success', ...}` state. All render-facing
+values (`overallVerdict`, `totalDefects`, `categoryVerdicts`) are derived
+from that state each render rather than computed inline. A `null`
+(unknown) state is treated distinctly from `0`/`PASS` everywhere in the
+UI — e.g. the Defect Tabulation KPI card shows `—`/`PENDING`, not a
+falsely-reassuring `0`/`PASS`, while loading or errored. Since the actual
+Submit button lives in `WizardPage.tsx` (wired via `form="wizard-step-form"`
+to the `<form>` this file owns) and that file was out of scope to touch,
+submission is instead blocked inside this file's own `onSubmit` handler —
+it no-ops with a toast (and a persistent inline status line, since a toast
+alone is easy to miss) unless `previewState.status === 'success'`. An
+amber error banner with a Retry button appears on fetch failure, matching
+the existing `AlertTriangle` / `border-amber-500/30 border-l-4` convention
+used elsewhere (`WizardPage.tsx`'s amendment banner, `HistoryFeed.tsx`).
+The one remaining local bracket-snap call (`snapToIsoBracket`, used only
+for the "ISO Bracket: X" and per-category "n=X" display text — never fed
+into verdict math, before or after) was replaced with a correctly-sourced
+`snapToDisplayBracket` mirroring the backend's canonical bracket list and
+algorithm — the same "display-only inline copy" pattern
+`ISO2859_MATH_ENGINE.md` §2 already documents for `HistoryFeed.tsx`.
+
+**`HistoryFeed.tsx` still has its own separate inline AQL copy** per
+`ISO2859_MATH_ENGINE.md` §2's own listing — a sibling duplicate, not
+touched by this fix (out of scope; only `StepReviewSubmit.tsx` was in
+scope this session).
+
+**Verified live, end to end (2026-08-08):** real submission through the
+actual wizard UI (profile GLOBAL STANDARD DEFAULT, product
+`N035MNV-OC-24FT`, size `L`, line `A003`, sample size `315`, 6 `Hole`
+defects recorded against BARRIER) → confirmed the `POST /api/verdict/preview`
+network call fired with the correct payload and its response
+(`ac:7,re:8`, `verdict:"PASSED"`) matched the rendered banner and category
+breakdown exactly → navigated Step 4 → Step 3 → Step 4 to confirm the
+preview re-fetches cleanly with no console errors or stale-state leaks →
+stopped the backend process entirely to force a real fetch failure:
+confirmed the "VERDICT UNAVAILABLE" error banner, Retry button, `—`/`PENDING`
+Defect Tabulation card, and blocked-submission notice all appeared, and
+confirmed via the network log that clicking "SUBMIT LOT" while in this
+state made **no** `POST /api/submissions` request — the guard held.
+Restarted the backend (confirmed via its startup log listing all routes
+including `/api/verdict/preview`), clicked Retry, confirmed full recovery
+to the correct `PASS` state — the error-simulation left no lasting change,
+only the running process was stopped and restarted. Submitted the lot for
+real: `POST /api/submissions` returned `201` with independently
+server-computed `verdict: "PASSED"`, matching the wizard's preview exactly.
+Typecheck clean throughout. Cleaned up afterward: deleted the test
+`Submission` row directly via Prisma, restoring `dev.db` to its 19-row
+baseline (0 amendment logs) — confirmed via direct Prisma count.
+
+### 5.7 Amendment verdict goes stale if defects are edited after prefill — StepReviewSubmit has no way to write back into WizardPage's inspectionData
+
+**Severity: Medium. Status: not fixed — newly identified 2026-08-08 while
+scoping §5.6, logged per explicit instruction to track separately rather
+than silently imply it's covered by that fix.**
+
+**Where:** `StepReviewSubmitProps` (`frontend/src/pages/wizard/StepReviewSubmit.tsx`)
+has no `onUpdate` callback, and `WizardPage.tsx` never passes one when
+rendering `<StepReviewSubmit>` — so nothing in this file, before or after
+§5.6's fix, ever writes its computed `overallVerdict` back into
+`WizardPage.tsx`'s `inspectionData.overallVerdict`.
+
+**Why it matters:** in amendment mode, `inspectionData.overallVerdict` is
+set exactly once, at prefill time, from the original record's stored
+verdict (`WizardPage.tsx`'s amendment-fetch mapping:
+`overallVerdict: target.verdict === 'PASSED' ? 'PASS' : 'FAIL'`) — see
+§5.5. If the operator then edits defects on Step 3 before submitting the
+amendment, `inspectionData.overallVerdict` is never refreshed to reflect
+that edit. `WizardPage.tsx`'s `handleSubmit` sends this stale value
+verbatim as `newValues.verdict` in the `POST /api/submissions/:id/amendments`
+payload — and per `API_AND_INTEGRATION_SPEC.md` §1, that endpoint "does
+NOT re-evaluate the AQL verdict. The verdict in `newValues` is whatever
+the caller supplies," and `POST /api/amendments/:id/approve` likewise
+"does not recompute the AQL verdict" on approval — so a stale verdict
+computed before the operator's edit can end up **persisted** as the
+approved outcome, silently disagreeing with what Step 4 was actually
+showing on screen at submit time.
+
+Note this gap is orthogonal to §5.6: it exists regardless of whether
+Step 4's verdict is client-computed (before §5.6) or server-verified
+(after) — the missing link is purely the write-back into `WizardPage.tsx`'s
+shared state, not the correctness of the computation itself. For a brand
+new (non-amendment) submission the same missing write-back is harmless,
+since `POST /api/submissions` always ignores `body.verdict` and computes
+its own from `resolveVerdict()` — confirmed while investigating §5.6.
+
+**Correct fix, for whoever picks this up:** add an `onUpdate` prop to
+`StepReviewSubmitProps`, call it from a `useEffect` whenever the derived
+`overallVerdict` changes, and wire `onUpdate={handleUpdate}` in
+`WizardPage.tsx` where `<StepReviewSubmit>` is rendered — mirroring the
+pattern every other step component (`StepMetadata`, `StepDimensions`,
+`StepDefects`) already uses. Out of scope for §5.6 (single-file constraint,
+`WizardPage.tsx` explicitly not to be touched that turn).
