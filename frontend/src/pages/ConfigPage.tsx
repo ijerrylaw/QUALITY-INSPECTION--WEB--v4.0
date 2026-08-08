@@ -39,6 +39,7 @@ const isDeepEqual = (obj1: any, obj2: any): boolean => {
   return true;
 };
 import { useConfig, API_BASE_URL } from '../context/ConfigContext';
+import { useAuth, authHeader } from '../context/AuthContext';
 import { useToast } from '../components/ui/ToastProvider';
 import { 
   Building2, 
@@ -59,6 +60,7 @@ type ConfigTab = 'factory' | 'product' | 'quality';
 
 export function ConfigPage() {
   const { config, isLoading, error, refreshConfig, updateLocalConfig } = useConfig();
+  const { user } = useAuth();
   const { addToast } = useToast();
   
   const [activeTab, setActiveTab] = useState<ConfigTab>('factory');
@@ -132,7 +134,7 @@ export function ConfigPage() {
       // 2. Persist to backend
       const response = await fetch(`${API_BASE_URL}/api/config`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader(user) },
         body: JSON.stringify(draftConfig)
       });
       

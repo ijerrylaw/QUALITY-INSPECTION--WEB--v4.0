@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { ShieldAlert, Check, X, ArrowRight, User, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { API_BASE_URL } from '../../context/ConfigContext';
+import { useAuth, authHeader } from '../../context/AuthContext';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,7 @@ interface PendingAmendment {
 // ── ApprovalsQueue ────────────────────────────────────────────────────────────
 
 export function ApprovalsQueue() {
+  const { user } = useAuth();
   const [amendments, setAmendments] = useState<PendingAmendment[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedAmend, setSelectedAmend] = useState<PendingAmendment | null>(null);
@@ -56,7 +58,7 @@ export function ApprovalsQueue() {
     try {
       const res = await fetch(`${API_BASE_URL}/api/amendments/${submissionId}/${action}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader(user) },
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       // Refresh list after action

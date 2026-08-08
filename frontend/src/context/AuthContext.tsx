@@ -88,3 +88,13 @@ export function useAuth() {
   }
   return context;
 }
+
+/**
+ * Claimed-role request header for the backend's requireRole() middleware
+ * (backend/src/middleware/auth.ts, AUDIT_REPORT.md §9.1/§10 Part 1). Not a
+ * verified token — just the currently logged-in user's role, mirroring the
+ * mock-auth maturity of the rest of this app's login flows.
+ */
+export function authHeader(user: User | null): Record<string, string> {
+  return user ? { 'X-User-Role': user.role } : {};
+}

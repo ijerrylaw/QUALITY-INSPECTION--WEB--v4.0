@@ -41,6 +41,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Wand2, Table, CheckCircle2, AlertCircle, ArrowLeft, ArrowRight, ClipboardCheck, FilePen, AlertTriangle } from 'lucide-react';
 import { useConfig, API_BASE_URL } from '../context/ConfigContext';
+import { useAuth, authHeader } from '../context/AuthContext';
 import { useToast } from '../components/ui/ToastProvider';
 
 import { StepMetadata } from './wizard/StepMetadata';
@@ -92,6 +93,7 @@ const QUALITATIVE_DECODING: Record<number, 'PASS' | 'FAIL' | 'NIL'> = { 0: 'NIL'
 
 export function WizardPage() {
   const { config, getResolvedProfile } = useConfig();
+  const { user } = useAuth();
   const { addToast } = useToast();
   const [searchParams] = useSearchParams();
 
@@ -282,7 +284,7 @@ export function WizardPage() {
       try {
         const response = await fetch(`${API_BASE_URL}/api/submissions/${sourceId}/amendments`, {
           method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeader(user) },
           body:    JSON.stringify(amendmentPayload),
         });
 
@@ -338,7 +340,7 @@ export function WizardPage() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/submissions`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader(user) },
         body:    JSON.stringify(submission),
       });
 

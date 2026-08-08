@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { useConfig, API_BASE_URL } from '../../context/ConfigContext';
+import { useAuth, authHeader } from '../../context/AuthContext';
 import { useToast } from '../../components/ui/ToastProvider';
 import {
   ShieldCheck, Barcode, Scaling, Activity, Calendar,
@@ -334,6 +335,7 @@ export interface BatchEntryHandle {
 
 export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
   const { config, isLoading } = useConfig();
+  const { user } = useAuth();
   const { addToast } = useToast();
 
   // --- Shared Metadata ---
@@ -465,7 +467,7 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
         submissions.map(sub => 
           fetch(`${API_BASE_URL}/api/submissions`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeader(user) },
             body: JSON.stringify(sub),
           }).then(res => {
             if (!res.ok) throw new Error(`Server error`);

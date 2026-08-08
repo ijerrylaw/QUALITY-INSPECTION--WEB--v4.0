@@ -12,6 +12,7 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prismaClient';
 import type { AppConfig } from '../../generated/prisma/client';
+import { requireRole } from '../middleware/auth';
 
 const router = Router();
 
@@ -137,7 +138,7 @@ router.get('/', async (_req: Request, res: Response) => {
  * Updates system configuration parameters in the AppConfig singleton.
  * Automatically serializes arrays and objects into JSON strings before DB save.
  */
-router.patch('/', async (req: Request, res: Response) => {
+router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Request, res: Response) => {
   try {
     const payload = req.body || {};
     const updateData: Record<string, any> = {};

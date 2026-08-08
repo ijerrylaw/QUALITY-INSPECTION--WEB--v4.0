@@ -31,6 +31,7 @@
 import { Router, Request, Response } from 'express';
 import { resolveVerdict, VerdictProfileNotFoundError } from '../engine/resolveVerdict';
 import prisma from '../lib/prismaClient';
+import { requireRole, ALL_ROLES } from '../middleware/auth';
 
 const router = Router();
 
@@ -103,7 +104,7 @@ function parseJSONObjectField<T = unknown>(raw: unknown): Record<string, T> {
  *   "categoryResults": [ ... ]
  * }
  */
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) => {
   try {
     const body = req.body as Record<string, unknown>;
 
@@ -300,7 +301,7 @@ router.get('/:id', async (req: Request, res: Response) => {
  *   }
  * }
  */
-router.post('/:id/amendments', async (req: Request, res: Response) => {
+router.post('/:id/amendments', requireRole(...ALL_ROLES), async (req: Request, res: Response) => {
   try {
     const submissionId = String(req.params['id']);
     const body = req.body as { reason?: string; newValues?: Record<string, unknown> };
@@ -431,7 +432,7 @@ amendmentsRouter.get('/pending', async (_req: Request, res: Response) => {
 // If the amendment's profile can't be resolved, approval hard-fails: this is
 // the one place a verdict is permanently written, so we never guess here.
 // The reviewer is mocked until Azure AD integration is complete.
-amendmentsRouter.post('/:id/approve', async (req: Request, res: Response) => {
+amendmentsRouter.post('/:id/approve', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Request, res: Response) => {
   try {
     const submissionId = String(req.params['id']);
 
@@ -568,7 +569,7 @@ amendmentsRouter.post('/:id/approve', async (req: Request, res: Response) => {
 
 // ── POST /api/amendments/:id/reject ───────────────────────────────────────
 // Discards the draft amendment. Sets amendmentStatus → 'REJECTED'.
-amendmentsRouter.post('/:id/reject', async (req: Request, res: Response) => {
+amendmentsRouter.post('/:id/reject', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Request, res: Response) => {
   try {
     const submissionId = String(req.params['id']);
     const body = req.body as { reason?: string };
