@@ -1,24 +1,30 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, MOCK_M365_IDENTITIES } from '../context/AuthContext';
 import { useToast } from '../components/ui/ToastProvider';
 import { Button } from '../components/ui/Button';
 import { ShieldCheck, HardHat, Delete } from 'lucide-react';
+
+// Dev-only mock M365 login is gated on import.meta.env.DEV (AUDIT_REPORT.md
+// §11, Task 6) — vite build dead-code-eliminates this whole branch out of
+// production bundles, so it can't accidentally run once real Azure AD
+// credentials are wired in.
+const MOCK_M365_ENABLED = import.meta.env.DEV;
 
 export function LoginPage() {
   const { loginWithM365, loginWithPIN } = useAuth();
   const { addToast } = useToast();
   const navigate = useNavigate();
-  
+
   const [pin, setPin] = useState<string>('');
-  const [selectedUser, setSelectedUser] = useState<string>('usr_floor_104');
+  const [selectedMockIdentity, setSelectedMockIdentity] = useState<string>(MOCK_M365_IDENTITIES[0]?.id ?? '');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Handle M365 Login
   const handleM365Login = async () => {
     try {
       setIsLoggingIn(true);
-      await loginWithM365();
+      await loginWithM365(selectedMockIdentity);
       addToast('success', 'Logged in successfully via Microsoft 365.');
       navigate('/wizard'); // Default page shall be entry wizard
     } catch (error) {
@@ -28,10 +34,12 @@ export function LoginPage() {
     }
   };
 
-  // Handle PIN Pad Input
+  // Handle PIN Pad Input — identity is resolved server-side from the PIN
+  // itself (backend/src/routes/pinUsers.routes.ts's POST /api/auth/pin-login),
+  // so no separate "who are you" selection step is needed.
   const handlePinInput = async (digit: string) => {
     if (pin.length >= 6) return;
-    
+
     const newPin = pin + digit;
     setPin(newPin);
 
@@ -39,7 +47,7 @@ export function LoginPage() {
     if (newPin.length === 6) {
       try {
         setIsLoggingIn(true);
-        await loginWithPIN(selectedUser, newPin);
+        await loginWithPIN(newPin);
         addToast('success', 'Factory floor login successful.');
         navigate('/wizard'); // Operators go to wizard
       } catch (error) {
@@ -73,7 +81,7 @@ export function LoginPage() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [pin, isLoggingIn, loginWithPIN, selectedUser, navigate, addToast]);
+  }, [pin, isLoggingIn, loginWithPIN, navigate, addToast]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-canvas text-primary">
@@ -95,21 +103,56 @@ export function LoginPage() {
             </p>
           </div>
 
-          <div className="pt-6">
-            <Button 
-              className="w-full h-14 text-base" 
-              onClick={handleM365Login}
-              disabled={isLoggingIn}
-            >
-              <svg className="w-6 h-6 mr-3" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="1" y="1" width="9" height="9" fill="#F25022"/>
-                <rect x="11" y="1" width="9" height="9" fill="#7FBA00"/>
-                <rect x="1" y="11" width="9" height="9" fill="#00A4EF"/>
-                <rect x="11" y="11" width="9" height="9" fill="#FFB900"/>
-              </svg>
-              {isLoggingIn ? 'Authenticating...' : 'Sign in with Microsoft 365'}
-            </Button>
-          </div>
+          {MOCK_M365_ENABLED ? (
+            <>
+              {/* Dev-only mock identity picker — simulates whichever real Azure
+                  AD user would be signing in, since real Entra ID is not wired
+                  up yet. Compiled out of production builds along with the
+                  button below (import.meta.env.DEV). */}
+              <div className="space-y-3 text-left">
+                <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider pl-1">
+                  [DEV] Mock Identity
+                </label>
+                <select
+                  className="w-full h-14 bg-surface border border-gray-700 rounded-xl px-4 text-primary focus:outline-none focus:border-brand-secondary transition-colors appearance-none"
+                  value={selectedMockIdentity}
+                  onChange={(e) => setSelectedMockIdentity(e.target.value)}
+                  disabled={isLoggingIn}
+                >
+                  {MOCK_M365_IDENTITIES.map((identity) => (
+                    <option key={identity.id} value={identity.id}>
+                      {identity.name} — {identity.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="pt-6">
+                <Button
+                  className="w-full h-14 text-base"
+                  onClick={handleM365Login}
+                  disabled={isLoggingIn}
+                >
+                  <svg className="w-6 h-6 mr-3" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="1" y="1" width="9" height="9" fill="#F25022"/>
+                    <rect x="11" y="1" width="9" height="9" fill="#7FBA00"/>
+                    <rect x="1" y="11" width="9" height="9" fill="#00A4EF"/>
+                    <rect x="11" y="11" width="9" height="9" fill="#FFB900"/>
+                  </svg>
+                  {isLoggingIn ? 'Authenticating...' : 'Sign in with Microsoft 365'}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="pt-6">
+              <Button className="w-full h-14 text-base" disabled>
+                Sign in with Microsoft 365
+              </Button>
+              <p className="mt-3 text-xs text-gray-500">
+                Pending Azure AD configuration.
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -124,27 +167,7 @@ export function LoginPage() {
               </div>
             </div>
             <h2 className="text-2xl font-bold tracking-tight">Factory Floor Kiosk</h2>
-            <p className="mt-2 text-muted">Select your ID and enter your 6-digit PIN</p>
-          </div>
-
-          {/* User Selection */}
-          <div className="space-y-3">
-            <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider pl-1">
-              Active Shift Operators
-            </label>
-            <select 
-              className="w-full h-14 bg-surface border border-gray-700 rounded-xl px-4 text-primary focus:outline-none focus:border-brand-secondary transition-colors appearance-none"
-              value={selectedUser}
-              onChange={(e) => {
-                setSelectedUser(e.target.value);
-                setPin('');
-              }}
-              disabled={isLoggingIn}
-            >
-              <option value="usr_floor_104">W-104 : Ahmad Razak (Line 01)</option>
-              <option value="usr_floor_105">W-105 : Siti Nurhaliza (Line 01)</option>
-              <option value="usr_leader_01">L-01 : Wong Wei Ming (Leader)</option>
-            </select>
+            <p className="mt-2 text-muted">Enter your 6-digit PIN</p>
           </div>
 
           {/* PIN Indicator Dots */}
@@ -201,7 +224,7 @@ export function LoginPage() {
 
           <div className="text-center pt-4">
              <p className="text-xs text-gray-500">
-               Test PIN is <span className="font-mono text-gray-300">123456</span>
+               Don't have a PIN? Ask your supervisor or manager.
              </p>
           </div>
 

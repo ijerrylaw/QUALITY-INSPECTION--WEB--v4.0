@@ -13,15 +13,16 @@
 
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import { 
-  ClipboardCheck, 
-  History, 
-  ShieldAlert, 
-  BarChart3, 
-  Sliders, 
-  Settings, 
-  PanelLeftClose, 
+import { useAuth, rolesInGroups } from '../../context/AuthContext';
+import {
+  ClipboardCheck,
+  History,
+  ShieldAlert,
+  BarChart3,
+  Sliders,
+  Settings,
+  Users,
+  PanelLeftClose,
   PanelLeftOpen,
   Factory,
   LogOut
@@ -34,13 +35,23 @@ interface SidebarItem {
   roles: string[];
 }
 
+// Group A/B/C role lists (AUDIT_REPORT.md §11) — derived from the single
+// source of truth in AuthContext.tsx rather than hardcoded per-item, so nav
+// visibility can't drift from the RoleRoute gates in App.tsx the way it did
+// before (Sidebar previously allowed SUPERVISOR into Approvals/Analytics
+// while RoleRoute didn't, and vice versa omitted EXECUTIVE).
+const GROUP_AB_ROLES = rolesInGroups('A', 'B');
+const GROUP_A_ROLES = rolesInGroups('A');
+const ALL_GROUP_ROLES = rolesInGroups('A', 'B', 'C');
+
 const sidebarItems: SidebarItem[] = [
-  { to: '/wizard', label: 'QUALITY ENTRY WIZARD', icon: ClipboardCheck, roles: ['OPERATOR', 'LEADER', 'SUPERVISOR', 'MANAGER', 'ADMIN'] },
-  { to: '/history', label: 'INSPECTION RECORDS', icon: History, roles: ['OPERATOR', 'LEADER', 'SUPERVISOR', 'MANAGER', 'ADMIN'] },
-  { to: '/approvals', label: 'APPROVALS QUEUE', icon: ShieldAlert, roles: ['SUPERVISOR', 'MANAGER', 'ADMIN'] },
-  { to: '/analytics', label: 'QUALITY ANALYTICS', icon: BarChart3, roles: ['SUPERVISOR', 'MANAGER', 'ADMIN'] },
-  { to: '/config', label: 'CONFIGURATION CONTROL', icon: Sliders, roles: ['MANAGER', 'ADMIN'] },
-  { to: '/system', label: 'SYSTEM ADMIN', icon: Settings, roles: ['ADMIN'] },
+  { to: '/wizard', label: 'QUALITY ENTRY WIZARD', icon: ClipboardCheck, roles: ALL_GROUP_ROLES },
+  { to: '/history', label: 'INSPECTION RECORDS', icon: History, roles: ALL_GROUP_ROLES },
+  { to: '/approvals', label: 'APPROVALS QUEUE', icon: ShieldAlert, roles: GROUP_AB_ROLES },
+  { to: '/analytics', label: 'QUALITY ANALYTICS', icon: BarChart3, roles: GROUP_AB_ROLES },
+  { to: '/config', label: 'CONFIGURATION CONTROL', icon: Sliders, roles: GROUP_AB_ROLES },
+  { to: '/pin-admin', label: 'STAFF PIN ACCESS', icon: Users, roles: GROUP_AB_ROLES },
+  { to: '/system', label: 'SYSTEM ADMIN', icon: Settings, roles: GROUP_A_ROLES },
 ];
 
 export function Sidebar() {
@@ -149,9 +160,7 @@ export function Sidebar() {
                     user.role === 'SUPERVISOR' ? 'text-amber-400' :
                     'text-brand-secondary'
                   }`}>
-                    {user.role === 'LEADER' ? 'LINE LEADER' : 
-                     user.role === 'MANAGER' ? 'QA MANAGER' :
-                     user.role === 'ADMIN' ? 'SYSTEM ADMIN' : user.role}
+                    {user.title}
                   </span>
                 </div>
               )}

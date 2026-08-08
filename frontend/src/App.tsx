@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import type { ReactNode } from 'react';
 import { Sidebar } from './components/layout/Sidebar';
 import { ToastProvider } from './components/ui/ToastProvider';
-import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthProvider, useAuth, rolesInGroups } from './context/AuthContext';
 import type { UserRole } from './context/AuthContext';
 import { ConfigProvider } from './context/ConfigContext';
 import { LoginPage } from './pages/LoginPage';
@@ -12,6 +12,13 @@ import { ApprovalsPage } from './pages/ApprovalsPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { ConfigPage } from './pages/ConfigPage';
 import { SystemPage } from './pages/SystemPage';
+import { PinAdminPage } from './pages/PinAdminPage';
+import { IdleSessionGuard } from './components/auth/IdleSessionGuard';
+
+// Group A/B/C role lists (AUDIT_REPORT.md §11) — single source of truth in
+// AuthContext.tsx, shared with Sidebar.tsx's nav-visibility gates.
+const GROUP_AB_ROLES = rolesInGroups('A', 'B');
+const GROUP_A_ROLES = rolesInGroups('A');
 
 // Protected Route Wrapper
 function ProtectedRoute({ children }: { children: ReactNode }) {
@@ -48,6 +55,7 @@ export function App() {
     <AuthProvider>
       <ConfigProvider>
         <ToastProvider>
+          <IdleSessionGuard />
           <BrowserRouter>
             <Routes>
               {/* Public Route */}
@@ -61,22 +69,27 @@ export function App() {
                     <Route path="/wizard" element={<WizardPage />} />
                     <Route path="/history" element={<HistoryPage />} />
                     <Route path="/approvals" element={
-                      <RoleRoute allowedRoles={['EXECUTIVE', 'MANAGER', 'ADMIN']}>
+                      <RoleRoute allowedRoles={GROUP_AB_ROLES}>
                         <ApprovalsPage />
                       </RoleRoute>
                     } />
                     <Route path="/analytics" element={
-                      <RoleRoute allowedRoles={['SUPERVISOR', 'EXECUTIVE', 'MANAGER', 'ADMIN']}>
+                      <RoleRoute allowedRoles={GROUP_AB_ROLES}>
                         <AnalyticsPage />
                       </RoleRoute>
                     } />
                     <Route path="/config" element={
-                      <RoleRoute allowedRoles={['EXECUTIVE', 'MANAGER', 'ADMIN']}>
+                      <RoleRoute allowedRoles={GROUP_AB_ROLES}>
                         <ConfigPage />
                       </RoleRoute>
                     } />
+                    <Route path="/pin-admin" element={
+                      <RoleRoute allowedRoles={GROUP_AB_ROLES}>
+                        <PinAdminPage />
+                      </RoleRoute>
+                    } />
                     <Route path="/system" element={
-                      <RoleRoute allowedRoles={['ADMIN']}>
+                      <RoleRoute allowedRoles={GROUP_A_ROLES}>
                         <SystemPage />
                       </RoleRoute>
                     } />
