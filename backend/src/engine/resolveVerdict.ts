@@ -18,6 +18,8 @@
 
 import { evaluateAQLVerdict } from './aqlEvaluator';
 import type { CategoryResult } from './aqlEvaluator';
+import { evaluateDimensions } from './dimensionEvaluator';
+import type { DimensionResult, ProductConfig, ProductDimensionDef } from './dimensionEvaluator';
 import prisma from '../lib/prismaClient';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -135,6 +137,19 @@ export interface ResolveVerdictParams {
   sampleSize: number;
   defectCounts: Record<string, number>;
   /**
+   * Glove size ('XS' | 'S' | 'M' | 'L' | 'XL') and raw physical dimension
+   * measurements (dimId -> slot value strings), used to resolve per-product
+   * spec config (AppConfig.productMatrixConfig[productCode].sizes[size]) and
+   * evaluate dimension pass/fail via dimensionEvaluator.ts (§5.9 fix).
+   *
+   * Both are optional and must be supplied together — omitting either skips
+   * dimension evaluation entirely and falls back to today's AQL-only verdict,
+   * so callers that don't have this data (or don't want it folded in) are
+   * unaffected.
+   */
+  size?: string;
+  dimensionMeasurements?: Record<string, string[]>;
+  /**
    * How to handle an explicit profileId that doesn't resolve to any known
    * profile:
    *   - 'throw' (default) — surface VerdictProfileNotFoundError to the
@@ -152,8 +167,18 @@ export interface ResolveVerdictParams {
 }
 
 export interface ResolveVerdictResult {
+  /**
+   * `(AQL verdict === 'FAILED') OR (failedDimensions > 0)` — same combination
+   * rule StepReviewSubmit.tsx already applies client-side (§5.9 fix), now
+   * also applied here so persisted verdicts can't silently drop a
+   * dimension-only failure the way the AQL-only recompute used to.
+   */
   verdict: 'PASSED' | 'FAILED';
   categoryResults: CategoryResult[];
+  /** Count of dimensions with >=1 out-of-spec slot. 0 when size/dimensionMeasurements weren't supplied. */
+  failedDimensions: number;
+  /** Per-dimension audit breakdown backing failedDimensions. Empty when size/dimensionMeasurements weren't supplied. */
+  dimensionResults: DimensionResult[];
   /** The profile id actually used for evaluation (post safety-net), or null if none resolved. */
   evaluationProfileId: string | null;
   /**
@@ -247,12 +272,37 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
     }
   }
 
-  const { verdict, categoryResults } = evaluateAQLVerdict({
+  const { verdict: aqlVerdict, categoryResults } = evaluateAQLVerdict({
     sampleSize,
     categories,
     defectDefinitions,
     defectCounts,
   });
 
-  return { verdict, categoryResults, evaluationProfileId, requestedProfileId };
+  // ── Dimension evaluation (§5.9 fix) — only when the caller supplied both
+  //    size and raw measurements; otherwise stays AQL-only (unchanged behavior).
+  let failedDimensions = 0;
+  let dimensionResults: DimensionResult[] = [];
+
+  if (params.size && params.dimensionMeasurements) {
+    const productMatrixConfig = safeParseJSON<Record<string, ProductConfig>>(
+      appConfig?.productMatrixConfig, {},
+    );
+    const globalDimensionDefs = safeParseJSON<ProductDimensionDef[]>(appConfig?.dimensions, []);
+
+    const dimResult = evaluateDimensions({
+      productMatrixConfig,
+      globalDimensionDefs,
+      productCode: productCode ?? '',
+      size: params.size,
+      measurements: params.dimensionMeasurements,
+    });
+    failedDimensions = dimResult.failedDimensions;
+    dimensionResults = dimResult.dimensionResults;
+  }
+
+  const verdict: 'PASSED' | 'FAILED' =
+    aqlVerdict === 'FAILED' || failedDimensions > 0 ? 'FAILED' : 'PASSED';
+
+  return { verdict, categoryResults, failedDimensions, dimensionResults, evaluationProfileId, requestedProfileId };
 }

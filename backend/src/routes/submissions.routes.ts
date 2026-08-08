@@ -52,20 +52,20 @@ const REQUIRED_STRING_FIELDS = [
 ] as const;
 
 /**
- * Normalizes a `defects` value that may arrive as a JSON string (as stored
- * on Submission/AmendmentLog) or already as a parsed object (as sent by the
- * frontend in a fresh payload) into a plain Record<string, number>.
+ * Normalizes a `defects`/`dimensions` value that may arrive as a JSON string
+ * (as stored on Submission/AmendmentLog) or already as a parsed object (as
+ * sent by the frontend in a fresh payload) into a plain object.
  */
-function parseDefectsField(raw: unknown): Record<string, number> {
+function parseJSONObjectField<T = unknown>(raw: unknown): Record<string, T> {
   if (raw == null) return {};
   if (typeof raw === 'string') {
     try {
-      return JSON.parse(raw) as Record<string, number>;
+      return JSON.parse(raw) as Record<string, T>;
     } catch {
       return {};
     }
   }
-  if (typeof raw === 'object') return raw as Record<string, number>;
+  if (typeof raw === 'object') return raw as Record<string, T>;
   return {};
 }
 
@@ -160,6 +160,8 @@ router.post('/', async (req: Request, res: Response) => {
         productCode: String(body['productCode']),
         sampleSize,
         defectCounts,
+        size: String(body['size']),
+        dimensionMeasurements: body['dimensions'] as Record<string, string[]>,
       });
       verdict = result.verdict;
       categoryResults = result.categoryResults;
@@ -327,16 +329,22 @@ router.post('/:id/amendments', async (req: Request, res: Response) => {
     const newValues = body.newValues;
     let recomputedVerdict: string | null = null;
     let recomputedCategoryResults: string | null = null;
+    let recomputedFailedDimensions: number | null = null;
+    let recomputedDimensionResults: string | null = null;
 
     try {
       const preview = await resolveVerdict({
         profileId: (newValues['profileId'] as string | undefined) ?? originalSubmission.profileId,
         productCode: String(newValues['productCode'] ?? originalSubmission.productCode),
         sampleSize: Number(newValues['sampleSize'] ?? originalSubmission.sampleSize),
-        defectCounts: parseDefectsField(newValues['defects'] ?? originalSubmission.defects),
+        defectCounts: parseJSONObjectField<number>(newValues['defects'] ?? originalSubmission.defects),
+        size: String(newValues['size'] ?? originalSubmission.size),
+        dimensionMeasurements: parseJSONObjectField<string[]>(newValues['dimensions'] ?? originalSubmission.dimensions),
       });
       recomputedVerdict = preview.verdict;
       recomputedCategoryResults = JSON.stringify(preview.categoryResults);
+      recomputedFailedDimensions = preview.failedDimensions;
+      recomputedDimensionResults = JSON.stringify(preview.dimensionResults);
     } catch (err) {
       if (err instanceof VerdictProfileNotFoundError) {
         console.warn(
@@ -366,6 +374,8 @@ router.post('/:id/amendments', async (req: Request, res: Response) => {
           status: 'PENDING_APPROVAL',
           recomputedVerdict,
           recomputedCategoryResults,
+          recomputedFailedDimensions,
+          recomputedDimensionResults,
         },
       }),
     ]);
@@ -460,7 +470,9 @@ amendmentsRouter.post('/:id/approve', async (req: Request, res: Response) => {
         profileId: (newValues['profileId'] as string | undefined) ?? existingSubmission.profileId,
         productCode: String(newValues['productCode'] ?? existingSubmission.productCode),
         sampleSize: Number(newValues['sampleSize'] ?? existingSubmission.sampleSize),
-        defectCounts: parseDefectsField(newValues['defects'] ?? existingSubmission.defects),
+        defectCounts: parseJSONObjectField<number>(newValues['defects'] ?? existingSubmission.defects),
+        size: String(newValues['size'] ?? existingSubmission.size),
+        dimensionMeasurements: parseJSONObjectField<string[]>(newValues['dimensions'] ?? existingSubmission.dimensions),
       });
     } catch (err) {
       if (err instanceof VerdictProfileNotFoundError) {
@@ -509,8 +521,10 @@ amendmentsRouter.post('/:id/approve', async (req: Request, res: Response) => {
           status:     'APPROVED',
           reviewedBy: 'executive@oneglove.com', // Mock until Azure AD integration
           reviewedAt: now,
-          recomputedVerdict:         recomputed.verdict,
-          recomputedCategoryResults: JSON.stringify(recomputed.categoryResults),
+          recomputedVerdict:          recomputed.verdict,
+          recomputedCategoryResults:  JSON.stringify(recomputed.categoryResults),
+          recomputedFailedDimensions: recomputed.failedDimensions,
+          recomputedDimensionResults: JSON.stringify(recomputed.dimensionResults),
         },
       }),
     ]);

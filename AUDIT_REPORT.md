@@ -952,13 +952,106 @@ count.
 
 ### 5.9 Amendment approval's server-side recompute is dimension-blind — a dimension-only-failing amendment can still be approved as PASSED
 
-**Severity: High. Status: not fixed — newly identified 2026-08-08 while
-scoping Step 10, discovered by directly reading (not assuming) the current
-state of `POST /api/amendments/:id/approve`. Flagged as a strong candidate
-for next priority, ahead of Phase 1+2 Step 11 (the originally-planned
-end-to-end verification pass) — this is a live, unresolved correctness
-gap in the amendment approval path itself, not a verification-coverage
-gap.**
+**Severity: High. Status: FIXED and verified live, 2026-08-08.**
+
+**Scope expansion discovered and confirmed during this fix, before any code
+was written:** the root cause — `resolveVerdict()` being AQL-only — is not
+confined to the approve endpoint. `POST /api/submissions` (the primary,
+highest-traffic persist path) never reads `body['verdict']` at all
+(confirmed via grep — zero references in that handler); its persisted
+`Submission.verdict` came 100% from the same AQL-only `resolveVerdict()`.
+This means **every initial submission ever made via the wizard has been
+dimension-blind at the point of persistence since inception**, not just
+amendments — the wizard's dimension-aware banner was always display-only
+and never round-tripped to what got stored. Confirmed with the user before
+proceeding and fixed in the same pass, since it's the same root function
+with a ~2-line wiring change per call site.
+
+**The fix (server-side recompute, not a client-trust shortcut):** rather
+than trusting the client-computed `fails` booleans already present in
+`Submission.dimensionMins` (which, despite its stale/misleading Prisma
+comment claiming `{thickness:number}`, actually stores the full
+`{min,max,avg,fails,threshold,maxThreshold,isMin}` stats object
+`StepDimensions.tsx` computes — see §5.11), the server now independently
+re-derives dimension pass/fail from raw measurements, mirroring the same
+"never trust client-derived pass/fail, only trust raw inputs" principle
+already applied to AQL:
+
+- **New `backend/src/engine/dimensionEvaluator.ts`** — pure function
+  replicating `StepDimensions.tsx`'s evaluation engine byte-for-byte
+  (fixed rows GLOVE LENGTH/PALM WIDTH + dynamic `dimensionDefs` from
+  `AppConfig.productMatrixConfig[productCode]` falling back to
+  `AppConfig.dimensions`, `getDimSpec()`'s exact resolution chain
+  including the `tolerance === 'MIN'` string convention, and the
+  `threshold`/`maxThreshold` formulas from `ISO2859_MATH_ENGINE.md` §5).
+  Deliberately mirrors the frontend's quirks rather than "fixing" them —
+  e.g. `ProductDimensionDef.isMin` is intentionally never read, matching
+  the frontend's actual behavior.
+- **`resolveVerdict.ts`** — extended with optional `size` +
+  `dimensionMeasurements` params. When both are supplied, it resolves
+  `productMatrixConfig`/global dimension defs off the same `AppConfig` row
+  already fetched for AQL (no extra query), evaluates dimensions, and folds:
+  `verdict = aqlVerdict === 'FAILED' || failedDimensions > 0 ? 'FAILED' : 'PASSED'`
+  — same combination rule `StepReviewSubmit.tsx` already applies
+  client-side. Omitting the params skips dimension evaluation entirely
+  (today's AQL-only behavior), so `POST /api/verdict/preview` and its two
+  frontend callers (`StepReviewSubmit.tsx`, `HistoryFeed.tsx`) were
+  deliberately left unwired this session — they already combine AQL +
+  dimension correctly for *display*, and touching them risked
+  double-counting or unnecessary frontend churn for a backend-scoped fix.
+- **`submissions.routes.ts`** — wired `size`/raw `dimensions` (with the
+  same `newValues[...] ?? existing[...]` fallback pattern already used for
+  `sampleSize`/`defects`) into all three persisting/recomputing call sites:
+  `POST /api/submissions` (closes the newly-found bigger gap),
+  `POST /api/submissions/:id/amendments` (draft preview, informational),
+  and `POST /api/amendments/:id/approve` (this finding's original target).
+
+**Schema change:** `AmendmentLog` gained two nullable columns —
+`recomputedFailedDimensions Int?` and `recomputedDimensionResults String?`
+(JSON `DimensionResult[]`) — mirroring the existing
+`recomputedVerdict`/`recomputedCategoryResults` pair, so a reviewer can see
+*why* a recompute is FAILED (AQL vs. dimensions) instead of just the final
+verdict. Applied via `prisma db push` rather than `prisma migrate dev`,
+consistent with the workaround already documented in §5.2 (the live
+`dev.db` has drifted from the recorded migration history since before this
+session; `migrate dev` still proposes a full data-losing reset). No data
+loss — confirmed via direct Prisma count before and after (19
+submissions / 0 amendment logs, unchanged).
+
+**Verified live (2026-08-08), three real HTTP traces against the actual
+product config in `dev.db` (`N035MNV-OC-24FT`, size `M`), not synthetic
+data:**
+
+1. *Dimension-only failure, initial submit* (0 defects; one `PALM
+   THICKNESS` measurement slot at `0.05` against a `0.060` MIN threshold,
+   all other dimensions in spec) — `POST /api/submissions` persisted
+   `verdict: "FAILED"`. Before this fix this would have persisted
+   `"PASSED"` (confirmed independently via `/api/verdict/preview` with the
+   same defect counts and no dimension data: AQL side alone returns
+   `"PASSED"` with all 6 categories passing).
+2. *Same submission, drafted then approved as an amendment* (trivial
+   `batchNumber`-only change, dimensions untouched) —
+   `POST /api/submissions/:id/amendments` correctly previewed
+   `recomputedVerdict: "FAILED"` with `recomputedFailedDimensions: 1` and
+   `recomputedDimensionResults` correctly isolating `palmThickness` as the
+   sole failing dimension (`fails: [false,false,true,false,false]`,
+   matching the deliberately-out-of-spec slot index). Approving it
+   persisted `Submission.verdict: "FAILED"` — this is §5.9's original
+   target scenario, now fixed: the approve endpoint no longer silently
+   overrides a correct dimension-driven FAILED with an AQL-only PASSED.
+3. *Regression checks:* an all-in-spec submission (0 defects, all
+   dimensions passing) persisted `"PASSED"` — no false positives
+   introduced. A dimensions-clean, AQL-failing submission (`def_hole: 10`
+   against BARRIER's `ac:1,re:2` at n=20) persisted `"FAILED"` with
+   `failedDimensions: 0` — AQL path unaffected.
+
+`npx tsc --noEmit -p backend` clean after every file (only the
+pre-existing §5.1 `config.routes.ts` error remains, unchanged). No
+frontend files touched this session. Test submissions/amendment logs
+deleted after verification; `dev.db` confirmed back at the 19/0 baseline.
+
+**Original finding text, preserved for context (superseded by the fix
+above):**
 
 **Where:** `backend/src/routes/submissions.routes.ts`'s
 `POST /api/amendments/:id/approve` (confirmed, reading the live code
@@ -1049,6 +1142,46 @@ persists that recomputed value, never `newValues.verdict` verbatim. The
 doc's claim was accurate for the pre-Phase-1+2 state described in this
 report's original §B4 finding, but Phase 1+2 Step 5 (per the plan-source
 note above) fixed exactly this, and the doc was never updated to match.
-Whoever eventually edits the six core docs should correct this line —
-and, given §5.9, should probably also caveat that the recompute is
-AQL-only pending that fix.
+Whoever eventually edits the six core docs should correct this line — and
+should note it now recomputes **both** AQL and physical dimensions (§5.9
+fixed the dimension half 2026-08-08).
+
+### 5.11 `Submission.dimensionMins`'s schema comment and doc reference are stale — the field doesn't store minimums
+
+**Severity: Low (documentation accuracy, not a functional bug). Status:
+not fixed — logged 2026-08-08, discovered while scoping §5.9's fix. Not
+fixed because `DATA_SCHEMAS_AND_TYPES.md` is one of the six core docs and
+must not be edited by this session; the `schema.prisma` comment is
+implementation (fair game) but wasn't touched since correcting it wasn't
+necessary for §5.9's fix — logged here instead so the discrepancy isn't
+lost.**
+
+`backend/prisma/schema.prisma`'s `Submission.dimensionMins` field carries
+the comment `// DimensionMinimums: { thickness: number; length: number }`.
+`DATA_SCHEMAS_AND_TYPES.md` §1 references a `DimensionMinimums` type by
+name on the `Submission` interface but never actually defines it anywhere
+in the doc (confirmed via full-repo grep — no `interface DimensionMinimums`
+exists anywhere, only this one comment and one type reference).
+
+**What the field actually stores, confirmed by reading `WizardPage.tsx`
+directly (lines ~176, 272, 325):** `dimensionMins: inspectionData.dimensionStats`
+— the *full* per-dimension stats object `StepDimensions.tsx` computes:
+`{ min, max, avg, fails: boolean[], threshold, maxThreshold, isMin }`,
+keyed by dimension id. Not a simple minimums map. This turned out to be
+useful groundwork for §5.9 (it's what `StepReviewSubmit.tsx`'s
+`failedDimensions` memo already reads client-side), even though §5.9's
+fix ultimately chose to re-derive dimension pass/fail from raw
+measurements server-side rather than trust this client-computed field.
+
+**Also note:** `frontend/src/pages/wizard/BatchEntry.tsx` (line 455)
+always sends `dimensionMins: {}` regardless of what was actually measured
+— harmless today since nothing read `dimensionMins` for verdict purposes
+before §5.9, and §5.9's fix doesn't read it either (it recomputes from raw
+`dimensions` instead), but worth knowing this field is unreliable for
+batch-created submissions if anything is ever built that trusts it directly.
+
+**Suggested fix, for whoever edits the six core docs next:** replace the
+stale `DimensionMinimums` type reference with the actual shape (or
+document `dimensionMins` as a legacy/misleading field name kept for
+backward compatibility), and correct the matching `schema.prisma` comment
+to match.

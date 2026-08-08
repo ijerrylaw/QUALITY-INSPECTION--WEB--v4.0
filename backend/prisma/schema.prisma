@@ -119,6 +119,16 @@ model AmendmentLog {
   /// JSON — CategoryResult[] audit breakdown backing recomputedVerdict.
   recomputedCategoryResults  String?
 
+  /// Count of physical dimensions with at least one out-of-spec measurement
+  /// slot, from the server-side dimension recompute (§5.9 fix) — folded into
+  /// recomputedVerdict via (AQL FAILED) OR (recomputedFailedDimensions > 0).
+  /// Null on rows created before this audit trail existed.
+  recomputedFailedDimensions Int?
+
+  /// JSON — DimensionResult[] audit breakdown explaining recomputedFailedDimensions,
+  /// same role as recomputedCategoryResults but for the dimension half of the verdict.
+  recomputedDimensionResults String?
+
   createdAt       DateTime    @default(now())
 
   @@index([submissionId])
