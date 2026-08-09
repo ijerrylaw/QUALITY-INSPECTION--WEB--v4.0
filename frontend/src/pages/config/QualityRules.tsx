@@ -27,8 +27,10 @@ import {
   ListOrdered,
   ArrowUp,
   ArrowDown,
+  AlertTriangle,
 } from 'lucide-react';
 import { useConfig } from '../../context/ConfigContext';
+import { useToast } from '../../components/ui/ToastProvider';
 
 interface QualityRulesProps {
   onDirty: () => void;
@@ -44,7 +46,8 @@ const EVAL_MODES: string[] = ['CUMULATIVE', 'GRANULAR'];
 
 export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   const { config } = useConfig();
-  
+  const { addToast } = useToast();
+
   // ── Local State ─────────────────────────────────────────────────────────
   const defaultProfiles = [
     {
@@ -75,6 +78,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
 
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [editProfileName, setEditProfileName] = useState('');
+  const [confirmDeleteProfileId, setConfirmDeleteProfileId] = useState<string | null>(null);
 
   // ── ISO Sample Sizes State ───────────────────────────────────────────────
   const DEFAULT_SAMPLE_SIZES = [13, 20, 32, 50, 80, 125, 200, 315, 500, 800, 1250];
@@ -146,6 +150,32 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
     const updated = profiles.map(p => ({ ...p, isDefault: p.id === id }));
     setProfiles(updated);
     triggerChange(updated);
+  };
+
+  // 'prof_default' is the hardcoded sentinel every submission and the
+  // resolveVerdict.ts safety net falls back to by id (independent of the
+  // isDefault flag, which admins can freely reassign) — deleting it would
+  // break AQL grading for any product code without an explicit/resolved
+  // profile. Never removable, regardless of which profile isDefault.
+  const requestDeleteProfile = () => {
+    if (activeProfile.id === 'prof_default') {
+      addToast('error', 'GLOBAL STANDARD (DEFAULT) cannot be deleted — every submission falls back to it for AQL grading.');
+      return;
+    }
+    setConfirmDeleteProfileId(activeProfile.id);
+  };
+
+  const handleDeleteProfile = () => {
+    if (!confirmDeleteProfileId) return;
+    const deleted = profiles.find(p => p.id === confirmDeleteProfileId);
+    const updated = profiles.filter(p => p.id !== confirmDeleteProfileId);
+    setProfiles(updated);
+    if (activeProfileId === confirmDeleteProfileId) {
+      setActiveProfileId(updated[0]?.id ?? 'prof_default');
+    }
+    triggerChange(updated);
+    setConfirmDeleteProfileId(null);
+    addToast('success', `Profile "${deleted?.name ?? ''}" removed. Click Save Configuration to persist.`);
   };
 
   const saveProfileEdit = (id: string) => {
@@ -426,6 +456,9 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
               </button>
               <button onClick={handleDuplicateProfile} className="h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-white hover:bg-gray-800 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0">
                 <Copy className="w-4 h-4" /> DUPLICATE
+              </button>
+              <button onClick={requestDeleteProfile} className="h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/30 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0">
+                <Trash className="w-4 h-4" /> DELETE PROFILE
               </button>
               <button onClick={handleAddProfile} className="h-9 px-4 rounded-lg bg-canvas border border-emerald-500/50 text-emerald-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0">
                 <Plus className="w-4 h-4" strokeWidth={2} />
@@ -914,6 +947,50 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
           </div>
         </div>
       </div>
+
+      {/* ── Delete Profile Confirmation Modal — matches ConfigPage.tsx's
+           discard/navigation-guard modal pattern (bg-black/70 backdrop,
+           bg-canvas card, rose AlertTriangle icon, cancel/confirm pair) ── */}
+      {confirmDeleteProfileId && (() => {
+        const target = profiles.find(p => p.id === confirmDeleteProfileId);
+        return (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className="bg-canvas border border-gray-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
+              <div className="flex items-start gap-4 p-4 border-b border-gray-800">
+                <div className="w-12 h-12 rounded-full bg-rose-500/10 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-6 h-6 text-rose-400" strokeWidth={2} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold uppercase tracking-wide text-primary mb-1">
+                    DELETE PROFILE?
+                  </h3>
+                  <p className="text-sm text-muted">
+                    Are you sure you want to permanently delete{' '}
+                    <span className="font-bold text-white uppercase">{target?.name}</span>? This cannot be undone — any product codes still mapped to this profile will fall back to the default profile for grading.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-4 bg-surface flex items-center justify-end gap-3">
+                <button
+                  onClick={() => setConfirmDeleteProfileId(null)}
+                  className="h-10 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-white font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none"
+                >
+                  <X className="w-4 h-4" strokeWidth={2} />
+                  <span>CANCEL</span>
+                </button>
+                <button
+                  onClick={handleDeleteProfile}
+                  className="h-10 px-5 rounded-lg bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none border border-rose-500/50 shadow-sm"
+                >
+                  <Trash className="w-4 h-4" strokeWidth={2} />
+                  <span>CONFIRM DELETE</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );
