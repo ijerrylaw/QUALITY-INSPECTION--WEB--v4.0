@@ -144,9 +144,32 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
   );
 
   // ── Totals ────────────────────────────────────────────────────────────────
+  // Amendment reopen seeds `defectCounts` from the submission's full persisted
+  // `defects` map (WizardPage.tsx's rawDefects), which still contains raw
+  // 0/1/2 state values for N/A-mode (qualitative) defect ids alongside real
+  // quantitative counts — those same ids are separately decoded and counted
+  // via qualitativeStates/totalQualitativeFails below, so they must be
+  // excluded here or they'd be counted twice in totalIssues.
+  const qualitativeDefectIds = useMemo(() => {
+    const qualCategoryIds = new Set(
+      aqlCategories
+        .filter((c) => isQualitativeAql(c.aql ?? c.aqlLevel))
+        .map((c) => c.id),
+    );
+    return new Set(
+      defectDefinitions
+        .filter((d) => qualCategoryIds.has(d.categoryId))
+        .map((d) => d.id),
+    );
+  }, [aqlCategories, defectDefinitions]);
+
   const totalQuantitativeDefects = useMemo(
-    () => Object.values(defectCounts).reduce((sum, c) => sum + c, 0),
-    [defectCounts]
+    () =>
+      Object.entries(defectCounts).reduce(
+        (sum, [defectId, count]) => (qualitativeDefectIds.has(defectId) ? sum : sum + count),
+        0
+      ),
+    [defectCounts, qualitativeDefectIds]
   );
   const totalQualitativeFails = useMemo(
     () => Object.values(qualitativeStates).filter((s) => s === 'FAIL').length,
