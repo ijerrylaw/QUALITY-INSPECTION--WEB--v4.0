@@ -172,7 +172,10 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
     res.json(formatAppConfig(updatedConfig));
   } catch (error) {
     console.error('[PATCH /api/config] Error:', error);
-    res.status(500).json({ error: 'Failed to update system configuration', details: error?.message || String(error) });
+    res.status(500).json({
+      error: 'Failed to update system configuration',
+      details: error instanceof Error ? error.message : String(error),
+    });
   }
 });
 
