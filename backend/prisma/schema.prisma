@@ -36,11 +36,15 @@ model Submission {
   sampleSize          Int
 
   // --- Measurement Data (stored as JSON blobs) ---
-  // DimensionMeasurements: { thickness: number[]; length: number[] }
-  dimensions          String          // JSON — DimensionMeasurements
+  // Raw per-slot measurement strings entered via numpad, keyed by dynamic
+  // dimension id (not a fixed thickness/length shape — see ProductDimensionDef).
+  dimensions          String          // JSON — DimensionMeasurements = Record<string, string[]>
 
-  // DimensionMinimums: { thickness: number; length: number }
-  dimensionMins       String          // JSON — DimensionMinimums
+  // Despite the name, stores the full per-dimension stats object (min/max/avg/
+  // fails/thresholds) computed client-side at measurement time, NOT minimums —
+  // legacy field name kept for backward compatibility. See DATA_SCHEMAS_AND_TYPES.md
+  // §1 DimensionStats / AUDIT_REPORT.md §5.11.
+  dimensionMins       String          // JSON — DimensionStats
 
   // DefectCounts: Record<DefectId, number>
   defects             String          // JSON — Record<string, number>

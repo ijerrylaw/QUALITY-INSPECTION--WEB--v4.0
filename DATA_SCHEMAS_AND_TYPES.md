@@ -28,7 +28,17 @@ export interface Submission {
   size: string;
   sampleSize: number;
   dimensions: DimensionMeasurements;
-  dimensionMins: DimensionMinimums;
+  /**
+   * Despite the field name, this does NOT store minimums. It's the full
+   * per-dimension stats object StepDimensions.tsx computes client-side at
+   * measurement time (min/max/avg/pass-fail per slot). Kept under its
+   * original field name for backward compatibility — do not rename without
+   * a migration. `BatchEntry.tsx` always sends `{}` here regardless of what
+   * was measured, so this field is unreliable for batch-created submissions;
+   * nothing currently reads it for verdict purposes (dimension pass/fail is
+   * recomputed server-side from `dimensions` instead).
+   */
+  dimensionMins: DimensionStats;
   defects: Record<string, number>;     // Record<DefectDefinition.id, count>
   verdict: 'PASSED' | 'FAILED';
   aadObjectId: string;                 // Azure AD object ID of the submitting user
@@ -46,6 +56,20 @@ export interface Submission {
   profileId: string | null;
   amendmentLogs: AmendmentLog[];
 }
+
+/** Raw per-slot measurement strings entered via numpad, keyed by dimension id. */
+export type DimensionMeasurements = Record<string, string[]>;
+
+/** Per-dimension computed stats, keyed by dimension id — see `dimensionMins` note above. */
+export type DimensionStats = Record<string, {
+  min: number;
+  max: number;
+  avg: number;
+  fails: boolean[];
+  threshold: number;
+  maxThreshold: number;
+  isMin: boolean;
+}>;
 
 export interface AmendmentLog {
   id: string;
@@ -65,27 +89,26 @@ export interface AmendmentLog {
 
 ## 2. CONFIGURATION & RULES SCHEMAS
 
-### 2.1 Dual Representation of AQL Rules
+### 2.1 AQL Rules Storage & Engine Normalization
 
-> **Important:** AQL categories and defect definitions exist in two forms depending on context:
+> **Important:** `InspectionProfile`, `AQLCategory`, and `DefectDefinition` are **not** Prisma models — those tables were removed after confirming they sat fully unused (0 rows) since real profile data has only ever lived in `AppConfig.inspectionProfiles` JSON (see `AUDIT_REPORT.md` §9.3 Option B / §10 Part 3). `AppConfig.inspectionProfiles` (a JSON-serialized array on the `AppConfig` singleton row) is the single source of truth. The interfaces below describe that JSON shape, plus the internal shape `evaluateAQLVerdict()` (the pure verdict engine) actually operates on — the two differ on one field name, reconciled by normalization at resolve time.
 >
-> - **Prisma DB (`InspectionProfile` table):** Uses `AQLCategory` and `DefectDefinition` models with strictly typed, non-nullable fields. Source of truth for the backend verdict engine.
-> - **AppConfig JSON (`AppConfig.inspectionProfiles` field):** Profiles are stored as a serialized JSON array. Field names in the JSON blob may differ from Prisma field names — specifically, defect definitions in the JSON use `categoryId` as the linking field rather than `currentClass`. The backend normalizes these before passing them to the engine.
+> Specifically: defect definitions in the stored JSON use `categoryId` as the linking field, but the engine expects `currentClass`. `resolveVerdict()` normalizes `categoryId → currentClass` (falling back to `categoryId` for `defaultClass` too) before calling the engine — see `backend/src/engine/resolveVerdict.ts`.
 
 ```typescript
 export type EvaluationMode = 'CUMULATIVE' | 'GRANULAR' | 'N/A' | '';
 
 /**
- * AQLCategory — used in both Prisma DB rows and AppConfig JSON blobs.
- * In Prisma: aqlLevel and evaluationMode are non-nullable (String, with @default("") on evaluationMode).
- * In AppConfig JSON: these may be null/undefined if not yet configured in Configuration Control.
+ * AQLCategory — the shape stored in AppConfig.inspectionProfiles JSON and
+ * consumed directly by the verdict engine (no field renaming needed for this type).
+ * evaluationMode may be empty/unset for a category not yet configured in Configuration Control.
  */
 export interface AQLCategory {
   id: string;
   name: string;
   aqlLevel: string;        // e.g. '0.65', '1.0', '1.5', '2.5', 'AND', 'PASS/FAIL/NIL'
   evaluationMode: EvaluationMode;
-  // Optional UI-display fields (frontend-only, not stored in Prisma):
+  // Optional UI-display fields (frontend-only, not persisted):
   iconName?: string;
   color?: string;
   bg?: string;
@@ -95,22 +118,22 @@ export interface AQLCategory {
 /**
  * DefectDefinition — two field naming conventions coexist:
  *
- * Prisma DB fields (backend engine uses these):
+ * Engine-normalized shape (what evaluateAQLVerdict() actually reads):
  *   currentClass  — the category this defect is assigned to (matches AQLCategory.name or .id)
  *   defaultClass  — the factory-default category before any profile override
  *
- * AppConfig JSON field (used in serialized profile blobs):
- *   categoryId    — serves the same linking role as currentClass in JSON context
+ * AppConfig JSON storage shape (what's actually persisted in AppConfig.inspectionProfiles):
+ *   categoryId    — serves the same linking role as currentClass
  *
- * When reading defect definitions from AppConfig JSON, always normalize
- * categoryId → currentClass before passing to evaluateAQLVerdict().
+ * resolveVerdict() normalizes categoryId → currentClass/defaultClass before
+ * calling the engine — see backend/src/engine/resolveVerdict.ts.
  */
 export interface DefectDefinition {
   id: string;
   name: string;
-  currentClass: string;   // Prisma field: links defect to its parent AQLCategory
-  defaultClass: string;   // Prisma field: factory default before profile override
-  categoryId?: string;    // AppConfig JSON only: equivalent to currentClass in JSON context
+  currentClass: string;   // Engine field: links defect to its parent AQLCategory
+  defaultClass: string;   // Engine field: factory default before profile override
+  categoryId?: string;    // AppConfig JSON storage field: equivalent to currentClass
 }
 
 export interface InspectionProfile {
