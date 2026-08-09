@@ -47,11 +47,16 @@ export interface Submission {
   totalCarton?: number;
   gloveWeight?: number;
   /**
-   * References the InspectionProfile used at submit time.
-   * NULLABLE — submissions made before a profile was linked, or when the wizard
-   * sends no profileId, will have this as null. The backend falls back to the
-   * GLOBAL STANDARD (DEFAULT) profile rules for verdict evaluation in those cases,
-   * but does not store a fabricated FK. Always check for null before relying on it.
+   * Opaque historical reference to whichever AppConfig.inspectionProfiles[]
+   * entry was in effect at submit time. NOT a foreign key — InspectionProfile
+   * was removed as a relational model (§2.1); this is a plain string checked
+   * against AppConfig.inspectionProfiles/the 'prof_default' sentinel, not a
+   * Prisma relation.
+   * NULLABLE — submissions made before a profile was linked, when the wizard
+   * sends no profileId, or when the id doesn't resolve, will have this as
+   * null. The backend falls back to the GLOBAL STANDARD (DEFAULT) profile
+   * rules for verdict evaluation in those cases. Always check for null
+   * before relying on it.
    */
   profileId: string | null;
   amendmentLogs: AmendmentLog[];
