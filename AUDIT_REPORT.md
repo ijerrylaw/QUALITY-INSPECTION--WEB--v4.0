@@ -2841,3 +2841,238 @@ cleanup.
 - The System Admin page's Azure AD/SharePoint fields remain a fully
   separate, not-yet-backend-wired future feature (§11 intro) — not part of
   this swap.
+
+---
+
+## 12. Real Defect Taxonomy Seed — `prof_default` (47 defects, 5 categories)
+
+**Status: DATA CHANGE, applied through the real write path. Commit
+`e530f38` (data), plus this doc-only append. No edits to the six core
+docs. Scope: `prof_default` only** — MEDLINE, CARDINAL, and HENRY SCHEIN
+were confirmed byte-identical before/after and are untouched. This closes
+ranked item #2 from §9.4/§9's list (real taxonomy was never seeded) for
+`prof_default` specifically.
+
+### 12.1 — Old `prof_default` content (before), confirmed live, not assumed
+
+Read directly from the live `dev.db` `AppConfig.inspectionProfiles` JSON
+via the same read-only method as §7.2 (`prisma.appConfig.findUnique`
+through `backend/src/lib/prismaClient.ts`), and backed up verbatim to a
+scratchpad file before any write. Matches §7.2/§7.4/§7.7's prior findings
+exactly: 6 categories (BARRIER 1.0/CUMULATIVE, CRITICAL VISUAL
+1.5/CUMULATIVE, MAJOR VISUAL 2.5/GRANULAR, MINOR VISUAL 4.0/GRANULAR, an
+unexplained NEW CATEGORY 1.0/CUMULATIVE, and PACKAGING PASS/FAIL/NIL/N/A),
+11 defects total, only 3 of which (`Porous`, `Thin Layer`, `Flow Mark`)
+were exact-name matches to the real taxonomy.
+
+### 12.2 — Evaluation-mode decision: CUMULATIVE for AND, confirmed not guessed
+
+`ISO2859_MATH_ENGINE.md` §2 states plainly: *"Use this mode [CUMULATIVE]
+for zero-tolerance AND categories."* Two independent code-level checks
+back this up rather than just trusting the doc's prose:
+
+- `backend/src/engine/resolveVerdict.ts`'s own `HARDCODED_DEFAULT_PROFILE`
+  reference profile (line 42) sets its AND-equivalent category to
+  `aqlLevel:'AND', evaluationMode:'CUMULATIVE'`, with the inline comment
+  *"AND = zero tolerance: CUMULATIVE mode with {ac:0,re:1} threshold."*
+- `aqlEvaluator.ts`'s `N/A` mode reads `defectCounts` as a 0/1/2
+  qualitative state (not-recorded/pass/fail), not a raw tally — mechanically
+  incompatible with AND's actual defects (Cut, Tear, Knocking, etc.),
+  which are counted, not toggled. `frontend/src/pages/wizard/StepDefects.tsx`
+  confirms this at the UI layer too: its `isQualitativeAql()` gate only
+  fires for `PASS/FAIL/NIL`, so AND-family defects always render as the
+  quantitative rapid-tap counter cards, never the PASS/FAIL/NIL toggle.
+
+**Contradiction found and flagged, not fixed:** `QualityRules.tsx`'s admin
+UI (`updateCategoryForm`, lines 163-166, and the `isAutoLocked` render
+gate at line 476) auto-locks any category with `aql === 'AND'` to
+`evalMode: 'N/A'` the moment its AQL dropdown is touched, and disables the
+Eval Mode dropdown down to a single "N/A (Auto-Locked)" option while
+`aql==='AND'`. This directly contradicts both the doc and the backend's
+own reference profile. It did not corrupt this seed — the auto-lock only
+fires on an actual `aql` field change, and this profile's AND category's
+`aql` never changes after being seeded — but it means an admin who opens
+the AND category for edit and touches the AQL dropdown (even to re-select
+the same `AND` value) would silently flip `evalMode` to `N/A` on save.
+**Not fixed in this pass** — flagged here for a future small fix to
+`QualityRules.tsx`.
+
+Barrier/Visual-Critical/Visual-Major/Visual-Minor eval modes were set to
+match the live `prof_default` profile's own existing, real convention
+(read in §12.1, not the code-only `HARDCODED_DEFAULT_PROFILE` sentinel,
+which disagreed on one point — see below): CUMULATIVE for the tighter
+tiers (Barrier 1.0, Visual-Critical 1.0), GRANULAR for the looser,
+many-defect tiers (Visual-Major 2.5, Visual-Minor 4.0). This exactly
+matches live `prof_default`'s pre-existing BARRIER/MAJOR VISUAL/MINOR
+VISUAL settings. (Note: `HARDCODED_DEFAULT_PROFILE` disagrees on MAJOR —
+it hardcodes CUMULATIVE where the live, admin-authored `prof_default` data
+has GRANULAR. Per the task's own instruction to prefer "how existing
+categories in **prof_default**... are currently configured," the live
+profile's GRANULAR won out — `HARDCODED_DEFAULT_PROFILE` is a code-level
+safety-net sentinel, not the authoritative live configuration, per §7.5's
+already-documented "same id, different provenance" callout.)
+
+### 12.3 — New `prof_default` content (after)
+
+| Category | id | AQL | evalMode | Defect count |
+|---|---|---|---|---|
+| AND | `AND` | `AND` | `CUMULATIVE` | 8 |
+| Barrier | `BARRIER` | `1.0` | `CUMULATIVE` | 9 |
+| Visual — Critical | `VISUAL_CRITICAL` | `1.0` | `CUMULATIVE` | 1 |
+| Visual — Major | `VISUAL_MAJOR` | `2.5` | `GRANULAR` | 19 |
+| Visual — Minor | `VISUAL_MINOR` | `4.0` | `GRANULAR` | 10 |
+
+**Total: 5 categories, 47 defects.** Full defect list: AND — Cut, Embedded
+Particle, Knocking, Mixed Size, Mixed Type, Tear, Touching, Double Glove /
+Dip. Barrier — Burst, Multiple Pinhole, Pinhole At Crotch/Cuff/Finger/
+Finger Tip/Palm, Visible Hole, Sagging. Visual — Critical — Dirt/Stain
+(single combined defect, not split — see §12.7's note on this being a
+correction mid-task). Visual — Major — Color Spotting, Discoloration,
+Glove Not Chlorinated, Glove Not Reverse, Incomplete Beading, Rolled Cuff
+/ Bead, Sticky, Lump, Slip Mark, Sticky Pleat, Smell Glove, Thin Layer,
+Uncured Glove, Wet Glove, White Patches, Thin/Weak Spot, Porous, Former
+Crack, Overcured Glove. Visual — Minor — Blister Beading, Flocking, Line
+Mark, Flow Mark, Fish Eye, Powder Mark, Shining/Oily Mark, Rough Surface,
+White Beading, Creasing Glove.
+
+Defect `id`s follow the exact convention `QualityRules.tsx`'s
+`handleAddDefect` generates (`def_` + lowercased name, non-alphanumerics
+collapsed to `_`), category shape is `{ id, name, aql, evalMode }` and
+defect shape is `{ id, name, categoryId }` — matching what
+`PATCH /api/config` and the rest of the app (`StepDefects.tsx`,
+`HistoryFeed.tsx`, the Kanban board) already read/write, confirmed by
+reading `QualityRules.tsx` directly rather than inferring from
+`DATA_SCHEMAS_AND_TYPES.md`'s slightly different field names (`aql` vs.
+documented `aqlLevel` — the doc's own §2.1 caveat already flags that the
+AppConfig-JSON and Prisma-engine shapes differ; `resolveVerdict.ts`'s
+`normalizeForEngine()` dual-reads both). Optional `iconName`/`color`/`bg`/
+`border` category fields were confirmed dead code (grepped, zero reads
+anywhere in the frontend) and omitted, matching the existing "NEW
+CATEGORY" precedent in the old data which also omitted them.
+
+### 12.4 — `productCodes` addendum
+
+Confirmed still `["N035MNV-OC-24FT"]` (1 of 3 real codes) immediately
+before this change, matching §7.2's prior finding exactly. Added the other
+two: `productCodes` is now `["N035MNV-OC-24FT", "N025SKB-OC-24FT",
+"N030SKB-OC-24FT"]`. `productProfileMap`'s existing typo for
+`N030SKB-OC-24FT` (§7.5 — the map has `N030MNV-OC-24FT`/`R030MNV-OC-24FT`
+instead) was deliberately left untouched: the wizard's submission path
+always sends an explicit `profileId` (operator-picked, default-prefilled),
+never consults `productProfileMap`, so the typo doesn't block correct
+grading via the wizard — confirmed directly in §12.7's live test 2 below,
+which used `N030SKB-OC-24FT` and graded correctly against `prof_default`.
+
+### 12.5 — Write path: real `PATCH /api/config`, not a direct DB write
+
+A one-off script (`GET /api/config` → merge only `prof_default` inside
+`inspectionProfiles`, leaving the other 3 profiles byte-for-byte
+untouched, plus the `productCodes` addendum → `PATCH /api/config` with
+`X-User-Role: ADMIN`) called the actual running Express route on
+`localhost:4009` — the same endpoint `QualityRules.tsx`'s Save
+Configuration button calls, going through `config.routes.ts`'s real
+`prisma.appConfig.upsert()`. Confirmed via response inspection: `PATCH`
+returned `200`, the round-tripped `prof_default` had exactly 5
+categories/47 defects, and the other 3 profiles compared byte-identical
+(`JSON.stringify` equality) to their pre-PATCH state. Independently
+re-confirmed by a second, separate read straight from `dev.db` (not
+trusting the same script's own response).
+
+One correction along the way, worth recording: `PATCH /api/config`
+(`config.routes.ts`) does **no field-level validation** of its own beyond
+JSON-serializing whatever's given — the `ISO_WHITELIST` referenced in the
+task is a **frontend-only** `<select>` option list in `QualityRules.tsx`,
+not a server-side check. The real thing this payload needed to satisfy
+was being a member of that whitelist so the admin UI's own dropdown
+recognizes the values on subsequent edits — confirmed `AND`/`1.0`/`2.5`/
+`4.0` are all present in it.
+
+### 12.6 — Live verification, all via the real running app
+
+| Check | Method | Result |
+|---|---|---|
+| `/config` → Quality Rules, as ADMIN via mock M365 | Browser | 5 categories with correct AQL/evalMode; Kanban shows correct 8/9/1/19/10 per-category defect counts; single "Dirt/Stain" card under VISUAL — CRITICAL (not split) |
+| Live-editability spot-check | Browser — renamed `Sagging` → `Sagging (edit-check)` via the real Edit control, Save Configuration, confirmed server-side via `GET /api/config`, then reverted via a second real `PATCH` | Round-tripped correctly both directions; `ALL CHANGES SAVED`/`UNSAVED CHANGES` banner tracked dirty state correctly |
+| Wizard submission, `N025SKB-OC-24FT`, 1× Cut recorded | Browser, full wizard click-through → Submit Lot | `POST /api/submissions` → `201`; verdict `FAILED`; AND category: `n=13, ac=0, re=1, count=1` → `"AND — cumulative total: 1 > ac(0)"` — exact CUMULATIVE zero-tolerance behavior |
+| Wizard submission, `N030SKB-OC-24FT`, 2× Color Spotting recorded | Browser | verdict `FAILED`; Visual — Major: `n=13, ac=1, re=2, count=2` → `"Color Spotting: 2 > ac(1)"` — exact GRANULAR per-defect-type behavior, other categories independently PASS |
+| Wizard submission, `N035MNV-OC-24FT`, 0 defects | Browser | verdict `PASSED`, all 5 categories PASS |
+| History view, `POST /api/verdict/preview` via `HistoryFeed.tsx`'s `DefectBreakdownPanel` | Browser — expanded the `N025SKB-OC-24FT` row | Identical breakdown to the wizard's own preview: same 5 categories, same AND/Cut/FAIL detail — confirms the server-authoritative pattern (§5.6/§5.8, re-confirmed §7.5) holds for the new taxonomy too |
+
+All three real product codes are now exercisable end-to-end (wizard →
+server verdict → persisted submission → History detail), which was not
+possible before this session (only `N035MNV-OC-24FT` was selectable at
+all, per §7.2/§12.4).
+
+### 12.7 — Mid-task correction: combined `Dirt/Stain`, not split
+
+The task, as originally scoped, called for splitting `Dirt/Stain` into
+`Dirt/Stain (Large)` (Critical) and `Dirt/Stain (Small)` (Minor) — 48
+defects total. Before implementation, Jerry corrected this: use a single
+combined `Dirt/Stain` defect under Visual — Critical only, 47 defects
+total. The plan, payload, and all live verification above reflect the
+corrected 47-defect version; no split ever reached the live database.
+
+### 12.8 — Assumed / unverified defect classifications — review recommended
+
+**Flagged plainly, per Jerry's explicit instruction: none of the
+Visual-tier assignments below are confirmed by any current (2026) source.**
+The source QA sheet treats all Visual defects as one combined category
+with no Critical/Major/Minor split at all. The tiering shipped in this
+seed comes from two non-authoritative places and is a **working first
+draft**, expected to be revisited by Jerry via the real `QualityRules.tsx`
+admin UI once real inspection usage or QA team input is available:
+
+**(a) Matched against old pivot-table tabs found inside the source
+spreadsheets, dated May 2021 — a leftover template, not current
+documentation (24 defects):**
+
+- Visual — Major (17 of these): Color Spotting, Discoloration, Glove Not
+  Chlorinated, Glove Not Reverse, Incomplete Beading, Rolled Cuff / Bead,
+  Sticky, Lump, Slip Mark, Sticky Pleat, Smell Glove, Thin Layer, Uncured
+  Glove, Wet Glove, White Patches, Thin/Weak Spot, Porous
+- Visual — Minor (7 of these): Blister Beading, Flocking, Line Mark, Flow
+  Mark, Fish Eye, Powder Mark, Shining/Oily Mark
+
+**(b) No match in the 2021 data at all — assigned by reasoning alone, no
+data backing (5 defects):**
+
+- Rough Surface — Minor
+- White Beading — Minor
+- Creasing Glove — Minor
+- Overcured Glove — Major
+- Former Crack — Major (per Jerry's explicit override of the 2021 data,
+  which had filed this one under AND instead)
+
+**(c) No 2026 tier source either — assigned as the single safest default
+for a combined defect (1 defect):**
+
+- Dirt/Stain — Visual — Critical
+
+**In short: 30 of 47 defects (all of Visual — Major and Visual — Minor,
+plus Dirt/Stain) carry no confirmed 2026 tier assignment.** AND (8
+defects) and Barrier (9 defects) are solid — both families and their
+membership are unambiguous from the ground truth supplied for this task.
+
+### 12.9 — Flagged, not fixed: `QualityRules.tsx` has no delete-profile capability
+
+Jerry noticed the admin UI lets you duplicate an inspection profile
+(`handleDuplicateProfile`) but not delete/remove one. Traced directly:
+grepped the entire frontend for `DeleteProfile`/`RemoveProfile` (any
+casing) — **zero matches anywhere.** This isn't a broken or unwired
+handler; the capability was simply never built. `QualityRules.tsx`'s
+profile toolbar wires exactly three actions: RENAME, DUPLICATE, ADD
+PROFILE (plus SET AS DEFAULT when not already default) — no fourth
+delete/remove action exists in the component at all. **Not implemented in
+this pass**, per the task's explicit instruction to log this as a
+scoped-out finding only.
+
+### 12.10 — Cleanup
+
+Three test submissions created during §12.6's live verification
+(`N025SKB-OC-24FT`, `N030SKB-OC-24FT`, `N035MNV-OC-24FT`) deleted directly
+via Prisma by id after verification completed; confirmed back at 19
+submissions / 0 amendment logs both via direct Prisma count and via the
+running server's own `GET /api/submissions`, before `git commit`. The
+`Sagging (edit-check)` rename from §12.6's edit spot-check was reverted to
+`Sagging` via a second real `PATCH /api/config` call before cleanup,
+confirmed via `GET /api/config`.
