@@ -38,7 +38,9 @@ The evaluation function determines the final PASS/FAIL verdict by mapping record
 **Engine source files:**
 - Matrix + bracket snap: `backend/src/engine/iso2859-matrix.ts`
 - Verdict engine: `backend/src/engine/aqlEvaluator.ts`
-- Display-only inline copy (frontend): `frontend/src/components/history/HistoryFeed.tsx`
+- Physical dimension engine (server-side): `backend/src/engine/dimensionEvaluator.ts` — see §5.
+- Shared resolution + combined verdict: `backend/src/engine/resolveVerdict.ts`
+- Display-only inline copies (frontend, never used for persistence — kept in sync manually): `frontend/src/components/history/HistoryFeed.tsx`, `frontend/src/pages/wizard/StepReviewSubmit.tsx`
 
 ---
 
@@ -46,7 +48,7 @@ The evaluation function determines the final PASS/FAIL verdict by mapping record
 
 * **SKU Weight Resolution:** Default glove weight is resolved from `weightTarget` in `ProductConfig` for the selected size (e.g., `sizes['M'].weightTarget`). Falls back to parsing characters 1–3 of the Product Code string (e.g., `N035SKB-OC-24FT` → `3.50g`).
 
-* **Profile Mapping:** Selecting a SKU triggers a lookup in `productProfileMap` (from `AppConfig`) to auto-load the correct `InspectionProfile` limits. If no mapping exists, the backend falls back to the first AppConfig profile with usable rules, then the hardcoded GLOBAL STANDARD (DEFAULT).
+* **Profile Selection:** Profiles are product-agnostic and user-selected via a dropdown in Step 1 of both wizards (Single and Batch) — selecting a SKU does **not** auto-load a profile. The dropdown pre-selects whichever profile is flagged `isDefault: true` in AppConfig; the operator can override it. `productProfileMap[productCode] → profileId` still exists as a **backend-only** fallback for callers that submit with no `profileId` at all (see `API_AND_INTEGRATION_SPEC.md` §1's `POST /api/submissions` resolution order) — falling back further to the first AppConfig profile with usable rules, then the hardcoded GLOBAL STANDARD (DEFAULT) — but neither wizard leaves `profileId` empty anymore, so this path is effectively dormant for normal submissions.
 
 * **Timestamp Precision:** `submissionTimestamp` is generated with millisecond precision upon submission to prevent backdating and ensure uniqueness across parallel sessions.
 
@@ -66,6 +68,8 @@ The evaluation function determines the final PASS/FAIL verdict by mapping record
 ---
 
 ## 5. PHYSICAL DIMENSION EVALUATION LOGIC (`StepDimensions` & `BatchEntry`)
+
+* **Server-Side Mirror:** `backend/src/engine/dimensionEvaluator.ts` mirrors this logic exactly (same threshold formulas, same quirks — e.g. `ProductDimensionDef.isMin` is intentionally never read; `isMin` is derived purely from whether a size's tolerance field is the literal string `'MIN'`). This is no longer a fully client-only, AQL-independent system: `resolveVerdict()` now combines both into the one persisted verdict — `(AQL verdict === 'FAILED') OR (failedDimensions > 0)` — so a dimension-only failure can no longer be silently dropped from what gets saved. See §2's engine source file list.
 
 * **Parameter Format Control:**
   - Each dimension row (fixed or dynamic) in Product Config features a format dropdown in the UOM cell (`0`, `0.0`, `0.00`, `0.000`).
