@@ -2,3 +2,7 @@ node_modules
 dist
 .env
 .DS_Store
+
+# Real One Glove Group production data exports (monthly) — must never enter git history
+*.xlsx
+*.xls
