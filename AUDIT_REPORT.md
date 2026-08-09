@@ -3076,3 +3076,164 @@ running server's own `GET /api/submissions`, before `git commit`. The
 `Sagging (edit-check)` rename from §12.6's edit spot-check was reverted to
 `Sagging` via a second real `PATCH /api/config` call before cleanup,
 confirmed via `GET /api/config`.
+
+---
+
+## 13. Five Independent Fixes — Cleanup Backlog Pass
+
+**Status: CODE CHANGES. Five separate commits, one per fix (per the
+task's explicit instruction — not one combined change), plus this
+doc-only append. No edits to the six core docs.** Each fix followed its
+own discovery → fix → typecheck → live-verify → commit cycle, per
+`AI_RULES.md` §4 (one file per turn, build/typecheck verification before
+proceeding). `dev.db` confirmed at the 19-submission/0-amendment-log
+baseline before every commit that touched it (Fixes 1, 2, 4, 5 — Fix 3's
+own edit happened to net to zero change from the server's prior state, so
+no dev.db diff existed to clean).
+
+### 13.1 — Fix 1: typecheck error in `config.routes.ts` (§5.1) — commit `0ab29b3`
+
+`PATCH /api/config`'s catch block did `error?.message || String(error)`
+on a value typed `unknown` — `tsc --noEmit` confirmed
+`TS2339: Property 'message' does not exist on type '{}'`. No existing
+codebase convention for a generic `unknown`-error type guard was found
+(`pinUsers.routes.ts`'s catch blocks never touch `.message` at all), but
+`submissions.routes.ts` already narrows a *specific* error type via
+`instanceof VerdictProfileNotFoundError` before reading `.message` —
+matched that idiom generically: `error instanceof Error ? error.message : String(error)`.
+**Verification:** re-ran `tsc --noEmit` — zero errors (confirmed gone, not
+moved elsewhere). Backend-only, no observable UI behavior change, so no
+browser verification was applicable; confirmed the endpoint still
+functions normally (`GET`/`PATCH` both `200`) as a regression check.
+
+### 13.2 — Fix 2: amendment wizard double-counted qualitative defects (§5.13) — commit `8e1ab3d`
+
+Root cause traced precisely: `WizardPage.tsx`'s amendment pre-fill sets
+`inspectionData.defects` to the submission's **full** persisted `defects`
+map (still containing raw 0/1/2 state values for N/A-mode/qualitative
+defect ids) *and separately* sets `inspectionData.qualitative` to the
+correctly-decoded PASS/FAIL/NIL map for those same ids. `StepDefects.tsx`
+seeded `defectCounts` from the former without excluding qualitative ids,
+so `totalQuantitativeDefects` summed a qualitative FAIL's raw value
+(e.g. `2`) *and* `totalQualitativeFails` counted it again via
+`qualitativeStates` — one real defect inflated the displayed total by 2-3x.
+Fixed by deriving a `qualitativeDefectIds` set (same category-aql-based
+logic `WizardPage.tsx` already uses) and excluding those ids from the
+quantitative sum. Confirmed genuinely display-only before touching
+anything: `combinedDefects` (what actually gets submitted) merges
+`qualitativeStates`-encoded values *over* `defectCounts`, so untouched
+qualitative entries always round-trip to their original raw value
+regardless of the display bug.
+
+**Live verification:** created a real submission on the HENRY SCHEIN
+profile (1× Hole + PACKAGING/Box Damage marked FAIL, total correctly `2`
+at creation time — proving the bug is amendment-reopen-specific, not a
+creation-time issue) via the real wizard, reopened it as a real amendment
+(History → AMEND RECORD), confirmed the Defects step's "TOTAL RECORDED
+ISSUES" now reads `2` (was previously reachable at `4`: `1 (Hole)
++ 2 (Box Damage raw state) + 1 (Box Damage qualitative FAIL)`), submitted
+the amendment with no changes, and confirmed via
+`GET /api/submissions`'s `amendmentLogs[].originalValues`/`newValues`
+that the submitted `defects` payload is byte-identical
+(`{"def_hole":1,"def_box":2}`) both before and after — the fix touched
+only the display total, never the persisted/graded data. Test submission
++ amendment log deleted afterward; confirmed back at 19/0.
+
+### 13.3 — Fix 3: `QualityRules.tsx` AND-category `evalMode` corruption — commit `8b8688a`
+
+Found during the §12 taxonomy seed: `updateCategoryForm`'s `aql==='AND'`
+branch force-set `evalMode` to `'N/A'`, and the `isAutoLocked` render gate
+disabled the Eval Mode dropdown to a single "N/A (Auto-Locked)" option
+for AND categories — contradicting `ISO2859_MATH_ENGINE.md` §2 and
+`resolveVerdict.ts`'s own `HARDCODED_DEFAULT_PROFILE` reference profile,
+both of which specify `CUMULATIVE` for AND (zero-tolerance is still a
+numeric count check, not qualitative — `PASS/FAIL/NIL` is the only
+category kind that genuinely requires `N/A`). Fixed by restricting the
+auto-lock-to-`N/A` branch to `PASS/FAIL/NIL` only, and removing
+`aql === 'AND'` from both `isAutoLocked` computations (edit-row and
+add-category forms) — AND categories now get a normal, editable
+CUMULATIVE/GRANULAR dropdown like any other numeric AQL level.
+
+**Live verification, both scenarios the task asked for:** opened
+`prof_default`'s AND category (seeded `AND`/`CUMULATIVE` in §12) for edit
+— (a) leaving the AQL field untouched: Eval Mode dropdown showed as a
+normal editable `CUMULATIVE`/`GRANULAR` select, not locked; (b)
+deliberately triggering the old bug path directly: changed AQL to `1.5`
+(evalMode stayed `CUMULATIVE`, unlocked, as expected for a normal AQL),
+then changed it back to `AND` — evalMode **remained `CUMULATIVE`**,
+confirmed via the dropdown's selected option and via a direct
+`GET /api/config` read after saving. Before the fix, step (b) would have
+silently flipped it to `N/A`.
+
+### 13.4 — Fix 4: migration history drift (§5.2) — commit `520d0b8`, plan-mode approved
+
+**This fix required explicit plan-mode approval per the task's
+instruction, given the destructive potential of migration tooling in
+general — approved before any command ran.** `prisma/migrations/`
+contained only the original init migration; every real schema change
+since (`AmendmentLog`'s 4 `recomputed*` audit columns, the `PinUser`
+table, `AppConfig`'s many added columns, and the
+`InspectionProfile`/`AQLCategory`/`DefectDefinition` removal + the
+`Submission.profileId` FK drop — §9.3/§10.3) was applied via
+`prisma db push`, which never touches migration history.
+`prisma migrate status` misleadingly reported "up to date" (it only
+checks whether existing migration *files* are marked applied, not
+whether they describe the live schema) — the real drift was confirmed via
+the fully read-only `prisma migrate diff --from-migrations ./prisma/migrations --to-config-datasource --script`.
+
+**Explicit constraint honored: `prisma migrate dev` was never run** —
+that command would have detected this exact drift and offered/forced a
+destructive reset of the 19-submission baseline. Instead: the `migrate
+diff` output (the literal, accurate description of every `db push` change
+since init) was saved as a new migration file
+(`20260809120000_reconcile_db_push_drift/migration.sql`), then
+`prisma migrate resolve --applied 20260809120000_reconcile_db_push_drift`
+was run — Prisma's documented mechanism for exactly this situation
+("baseline databases when starting to use Prisma Migrate on existing
+databases" / "reconcile hotfixes done manually on databases with your
+migration history," per `prisma migrate resolve --help`). `resolve` only
+writes a bookkeeping row into `_prisma_migrations` — it never executes
+migration SQL against application tables.
+
+**Verification:** confirmed via direct SQL query that the new
+`_prisma_migrations` row has `applied_steps_count: 0` (proof zero DDL
+ran — a normally-applied migration would show a nonzero count matching
+its statement count); a fresh `migrate diff` after `resolve` returned
+`-- This is an empty migration.` (zero remaining drift); `Submission`/
+`AmendmentLog` row counts unchanged (19/0) before and after; the only
+`dev.db` byte diff was that one bookkeeping row, confirmed by inspecting
+`_prisma_migrations`'s contents directly.
+
+### 13.5 — Fix 5: delete-profile capability — commit `c4dcd04`
+
+Missing feature (per §12.9's already-logged scoped-out finding), not a
+regression — `QualityRules.tsx`'s profile toolbar had RENAME/DUPLICATE/
+ADD PROFILE/SET AS DEFAULT but no delete/remove action anywhere. Added a
+DELETE PROFILE button next to DUPLICATE, backed by a confirmation modal
+reusing `ConfigPage.tsx`'s existing discard/navigation-guard modal
+pattern verbatim (`bg-black/70` backdrop, `bg-canvas` card, rose
+`AlertTriangle` icon, CANCEL/CONFIRM DELETE pair) — the one confirmation
+pattern already established in this codebase, no new dependency or
+component style introduced (matches `AI_RULES.md` §5's "Core Tech Stack
+Guardrail: do not install unapproved third-party NPM packages").
+
+`prof_default` is blocked from deletion specifically by id — not by
+whichever profile currently has `isDefault:true`, since that flag is
+freely reassignable via the existing SET AS DEFAULT button, while
+`prof_default`'s id string is the actual hardcoded sentinel
+`resolveVerdict.ts`'s safety net and `productProfileMap` fall back to
+(§7.3/§7.5). Attempting to delete it shows a toast error and never opens
+the confirmation modal at all. Deletion itself reuses the exact same
+`triggerChange` → `onChange` → `ConfigPage.tsx`'s existing SAVE
+CONFIGURATION → real `PATCH /api/config` flow every other profile CRUD
+operation in this component already uses — no new backend endpoint, per
+the task's instruction.
+
+**Live verification:** attempted deleting `prof_default` — blocked, no
+modal opened, `GET /api/config` confirmed all 4 profiles including
+`prof_default` unchanged. Created a disposable "NEW PROFILE" via the real
+ADD PROFILE button, saved it, selected it, clicked DELETE PROFILE —
+confirmation modal rendered with the correct profile name and warning
+text, clicked CONFIRM DELETE, clicked SAVE CONFIGURATION, then confirmed
+via `GET /api/config` that the profile count returned to 4 with the test
+profile genuinely gone and the other 4 real profiles untouched.
