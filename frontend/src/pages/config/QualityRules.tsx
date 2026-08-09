@@ -160,7 +160,12 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   const updateCategoryForm = (formSetter: any, field: string, value: string) => {
     formSetter((prev: any) => {
       const next = { ...prev, [field]: value };
-      if (field === 'aql' && (value === 'AND' || value === 'PASS/FAIL/NIL')) {
+      // PASS/FAIL/NIL is qualitative (no numeric Ac/Re threshold applies) —
+      // N/A is the only valid mode. AND is zero-tolerance but still a
+      // numeric count check (ISO2859_MATH_ENGINE.md §2, resolveVerdict.ts's
+      // HARDCODED_DEFAULT_PROFILE both specify CUMULATIVE) — it must never
+      // be forced to N/A here.
+      if (field === 'aql' && value === 'PASS/FAIL/NIL') {
         next.evalMode = 'N/A';
       } else if (field === 'aql' && next.evalMode === 'N/A') {
         next.evalMode = 'CUMULATIVE';
@@ -473,7 +478,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                 {activeCategories.map((cat: any, index: number) => {
                   const isEditing = editingCategoryId === cat.id;
                   const targetAql = isEditing ? editCategoryForm.aql : cat.aql;
-                  const isAutoLocked = targetAql === 'AND' || targetAql === 'PASS/FAIL/NIL';
+                  const isAutoLocked = targetAql === 'PASS/FAIL/NIL';
 
                   return (
                     <tr key={cat.id} className="hover:bg-surface-light transition-colors group border-b border-gray-700/50">
@@ -587,7 +592,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                 
                 {/* ── Inline Add Category Row ───────────────────────────────── */}
                 {isAddingCategory && (() => {
-                  const isAutoLocked = newCategoryForm.aql === 'AND' || newCategoryForm.aql === 'PASS/FAIL/NIL';
+                  const isAutoLocked = newCategoryForm.aql === 'PASS/FAIL/NIL';
                   return (
                     <tr className="bg-surface-light border-b border-brand-secondary/30">
                       <td className="py-3 px-3">
