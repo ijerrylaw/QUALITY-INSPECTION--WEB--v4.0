@@ -61,7 +61,8 @@
 
 * `POST /api/amendments/:id/approve`
   * **Role:** Applies `newValues` from the latest pending `AmendmentLog` to the `Submission` record. Sets `amendmentStatus` to `APPROVED` on both the submission and the log.
-  * **Important:** This applies the pre-stored `newValues` verbatim — it does **not** recompute the AQL verdict. Any verdict change must be explicitly included in `newValues` at amendment-draft time.
+  * **Important:** The AQL verdict **and** physical dimension results are recomputed server-side via the shared `resolveVerdict()` engine at approval time — the client-supplied `newValues.verdict` is never trusted for persistence, only retained on the `AmendmentLog` (`recomputedVerdict`, `recomputedCategoryResults`, `recomputedFailedDimensions`, `recomputedDimensionResults`) for audit comparison against what was originally drafted.
+  * **Response 200:** Includes a `verdictRecompute: { clientSupplied, serverRecomputed, mismatch }` diagnostic block so callers can see whether the recomputed verdict differed from the client's draft.
 
 * `POST /api/amendments/:id/reject`
   * **Role:** Discards the draft amendment. Sets `amendmentStatus` to `REJECTED` on both the submission and the log.
