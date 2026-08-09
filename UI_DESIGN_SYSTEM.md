@@ -10,6 +10,7 @@
 
 ### 1.1 Color Palette (White-Labeled Tokens)
 Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables defined below:
+* **Chart Library Exemption:** Recharts (and similar SVG-based charting libraries) accept `fill`/`stroke` props as raw color values, not Tailwind classes. Raw hex codes are permitted there, but MUST be the exact hex values of the tokens below (e.g. `#08C8CD` for Brand Secondary, `#EF4444` for Danger) — never invented one-off colors outside this palette.
 * **Canvas (Background):** `bg-canvas` (`#0B0F19`) — Primary background.
 * **Surface (Cards/Modals):** `bg-surface` (`#111827`) — Elevated containers.
 * **Brand Primary:** `bg-brand-primary` (`#3F48CC`) — Core brand blue.
