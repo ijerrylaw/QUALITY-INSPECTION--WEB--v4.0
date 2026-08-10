@@ -14,8 +14,14 @@
  *  staff; Group C (including Supervisors) cannot reach this screen at all.
  *
  * Also exports:
- *  - pinAuthRouter (mounted at /api/auth) — POST /pin-login, deliberately
- *    ungated since it IS the login step; no role exists yet to check.
+ *  - pinAuthRouter (mounted at /api/auth):
+ *      - POST /pin-login   deliberately ungated since it IS the login step;
+ *        no role exists yet to check.
+ *      - POST /pin-change  self-service PIN change (Staff PIN Access task,
+ *        AUDIT_REPORT.md). Also ungated — identity is established by
+ *        verifying `currentPin` against every active row (same scan
+ *        `/pin-login` already does), never by trusting a client-passed
+ *        userId. Available to any PIN-logged-in user, not just Group A/B.
  *
  * pinHash/pinSalt are never included in any response.
  */
@@ -149,5 +155,52 @@ pinAuthRouter.post('/pin-login', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('[POST /api/auth/pin-login] Error:', error);
     res.status(500).json({ error: 'Failed to process PIN login' });
+  }
+});
+
+// POST /api/auth/pin-change — self-service PIN change, ungated. Identity is
+// established purely by finding which active PinUser's pinHash the submitted
+// currentPin verifies against (same scan pin-login already does) — no userId
+// is ever accepted from the client.
+pinAuthRouter.post('/pin-change', async (req: Request, res: Response) => {
+  try {
+    const body = req.body as { currentPin?: string; newPin?: string };
+
+    if (!isValidSixDigitPin(body.currentPin)) {
+      res.status(401).json({ error: 'Current PIN is incorrect.' });
+      return;
+    }
+    if (!isValidSixDigitPin(body.newPin)) {
+      res.status(400).json({ error: 'New PIN must be exactly 6 digits.' });
+      return;
+    }
+
+    const activeUsers = await prisma.pinUser.findMany({ where: { active: true } });
+    const self = activeUsers.find((u) => verifyPin(body.currentPin as string, u.pinHash, u.pinSalt));
+    if (!self) {
+      res.status(401).json({ error: 'Current PIN is incorrect.' });
+      return;
+    }
+
+    // Uniqueness among active rows, excluding the resolved user's own row —
+    // same rule POST /api/pin-users enforces at creation time.
+    const collision = activeUsers.some(
+      (u) => u.id !== self.id && verifyPin(body.newPin as string, u.pinHash, u.pinSalt)
+    );
+    if (collision) {
+      res.status(409).json({ error: 'This PIN is already in use by an active user.' });
+      return;
+    }
+
+    const { pinHash, pinSalt } = hashPin(body.newPin as string);
+    const updated = await prisma.pinUser.update({
+      where: { id: self.id },
+      data: { pinHash, pinSalt },
+    });
+
+    res.json(toPublicPinUser(updated));
+  } catch (error) {
+    console.error('[POST /api/auth/pin-change] Error:', error);
+    res.status(500).json({ error: 'Failed to change PIN' });
   }
 });

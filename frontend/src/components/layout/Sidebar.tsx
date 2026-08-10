@@ -14,6 +14,7 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth, rolesInGroups } from '../../context/AuthContext';
+import { PinChangeModal } from '../auth/PinChangeModal';
 import {
   ClipboardCheck,
   History,
@@ -25,7 +26,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Factory,
-  LogOut
+  LogOut,
+  KeyRound
 } from 'lucide-react';
 
 interface SidebarItem {
@@ -56,7 +58,9 @@ const sidebarItems: SidebarItem[] = [
 
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
+  const [showPinChange, setShowPinChange] = useState(false);
   const { user, logout } = useAuth();
+  const canChangePin = user?.loginMethod === 'PIN';
 
   // Filter items based on user role
   const visibleItems = sidebarItems.filter(item => 
@@ -167,27 +171,51 @@ export function Sidebar() {
             </div>
             
             {!collapsed && (
-              <button 
-                onClick={logout}
-                title="Log Out"
-                className="w-8 h-8 rounded-lg text-muted hover:text-danger hover:bg-danger/10 flex items-center justify-center shrink-0 transition-colors outline-none"
-              >
-                <LogOut className="w-4 h-4" strokeWidth={2} />
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                {canChangePin && (
+                  <button
+                    onClick={() => setShowPinChange(true)}
+                    title="Change My PIN"
+                    className="w-8 h-8 rounded-lg text-muted hover:text-brand-secondary hover:bg-brand-primary/10 flex items-center justify-center transition-colors outline-none"
+                  >
+                    <KeyRound className="w-4 h-4" strokeWidth={2} />
+                  </button>
+                )}
+                <button
+                  onClick={logout}
+                  title="Log Out"
+                  className="w-8 h-8 rounded-lg text-muted hover:text-danger hover:bg-danger/10 flex items-center justify-center shrink-0 transition-colors outline-none"
+                >
+                  <LogOut className="w-4 h-4" strokeWidth={2} />
+                </button>
+              </div>
             )}
           </div>
-          
+
           {collapsed && (
-            <button 
-              onClick={logout}
-              title="Log Out"
-              className="w-full h-12 rounded-lg text-muted hover:text-danger hover:bg-danger/10 flex items-center justify-center transition-colors outline-none"
-            >
-              <LogOut className="w-5 h-5" strokeWidth={2} />
-            </button>
+            <div className="space-y-2">
+              {canChangePin && (
+                <button
+                  onClick={() => setShowPinChange(true)}
+                  title="Change My PIN"
+                  className="w-full h-12 rounded-lg text-muted hover:text-brand-secondary hover:bg-brand-primary/10 flex items-center justify-center transition-colors outline-none"
+                >
+                  <KeyRound className="w-5 h-5" strokeWidth={2} />
+                </button>
+              )}
+              <button
+                onClick={logout}
+                title="Log Out"
+                className="w-full h-12 rounded-lg text-muted hover:text-danger hover:bg-danger/10 flex items-center justify-center transition-colors outline-none"
+              >
+                <LogOut className="w-5 h-5" strokeWidth={2} />
+              </button>
+            </div>
           )}
         </div>
       )}
+
+      <PinChangeModal open={showPinChange} onClose={() => setShowPinChange(false)} />
     </aside>
   );
 }

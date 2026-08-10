@@ -3442,3 +3442,68 @@ app's real data volume the extra JSON transfer overhead is a non-issue.
 
 **Files touched:** `backend/src/routes/submissions.routes.ts`,
 `frontend/src/components/history/HistoryFeed.tsx`.
+
+---
+
+## 17. Staff PIN Access — Self-Service PIN Change, Deactivated-Staff Filter, Hard-Delete Descoped
+
+Three items were scoped for this task: self-service PIN change, a
+deactivated-staff filter on `/pin-admin`, and hard-delete for PIN users with
+zero submission history. The third was **descoped mid-task** after
+discovery, not built — see below.
+
+**Discovery finding — blocks hard-delete, flagged not worked around:**
+`Submission.aadObjectId`/`userPrincipalName` (`schema.prisma`) are designed
+around real M365 token identity, but both wizard submit paths
+(`WizardPage.tsx:341-342`, `BatchEntry.tsx:486-487`) stamp every submission
+with the same hardcoded literals (`'mock-user-id'`,
+`'operator@oneglove.com'`) regardless of login method — PIN or M365 mock
+alike. `AuthContext.loginWithPIN` does resolve a real `user.id` equal to
+`PinUser.id` (`AuthContext.tsx:142-150`), but that real identity is never
+threaded into the submission payload. Net effect: **no submission in this
+app is attributable to any specific user today.** A "does this PinUser have
+zero submission history" check — needed to gate hard-delete safely — cannot
+be built reliably on top of this: it would either always report zero
+history (silently unsafe, since a PinUser with real floor history would
+look deletable) or require first fixing the identity-stamping gap itself,
+which is a separate, larger change touching both wizards' submit payloads.
+Confirmed and discussed live; the decision was to descope hard-delete from
+this task entirely rather than build on the unreliable field. Soft
+deactivate (already correct/intentional — preserves audit trail) remains
+the only way to remove a PIN login. **Candidate for a future task:** wire
+real `user.id`/`user.name` into submission payloads for both login methods,
+then hard-delete-on-zero-history becomes buildable — but note even then,
+submissions created *before* that fix would remain permanently
+unattributable (still carrying the old hardcoded placeholder), so any
+future zero-history check would only be trustworthy going forward from
+whenever that fix ships, not retroactively.
+
+**Fix (self-service PIN change):** New `POST /api/auth/pin-change`
+(`backend/src/routes/pinUsers.routes.ts`, same ungated `pinAuthRouter` as
+`pin-login`). Identity resolved the same way `pin-login` already does —
+scans active `PinUser` rows and verifies `currentPin` against each hash;
+never trusts a client-passed `userId`. `newPin` validated exactly 6 digits
+and unique among active rows excluding the resolved user's own row (same
+rule `POST /api/pin-users` enforces at creation). New
+`frontend/src/components/auth/PinChangeModal.tsx` (Current/New/Confirm PIN
+fields, client-side format + match validation, `useToast` success/error
+feedback) wired into `Sidebar.tsx`'s footer via a `KeyRound` button shown
+only when `user.loginMethod === 'PIN'`.
+
+**Fix (deactivated-staff filter):** `PinAdminPanel.tsx`'s roster now
+defaults to active-only (`showDeactivated` state, default `false`); a
+"Show/Hide Deactivated" toggle next to the existing refresh button reveals
+deactivated rows, visually dimmed (`opacity-50`) on top of the existing
+"Deactivated" danger badge.
+
+**MDs updated:** `NAVIGATION_AND_RBAC.md` §3.2/§5.1 and
+`API_AND_INTEGRATION_SPEC.md`'s PIN User Administration section both
+document `POST /api/auth/pin-change` and the roster filter; §3.2 also
+carries the hard-delete-descoped note with a pointer back to this entry.
+
+**Live verification:** confirmed a PIN user can change their own PIN, log
+out, and log back in with the new PIN while the old one now fails;
+confirmed a wrong current PIN is rejected (`401`) with no state change;
+confirmed changing to a PIN already active on another user is rejected
+(`409`); confirmed `/pin-admin` hides deactivated staff by default and
+reveals them (dimmed) via the toggle.

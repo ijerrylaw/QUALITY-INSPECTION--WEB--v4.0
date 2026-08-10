@@ -53,7 +53,9 @@ For floor staff without a company email/Microsoft account (high-turnover roles).
 
 * Backed by a real `PinUser` table (`backend/prisma/schema.prisma`): `name`, `jobTitle` (free-text real title, display/audit only), `role` (restricted server-side to `OPERATOR` | `LEADER` | `SUPERVISOR` — Group C only), `pinHash`/`pinSalt` (Node's built-in `crypto.scryptSync`; PINs are never stored in plaintext), `active` (soft-delete — deactivated rows are kept for audit history and their PIN becomes free for reuse).
 * `POST /api/auth/pin-login` (`backend/src/routes/pinUsers.routes.ts`) — deliberately ungated, since it *is* the login step; there's no role to check yet. Scans active `PinUser` rows and verifies the submitted PIN against each; returns `{ id, name, jobTitle, role }` on match, `401` otherwise.
-* Managed via the **Staff PIN Access** screen (`/pin-admin`, Group A/B only — see §4): create (name, job title, role, 6-digit PIN — uniqueness enforced among active rows only, so a deactivated person's old PIN becomes reusable) and deactivate. No edit, reactivate, or history view, by deliberate scope choice.
+* Managed via the **Staff PIN Access** screen (`/pin-admin`, Group A/B only — see §4): create (name, job title, role, 6-digit PIN — uniqueness enforced among active rows only, so a deactivated person's old PIN becomes reusable) and deactivate. The roster defaults to active-only, with a "Show Deactivated" toggle to reveal deactivated rows (visually dimmed, "Deactivated" badge). No edit (of name/jobTitle/role), reactivate, or history view, by deliberate scope choice.
+* **Self-service PIN change** — `POST /api/auth/pin-change` (`backend/src/routes/pinUsers.routes.ts`, same ungated `pinAuthRouter` as `pin-login`). Lets any PIN-logged-in user change their own PIN without manager involvement, reachable via a "Change My PIN" button in `Sidebar.tsx`'s footer (shown only when `user.loginMethod === 'PIN'`). Payload is `{ currentPin, newPin }` — **never a client-passed userId**; identity is established purely by finding which active `PinUser` row's hash the submitted `currentPin` verifies against, the same scan `pin-login` already does. `newPin` must be exactly 6 digits and unique among active rows (excluding the resolved user's own row) — identical validation rule to creation. `401` on a wrong current PIN, `409` on a colliding new PIN.
+* **Hard-delete for zero-history PIN users — considered, not built.** Deleting a `PinUser` outright (vs. soft-deactivate) was scoped for staff added by mistake with no real floor history, gated on confirming zero associated `Submission` rows first. Discovery found `Submission.aadObjectId`/`userPrincipalName` are hardcoded literals for every submission regardless of login method — no submission today is attributable to any specific user, PIN or M365 — so a "zero history" check cannot be built reliably without first fixing that deeper identity-stamping gap. Descoped; see `AUDIT_REPORT.md` for the full finding. Soft-deactivate remains the only way to remove a PIN login.
 
 ---
 
@@ -90,6 +92,7 @@ Every mutating backend route is gated by `requireRole(...)`/`requireGroup(...)` 
 | `POST /api/amendments/:id/reject` | Group A/B |
 | `GET /api/pin-users`, `POST /api/pin-users`, `PATCH /api/pin-users/:id/deactivate` | Group A/B |
 | `POST /api/auth/pin-login` | Ungated — this *is* the login step |
+| `POST /api/auth/pin-change` | Ungated — the correct current PIN *is* the identity check (§3.2) |
 | All `GET` routes (`/api/health`, `/api/config`, `/api/submissions`) and `POST /api/verdict/preview` | Ungated — non-mutating |
 
 Missing header → `401`. Header present but not a recognized role string → `401`. Recognized role outside the route's allow-list → `403`.

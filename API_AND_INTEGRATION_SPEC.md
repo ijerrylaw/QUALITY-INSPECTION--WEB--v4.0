@@ -101,6 +101,12 @@
   * **Response:** `200` with the identity object on match, `401 { error: 'Invalid PIN' }` otherwise.
   * **Auth:** None — deliberately ungated, since this endpoint *is* the login step and there is no role to check yet.
 
+* `POST /api/auth/pin-change`
+  * **Role:** Self-service PIN change for a PIN-logged-in user. Identity is resolved server-side by scanning active `PinUser` rows and verifying `currentPin` against each hash — **never a client-passed `userId`**. On a match, validates `newPin` (exactly 6 digits, unique among active rows excluding the resolved user's own row) and updates that row's `pinHash`/`pinSalt`.
+  * **Payload:** `{ currentPin: string, newPin: string }`
+  * **Response:** `200` with the updated `PinUser` (no `pinHash`/`pinSalt`) on success. `401 { error: 'Current PIN is incorrect.' }` if `currentPin` matches no active user. `400 { error: 'New PIN must be exactly 6 digits.' }` for a malformed `newPin`. `409 { error: 'This PIN is already in use by an active user.' }` if `newPin` collides with another active user.
+  * **Auth:** None — deliberately ungated, same reasoning as `pin-login`: the correct `currentPin` *is* the identity/authorization check. Available to any PIN-logged-in user, not just Group A/B.
+
 ---
 
 ## 2. AUTHENTICATION
@@ -116,6 +122,7 @@ Full RBAC/session detail (permission groups, idle expiry, dev-gating mechanics) 
 * **PIN login — real, not mocked:**
   - `POST /api/auth/pin-login` (payload/response documented under "PIN User Administration" above) verifies against a real `PinUser` table (scrypt-hashed PINs). Restricted to the three PIN-eligible roles (`OPERATOR`/`LEADER`/`SUPERVISOR`).
   - Managed via `GET/POST /api/pin-users` and `PATCH /api/pin-users/:id/deactivate` (Group A/B only — see above).
+  - `POST /api/auth/pin-change` (documented above) lets any PIN-logged-in user change their own PIN — no Group A/B auth needed, since the correct current PIN is itself the identity check.
 
 ---
 

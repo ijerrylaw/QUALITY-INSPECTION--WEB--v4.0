@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { UserPlus, UserX, RefreshCw } from 'lucide-react';
+import { UserPlus, UserX, RefreshCw, Eye, EyeOff } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { API_BASE_URL } from '../../context/ConfigContext';
@@ -34,6 +34,9 @@ export function PinAdminPanel() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [showDeactivated, setShowDeactivated] = useState(false);
+
+  const visibleUsers = showDeactivated ? pinUsers : pinUsers.filter((pu) => pu.active);
 
   const [name, setName] = useState('');
   const [jobTitle, setJobTitle] = useState('');
@@ -181,9 +184,19 @@ export function PinAdminPanel() {
       <div className="lg:col-span-2 bg-surface border border-gray-800 rounded-xl shadow-sm overflow-hidden">
         <div className="bg-canvas border-b border-gray-800 p-6 flex items-center justify-between gap-3">
           <h3 className="text-lg font-bold text-primary uppercase">Staff Roster</h3>
-          <Button variant="secondary" className="px-4" onClick={fetchPinUsers} disabled={loading}>
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              className="px-4 gap-2"
+              onClick={() => setShowDeactivated((prev) => !prev)}
+            >
+              {showDeactivated ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              <span>{showDeactivated ? 'Hide Deactivated' : 'Show Deactivated'}</span>
+            </Button>
+            <Button variant="secondary" className="px-4" onClick={fetchPinUsers} disabled={loading}>
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -198,13 +211,20 @@ export function PinAdminPanel() {
               </tr>
             </thead>
             <tbody>
-              {pinUsers.length === 0 && !loading && (
+              {visibleUsers.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-muted">No staff PIN logins yet.</td>
+                  <td colSpan={5} className="px-6 py-8 text-center text-muted">
+                    {pinUsers.length === 0
+                      ? 'No staff PIN logins yet.'
+                      : 'No active staff. Toggle "Show Deactivated" to view deactivated staff.'}
+                  </td>
                 </tr>
               )}
-              {pinUsers.map((pu) => (
-                <tr key={pu.id} className="border-b border-gray-800/60 last:border-0">
+              {visibleUsers.map((pu) => (
+                <tr
+                  key={pu.id}
+                  className={`border-b border-gray-800/60 last:border-0 ${!pu.active ? 'opacity-50' : ''}`}
+                >
                   <td className="px-6 py-3 text-primary font-medium">{pu.name}</td>
                   <td className="px-6 py-3 text-muted">{pu.jobTitle}</td>
                   <td className="px-6 py-3 text-muted font-mono text-xs uppercase">{pu.role}</td>
