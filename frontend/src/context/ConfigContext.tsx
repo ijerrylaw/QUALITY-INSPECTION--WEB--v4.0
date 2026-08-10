@@ -258,12 +258,33 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const fetchConfig = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/config`);
-      if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+    // Retry a few times with backoff — the backend may still be starting up
+    // (e.g. both dev servers launched together) and a single dropped request
+    // should not permanently strand the app on a null config.
+    const RETRY_DELAYS_MS = [500, 1000, 2000];
+    let lastError: unknown;
+    let data: AppConfig | undefined;
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/config`);
+        if (!response.ok) {
+          throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+        }
+        data = (await response.json()) as AppConfig;
+        lastError = undefined;
+        break;
+      } catch (err) {
+        lastError = err;
+        if (attempt < RETRY_DELAYS_MS.length) {
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+        }
       }
-      const data = (await response.json()) as AppConfig;
+    }
+
+    try {
+      if (lastError !== undefined || !data) {
+        throw lastError instanceof Error ? lastError : new Error(String(lastError));
+      }
 
       // If the backend has no profiles configured yet, inject the built-in
       // default profile so the wizard dropdown is never empty.
