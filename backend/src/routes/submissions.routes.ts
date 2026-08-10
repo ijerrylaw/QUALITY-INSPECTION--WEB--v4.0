@@ -11,7 +11,9 @@
  *      3. Persist the final Submission record (including verdict) to SQLite via Prisma.
  *
  *  GET  /api/submissions
- *    Returns the 50 most recent submissions, ordered by creation date descending.
+ *    Returns a page of submissions ordered by creation date descending (see
+ *    query params on the handler below). Defaults to page 1 / 50 rows when
+ *    called with no params, matching this endpoint's original behavior.
  *
  *  GET  /api/submissions/:id
  *    Returns a single submission with its amendment logs. `profileId` is an
@@ -257,20 +259,52 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /api/submissions  (list — most recent 50)
+// GET /api/submissions  (paginated list, most recent first)
 // ─────────────────────────────────────────────────────────────────────────────
 
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 200;
+
 /**
- * Returns the 50 most recent submissions ordered by creation date descending.
+ * Returns a page of submissions ordered by creation date descending.
+ *
+ * Query params (both optional, defensively parsed — an invalid/missing value
+ * falls back to its default rather than erroring, so a caller with no params
+ * at all keeps behaving exactly as this endpoint always has: page 1, 50 rows):
+ *   page  — 1-based page number. Default 1.
+ *   limit — rows per page. Default 50, clamped to a max of 200 (a per-page
+ *           size guard, not a reintroduction of the old hard ceiling — every
+ *           row remains reachable via `page`).
+ *
+ * `id` is folded in as a secondary sort key alongside `createdAt` because
+ * SQLite's DateTime has finite resolution — two rows created in the same
+ * instant would otherwise tie nondeterministically across page boundaries.
  */
-router.get('/', async (_req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
-    const submissions = await prisma.submission.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-      include: { amendmentLogs: true },
-    });
-    res.status(200).json({ submissions, count: submissions.length });
+    const parsedPage = Number(req.query['page']);
+    const page = Number.isInteger(parsedPage) && parsedPage >= 1 ? parsedPage : 1;
+
+    const parsedLimit = Number(req.query['limit']);
+    const limit = Number.isInteger(parsedLimit) && parsedLimit >= 1
+      ? Math.min(parsedLimit, MAX_PAGE_SIZE)
+      : DEFAULT_PAGE_SIZE;
+
+    const skip = (page - 1) * limit;
+
+    const [submissions, totalCount] = await Promise.all([
+      prisma.submission.findMany({
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: limit,
+        include: { amendmentLogs: true },
+      }),
+      prisma.submission.count(),
+    ]);
+
+    const hasMore = skip + submissions.length < totalCount;
+
+    res.status(200).json({ submissions, count: submissions.length, page, limit, totalCount, hasMore });
   } catch (err) {
     console.error('[GET /api/submissions]', err);
     res.status(500).json({ error: 'Internal server error', details: String(err) });

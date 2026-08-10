@@ -123,8 +123,9 @@ export function WizardPage() {
   }, []);
 
   // ── Pre-fill wizard from an existing submission when in amendment mode ────
-  // Fetches the full submissions list, finds the matching record by ID, and
-  // maps the Submission shape → wizard inspectionData shape.
+  // Fetches the single target record by ID directly — independent of however
+  // many submissions exist or how old this one is — and maps the Submission
+  // shape → wizard inspectionData shape.
   useEffect(() => {
     if (!amendId) return;
     // Wait for AppConfig — resolving which defect ids belong to N/A-mode
@@ -132,15 +133,25 @@ export function WizardPage() {
     if (!config) return;
     setIsLoadingAmendment(true);
 
-    fetch(`${API_BASE_URL}/api/submissions`)
-      .then((res) => res.json())
-      .then((data) => {
-        const submissions: any[] = data.submissions || [];
-        const target = submissions.find((s) => s.id === amendId);
-        if (!target) {
+    fetch(`${API_BASE_URL}/api/submissions/${amendId}`)
+      .then(async (res) => {
+        if (res.status === 404) {
           addToast('error', `Amendment target record "${amendId}" not found.`);
-          return;
+          return null;
         }
+        if (!res.ok) {
+          let errStr = res.statusText;
+          try {
+            const errJson = await res.json();
+            errStr = errJson?.error ?? errStr;
+          } catch (_) {}
+          throw new Error(`Server responded ${res.status}: ${errStr}`);
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (!data) return;
+        const target = data.submission;
 
         const rawDefects     = safeParseJSON<Record<string, number>>(target.defects, {});
         const dimensions     = safeParseJSON<Record<string, any>>(target.dimensions, {});

@@ -639,33 +639,60 @@ function DefectBreakdownPanel({
 
 // ── HistoryFeed ───────────────────────────────────────────────────────────────
 
+const PAGE_SIZE = 50;
+
 export function HistoryFeed() {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
 
-  const fetchSubmissions = useCallback(() => {
-    setLoading(true);
-    fetch(`${API_BASE_URL}/api/submissions`)
+  // Fetches one page (`replace: false`, appended + de-duped by id — used by
+  // "Load More") or re-fetches the full depth already loaded and replaces
+  // the array outright (`replace: true` — used on mount and window focus,
+  // so tabbing back in doesn't silently truncate a deeply-paged view back
+  // down to PAGE_SIZE rows).
+  const loadPage = useCallback((pageNum: number, options: { replace: boolean }) => {
+    const limit = options.replace ? pageNum * PAGE_SIZE : PAGE_SIZE;
+    const fetchPage = options.replace ? 1 : pageNum;
+    if (options.replace) setLoading(true); else setLoadingMore(true);
+
+    fetch(`${API_BASE_URL}/api/submissions?page=${fetchPage}&limit=${limit}`)
       .then((res) => res.json())
       .then((data) => {
-        setSubmissions(data.submissions || []);
-        setLoading(false);
+        const incoming: Submission[] = data.submissions || [];
+        if (options.replace) {
+          setSubmissions(incoming);
+        } else {
+          setSubmissions((prev) => {
+            const existingIds = new Set(prev.map((s) => s.id));
+            return [...prev, ...incoming.filter((s) => !existingIds.has(s.id))];
+          });
+        }
+        setPage(pageNum);
+        setHasMore(Boolean(data.hasMore));
       })
       .catch((err) => {
         console.error('Failed to fetch history:', err);
-        setLoading(false);
+      })
+      .finally(() => {
+        if (options.replace) setLoading(false); else setLoadingMore(false);
       });
   }, []);
 
-  useEffect(() => { fetchSubmissions(); }, [fetchSubmissions]);
+  useEffect(() => { loadPage(1, { replace: true }); }, [loadPage]);
 
   useEffect(() => {
-    window.addEventListener('focus', fetchSubmissions);
-    return () => window.removeEventListener('focus', fetchSubmissions);
-  }, [fetchSubmissions]);
+    const handleFocus = () => loadPage(page, { replace: true });
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [loadPage, page]);
+
+  const handleLoadMore = () => loadPage(page + 1, { replace: false });
 
   const filteredSubmissions = useMemo(() => {
     const query = searchTerm.toLowerCase();
@@ -870,6 +897,14 @@ export function HistoryFeed() {
           </tbody>
         </table>
       </div>
+
+      {!loading && hasMore && (
+        <div className="flex justify-center pt-2">
+          <Button variant="secondary" onClick={handleLoadMore} disabled={loadingMore} className="px-8">
+            {loadingMore ? 'LOADING…' : 'LOAD MORE'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

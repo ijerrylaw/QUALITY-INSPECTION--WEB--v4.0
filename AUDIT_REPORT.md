@@ -3237,3 +3237,81 @@ confirmation modal rendered with the correct profile name and warning
 text, clicked CONFIRM DELETE, clicked SAVE CONFIGURATION, then confirmed
 via `GET /api/config` that the profile count returned to 4 with the test
 profile genuinely gone and the other 4 real profiles untouched.
+
+## 14. Inspection Records 50-Row Cap + Amendment Lookup Fix
+
+`GET /api/submissions` was hardcoded to `orderBy: createdAt desc, take: 50`
+with no query params — any submission beyond the 50 most recent was
+permanently unreachable (not merely unpaginated). `HistoryFeed.tsx`
+(Inspection Records) fetched that endpoint once and never paged further.
+`WizardPage.tsx`'s amendment-prefill effect re-fetched the same capped
+endpoint and did a client-side `.find(s => s.id === amendId)` instead of
+calling the already-existing `GET /api/submissions/:id` — meaning a
+submission older than the 50 most recent could not be amended either,
+even though the single-record endpoint that would have fixed this
+directly already existed and was unused for this purpose.
+
+**Fix — `backend/src/routes/submissions.routes.ts`:** added `page`
+(default 1) / `limit` (default 50, clamped to a max of 200 per-page —
+not a reintroduction of the old ceiling, since every row remains
+reachable via `page`) query params, both defensively parsed so a
+zero-param call behaves exactly as before. Added `id` as a secondary
+sort key (`orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]`) since
+SQLite's `DateTime` has finite resolution and same-instant rows would
+otherwise tie nondeterministically across page boundaries. Response is
+additive: `{ submissions, count, page, limit, totalCount, hasMore }` —
+`count` keeps its old meaning ("rows in this page").
+
+**Fix — `frontend/src/pages/WizardPage.tsx`:** amendment-prefill now
+calls `GET /api/submissions/${amendId}` directly (`{ submission }`
+singular) instead of searching the capped list, with an explicit
+`res.status === 404` branch before parsing JSON. Independent of the
+pagination change — works for a record of any age regardless of
+whether it's in a currently-loaded page.
+
+**Fix — `frontend/src/components/history/HistoryFeed.tsx`:** added a
+"Load More" button (no existing pagination pattern anywhere in this app
+to match, so this is the first) backed by `page`/`hasMore`/`loadingMore`
+state and a `loadPage(pageNum, { replace })` fetcher that appends
+de-duped-by-`id` pages, or replaces outright on initial load and
+window-focus refetch. Window-focus refetch re-fetches the full depth
+currently loaded (`page * limit` in one request) rather than resetting
+to page 1, so tabbing back in doesn't silently truncate a deeply-paged
+view — an accepted trade-off (payload grows with how deep a session has
+paged) rather than a silent design pick.
+
+**Live verification:** seeded 35 additional `Submission` rows (tagged
+`aadObjectId: 'test-seed-verification'` for unambiguous cleanup) to push
+past the old 50-row ceiling, with one deliberately backdated to be the
+global oldest (`batchNumber: 'TEST-OLDEST-VERIFY-001'`). Confirmed via
+direct HTTP: `?page=1&limit=50` excludes it, `?page=2&limit=50` surfaces
+it with `hasMore:false`; `GET /api/submissions/<its id>` returns it
+directly. In-browser: logged in, opened Inspection Records, clicked
+LOAD MORE, found the row, expanded it, clicked AMEND RECORD — wizard
+opened in Amendment Mode with the correct lot number and all fields
+pre-filled, no crash. Deleted all `test-seed-verification`-tagged rows
+afterward and confirmed the exact documented baseline (19 submissions,
+0 amendment logs) via both a direct Prisma count and a live
+`GET /api/submissions` call.
+
+**Out-of-scope finding (not fixed this turn):** while investigating,
+confirmed `GET /api/amendments/pending`
+(`submissions.routes.ts`, `amendmentsRouter.get('/pending', ...)`) has
+no pagination or row limit at all — it fetches every
+`PENDING_APPROVAL` submission unbounded (the nested `amendmentLogs`
+include's `take: 1` only limits logs-per-submission, not the submission
+list itself). Different shape of the same underlying class of issue as
+the list endpoint fixed above, but a separate route backing the
+Approvals Queue screen, and wasn't part of what was asked this turn.
+
+**Verification artifact note:** the first seeding attempt used bare
+`'08:00'`/`'2026-01-01'` for `productionDate`/`samplingTime`, which
+crashed the wizard (`RangeError: Invalid time value`) when opened for
+amendment. Confirmed via a real submission's actual stored values that
+production data always uses full ISO 8601 datetime strings for both
+fields (the schema's `// HH:MM string` / `// ISO date string` comments
+are stale — see `schema.prisma:29-31`) — not a real app bug, an artifact
+of unrealistic synthetic seed data. Reseeded with full ISO datetimes and
+the crash did not reproduce. Flagging only because the stale schema
+comments could mislead a future session into generating the same bad
+test data.
