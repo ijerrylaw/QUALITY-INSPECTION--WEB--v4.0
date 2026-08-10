@@ -3315,3 +3315,91 @@ of unrealistic synthetic seed data. Reseeded with full ISO datetimes and
 the crash did not reproduce. Flagging only because the stale schema
 comments could mislead a future session into generating the same bad
 test data.
+
+## 15. Unified Lot Number Composition, Editable Production Date, Uniqueness Enforcement
+
+Confirmed via discovery: "Full System Lot Number" (`Submission.batchNumber`)
+had two independent, incompatible generators — `StepMetadata.tsx` (Single
+Entry) built `[Line][Side][YJJJ][Sequence]`; `BatchEntry.tsx` built a
+completely different `[Line][YYMMDD][Sequence]`, silently dropping `side`
+entirely despite tracking it per row. `BatchEntry.tsx` also called an unused
+second generator (`generateJulianLotNo()`) purely for a decorative "LOT
+(YJJJ)" preview box that never matched what was actually submitted, and
+hardcoded `shift: 'Shift 1'` in its POST payload regardless of the actual
+date/time entered. Nothing anywhere enforced uniqueness — dev.db had
+accumulated the same lot number 7× and 6× by accident. `ISO2859_MATH_ENGINE.md`
+§4 documented a third, wrong formula (mislabeled "Machine" instead of "Side").
+The lot number is not invented by this app — it must match what the
+company's ERP separately registers for the same physical lot; the app's job
+is to let the operator record the correct number (validated for format and
+uniqueness), not compute or guess it.
+
+**Fix:** Created `frontend/src/utils/lotNumber.ts` — the first non-component
+util module in this app — sharing the shift-resolution (incl. night-shift
+rollover), YJJJ composition, and full-lot-number composition logic between
+both wizards, so they can no longer drift into incompatible formats.
+`BatchEntry.tsx`'s two generators were deleted entirely and all 4 call sites
+(grid column, modal header, shared-metadata preview, submit payload) now use
+the shared util, correctly incorporating each row's own `side`; its submit
+payload's `shift` field now uses the real resolved shift instead of the
+`'Shift 1'` placeholder, and its production date now feeds a real shift
+readout (previously the "DATE / SHIFT" field showed no shift at all).
+Sequence No lost its auto-default (`'001'` in `StepMetadata.tsx`) and its
+auto-increment (`BatchEntry.tsx`'s `handleAddRow`) — it's now a required,
+purely operator-entered field in both wizards, per an explicit business
+decision: auto-incrementing would capture submission order, not true
+production order, since operators routinely consolidate multi-lot test
+results out of production order. A non-binding "suggested next sequence"
+hint (max existing sequence + 1 for the same Line+Side+YJJJ group, confirmed
+with Jerry over the alternative of showing the raw last-recorded value) is
+shown next to the field in both wizards, backed by a new
+`GET /api/submissions/sequence-hint` endpoint — advisory only, never
+pre-fills or restricts.
+
+**Server-side validation:** `POST /api/submissions` now rejects a colliding
+`batchNumber` with `409 { error: 'This lot number already exists.' }` via a
+pre-insert check, with a `P2002`-catch backstop around the actual `create()`
+call for the race-condition case the pre-check can't close atomically. The
+same protection was added to the amendment-approve transaction, since an
+amendment can also change `batchNumber` to a colliding value. `Submission.
+batchNumber` gained `@unique` in `schema.prisma` as the authoritative DB-level
+backstop behind both app-level checks.
+
+**Dev.db cleanup (required before the `@unique` push could succeed):** all 19
+existing submissions were confirmed disposable test data. For each of the 3
+duplicate groups, kept the oldest row (earliest `createdAt`) and deleted the
+rest — no attempt to renumber into a fake sequence, per instruction. Verified
+none of the deleted rows had `AmendmentLog` children before deleting (none
+did — baseline was 0 amendment logs). **19 → 6 submissions** after cleanup;
+this is the new baseline going into future sessions, not restored to 19.
+`prisma db push --accept-data-loss` required explicit user consent per
+Prisma's own AI-agent safety gate (it detected the invoking agent and
+refused to run without a fresh, explicit confirmation) — consent was
+obtained before running.
+
+**MDs corrected:** `ISO2859_MATH_ENGINE.md` §4's formula fixed to
+`[Line] + [Side] + [YJJJ] + [Sequence]` (was `[Line] + [Machine] + ...`), with
+notes on the editable production date, the ERP-matching design intent, the
+no-auto-increment Sequence decision, and the shared composition module.
+`DATA_SCHEMAS_AND_TYPES.md`'s `batchNumber` comment updated to match, and its
+`productionDate`/`samplingTime` comments corrected from the stale
+date-only/`"HH:MM"` shapes to the real full-ISO-8601-datetime shape — closing
+out the flag raised earlier in this same document (§14's "Verification
+artifact note").
+
+**Out-of-scope, flagged not fixed:** `test_post.js`'s hardcoded
+`batchNumber: 'K-L01-26214-A'` is confirmed as the origin of that specific
+duplicate group (3 identical POSTs). It's not referenced by any npm script or
+launch config — inert, standalone manual tooling — but its hardcoded value no
+longer matches the real `[Line][Side][YJJJ][Sequence]` format either way.
+Left as-is; a candidate for either deletion or updating in a future session.
+
+**Live verification:** confirmed Single Entry and Batch Entry produce
+byte-identical `batchNumber` formatting for equivalent Line/Side/date/sequence
+inputs; confirmed a duplicate submission is rejected with the clear 409
+message end-to-end (backend → `WizardPage.tsx`'s now-cleaned-up error
+surfacing → toast); confirmed the sequence hint reflects the correct
+suggested-next value for a real post-cleanup Line/Side/date group; confirmed
+editing the production date in both wizards updates the YJJJ component and
+the displayed shift correctly, including across the existing night-rollover
+boundary.

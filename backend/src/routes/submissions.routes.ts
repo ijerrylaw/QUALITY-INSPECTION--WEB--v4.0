@@ -8,12 +8,20 @@
  *    Full inspection submission flow:
  *      1. Validate incoming payload against Submission schema fields.
  *      2. Resolve InspectionProfile + evaluate verdict via resolveVerdict() (engine/resolveVerdict.ts).
- *      3. Persist the final Submission record (including verdict) to SQLite via Prisma.
+ *      3. Reject with 409 if `batchNumber` (the Full System Lot Number) already
+ *         exists — this app records the operator-entered lot number, it never
+ *         invents one (ISO2859_MATH_ENGINE.md §4), so a collision means the
+ *         same physical lot was recorded twice.
+ *      4. Persist the final Submission record (including verdict) to SQLite via Prisma.
  *
  *  GET  /api/submissions
  *    Returns a page of submissions ordered by creation date descending (see
  *    query params on the handler below). Defaults to page 1 / 50 rows when
  *    called with no params, matching this endpoint's original behavior.
+ *
+ *  GET  /api/submissions/sequence-hint
+ *    Non-binding advisory: suggested next Sequence No for a Line+Side+YJJJ
+ *    group. Never restricts or pre-fills — see ISO2859_MATH_ENGINE.md §4.
  *
  *  GET  /api/submissions/:id
  *    Returns a single submission with its amendment logs. `profileId` is an
@@ -87,6 +95,21 @@ function parseJSONObjectField<T = unknown>(raw: unknown): Record<string, T> {
  * absent from the array, matching resolveVerdict.ts's own hardcoded-default
  * sentinel handling.
  */
+/**
+ * True if `err` is a Prisma unique-constraint violation (code P2002) on the
+ * given column — used to translate a race-condition collision on
+ * `Submission.batchNumber` (the pre-insert findFirst check below is not
+ * atomic) into the same clean, specific error response as the pre-check.
+ */
+function isUniqueConstraintViolation(err: unknown, field: string): boolean {
+  return (
+    typeof err === 'object' && err !== null &&
+    'code' in err && (err as { code?: unknown }).code === 'P2002' &&
+    Array.isArray((err as { meta?: { target?: unknown } }).meta?.target) &&
+    ((err as { meta?: { target?: unknown[] } }).meta?.target ?? []).includes(field)
+  );
+}
+
 async function isKnownProfileId(profileId: string): Promise<boolean> {
   if (profileId === 'prof_default') return true;
   const appConfig = await prisma.appConfig.findUnique({ where: { id: '1' }, select: { inspectionProfiles: true } });
@@ -225,30 +248,52 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
       }
     }
 
-    // ── 4. Insert into Database ───────────────────────────────────────────────
-    const newSubmission = await prisma.submission.create({
-      data: {
-        productCode:         String(body['productCode']),
-        productionDate:      String(body['productionDate']),
-        samplingTime:        String(body['samplingTime']),
-        submissionTimestamp: new Date().toISOString(),
-        machineId:           String(body['machineId']),
-        shift:               String(body['shift']),
-        batchNumber:         String(body['batchNumber']),
-        size:                String(body['size']),
-        sampleSize,
-        dimensions:          JSON.stringify(body['dimensions']),
-        dimensionMins:       JSON.stringify(body['dimensionMins']),
-        defects:             JSON.stringify(defectCounts),
-        verdict,
-        aadObjectId:         String(body['aadObjectId']),
-        userPrincipalName:   String(body['userPrincipalName']),
-        amendmentStatus:     'UNMODIFIED',
-        totalCarton:  body['totalCarton'] != null ? Number(body['totalCarton']) : null,
-        gloveWeight:  body['gloveWeight']  != null ? Number(body['gloveWeight'])  : null,
-        profileId:    validDbProfileId,
-      },
-    });
+    // ── 4. Lot number uniqueness — the operator records the ERP's lot number,
+    //    this app never invents one, so a collision means either the same
+    //    physical lot was recorded twice or the Line/Side/Date/Sequence
+    //    inputs that composed it were wrong. Pre-check for a friendly error;
+    //    the DB's own @unique constraint (schema.prisma) is the atomic
+    //    backstop against a race between this check and the insert below.
+    const batchNumber = String(body['batchNumber']);
+    const existing = await prisma.submission.findFirst({ where: { batchNumber } });
+    if (existing) {
+      res.status(409).json({ error: 'This lot number already exists.', batchNumber });
+      return;
+    }
+
+    // ── 5. Insert into Database ───────────────────────────────────────────────
+    let newSubmission;
+    try {
+      newSubmission = await prisma.submission.create({
+        data: {
+          productCode:         String(body['productCode']),
+          productionDate:      String(body['productionDate']),
+          samplingTime:        String(body['samplingTime']),
+          submissionTimestamp: new Date().toISOString(),
+          machineId:           String(body['machineId']),
+          shift:               String(body['shift']),
+          batchNumber,
+          size:                String(body['size']),
+          sampleSize,
+          dimensions:          JSON.stringify(body['dimensions']),
+          dimensionMins:       JSON.stringify(body['dimensionMins']),
+          defects:             JSON.stringify(defectCounts),
+          verdict,
+          aadObjectId:         String(body['aadObjectId']),
+          userPrincipalName:   String(body['userPrincipalName']),
+          amendmentStatus:     'UNMODIFIED',
+          totalCarton:  body['totalCarton'] != null ? Number(body['totalCarton']) : null,
+          gloveWeight:  body['gloveWeight']  != null ? Number(body['gloveWeight'])  : null,
+          profileId:    validDbProfileId,
+        },
+      });
+    } catch (err) {
+      if (isUniqueConstraintViolation(err, 'batchNumber')) {
+        res.status(409).json({ error: 'This lot number already exists.', batchNumber });
+        return;
+      }
+      throw err;
+    }
 
     res.status(201).json({ submission: newSubmission, verdict, categoryResults });
 
@@ -308,6 +353,56 @@ router.get('/', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[GET /api/submissions]', err);
     res.status(500).json({ error: 'Internal server error', details: String(err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/submissions/sequence-hint  (non-binding advisory)
+// Registered BEFORE /:id — Express matches routes in order, and /:id would
+// otherwise swallow this path, treating "sequence-hint" as an id.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns the suggested next Sequence No (max existing + 1) already recorded
+ * for a given Line+Side+YJJJ group — advisory only, per ISO2859_MATH_ENGINE.md
+ * §4: Sequence has no auto-default and is never auto-incremented by this app,
+ * since it must reflect true production order, not submission order. The
+ * caller composes `${lineId}${side}${yjjj}` as the batchNumber prefix; the
+ * trailing 3 characters of each matching batchNumber are parsed as the
+ * sequence. Query params: lineId, side, yjjj (all required — missing any
+ * returns `{ suggestedNext: null }` rather than an error, since this is purely
+ * advisory).
+ */
+router.get('/sequence-hint', async (req: Request, res: Response) => {
+  try {
+    const lineId = String(req.query['lineId'] ?? '');
+    const side = String(req.query['side'] ?? '');
+    const yjjj = String(req.query['yjjj'] ?? '');
+
+    if (!lineId || !side || !yjjj) {
+      res.status(200).json({ suggestedNext: null });
+      return;
+    }
+
+    const prefix = `${lineId}${side}${yjjj}`;
+    const matches = await prisma.submission.findMany({
+      where: { machineId: lineId, batchNumber: { startsWith: prefix } },
+      select: { batchNumber: true },
+    });
+
+    let maxSeq: number | null = null;
+    for (const { batchNumber } of matches) {
+      const seqStr = batchNumber.slice(-3);
+      const seq = Number(seqStr);
+      if (Number.isInteger(seq) && (maxSeq === null || seq > maxSeq)) {
+        maxSeq = seq;
+      }
+    }
+
+    res.status(200).json({ suggestedNext: maxSeq === null ? null : maxSeq + 1 });
+  } catch (err) {
+    console.error('[GET /api/submissions/sequence-hint]', err);
+    res.status(200).json({ suggestedNext: null });
   }
 });
 
@@ -566,10 +661,26 @@ amendmentsRouter.post('/:id/approve', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN
       }
     }
 
-    // 5. Transaction: apply newValues to the Submission + mark both as APPROVED.
+    // 5. Lot number uniqueness — same invariant as POST /api/submissions.
+    //    Only relevant if this amendment actually changes batchNumber to a
+    //    value different from the submission's own current one.
+    const amendedBatchNumber = newValues['batchNumber'] != null ? String(newValues['batchNumber']) : null;
+    if (amendedBatchNumber !== null && amendedBatchNumber !== existingSubmission.batchNumber) {
+      const collision = await prisma.submission.findFirst({
+        where: { batchNumber: amendedBatchNumber, id: { not: submissionId } },
+      });
+      if (collision) {
+        res.status(409).json({ error: 'This lot number already exists.', batchNumber: amendedBatchNumber });
+        return;
+      }
+    }
+
+    // 6. Transaction: apply newValues to the Submission + mark both as APPROVED.
     //    verdict is ALWAYS the server-recomputed value — newValues.verdict is
     //    never written to the Submission, only kept for audit comparison below.
-    const [updatedSubmission, updatedLog] = await prisma.$transaction([
+    let updatedSubmission, updatedLog;
+    try {
+      [updatedSubmission, updatedLog] = await prisma.$transaction([
       prisma.submission.update({
         where: { id: submissionId },
         data: {
@@ -604,7 +715,14 @@ amendmentsRouter.post('/:id/approve', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN
           recomputedDimensionResults: JSON.stringify(recomputed.dimensionResults),
         },
       }),
-    ]);
+      ]);
+    } catch (err) {
+      if (isUniqueConstraintViolation(err, 'batchNumber')) {
+        res.status(409).json({ error: 'This lot number already exists.', batchNumber: amendedBatchNumber });
+        return;
+      }
+      throw err;
+    }
 
     if (clientSuppliedVerdict != null && clientSuppliedVerdict !== recomputed.verdict) {
       console.warn(

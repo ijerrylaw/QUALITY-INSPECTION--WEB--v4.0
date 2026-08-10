@@ -33,6 +33,12 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useConfig } from '../../context/ConfigContext';
 import {
+  resolveShiftAndEffectiveDate,
+  composeYJJJ,
+  composeFullLotNumber,
+  fetchSuggestedNextSequence,
+} from '../../utils/lotNumber';
+import {
   Activity,
   Clock,
   Box,
@@ -72,7 +78,10 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
   const [side, setSide] = useState<string>(
     initialData?.side || localStorage.getItem('wizard_side') || 'A'
   );
-  const [sequenceNo, setSequenceNo] = useState<string>(initialData?.sequenceNo || '001');
+  // No auto-default — Sequence must be genuinely operator-entered every time
+  // (auto-incrementing would capture submission order, not true production
+  // order; the business explicitly does not want that — see lotNumber.ts).
+  const [sequenceNo, setSequenceNo] = useState<string>(initialData?.sequenceNo || '');
   const [totalCarton, setTotalCarton] = useState<string>(initialData?.totalCarton?.toString() || '');
   const [sampleSize, setSampleSize] = useState<string>(
     initialData?.sampleSize?.toString() || localStorage.getItem('wizard_sampleSize') || ''
@@ -184,77 +193,11 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
   // the assembled lot string) — freezing it below avoids overwriting the real
   // original lot number with one rebuilt from wrong side/sequence defaults.
   const computedLot = useMemo(() => {
-    // --- Shift resolution from dynamic config.shifts ---
-    let currentShift = 'Off-Shift';
-    let isNightRollover = false;
+    const { effectiveDate, activeShift } = resolveShiftAndEffectiveDate(timestamp, config?.shifts);
+    const lot4Digit = composeYJJJ(effectiveDate);
+    const fullSystemLotNo = composeFullLotNumber(lineId, side, lot4Digit, sequenceNo);
 
-    if (config?.shifts && config.shifts.length > 0) {
-      const currentMinutes = timestamp.getHours() * 60 + timestamp.getMinutes();
-
-      for (const shift of config.shifts) {
-        const startMins = shift.startHour * 60 + shift.startMinute;
-        const durationMins = Math.round((shift.durationHours || 8) * 60);
-        const endMins = startMins + durationMins;
-
-        let isMatch = false;
-        if (endMins <= 1440) {
-          isMatch = currentMinutes >= startMins && currentMinutes < endMins;
-        } else {
-          // Midnight rollover (e.g. Night shift 20:00–08:00)
-          isMatch = currentMinutes >= startMins || currentMinutes < (endMins % 1440);
-        }
-
-        if (isMatch) {
-          const startStr = `${String(shift.startHour).padStart(2, '0')}:${String(shift.startMinute).padStart(2, '0')}`;
-          // Subtract 1 minute from end display per ISO2859_MATH_ENGINE.md §4
-          const actualEndMins = (endMins - 1 + 1440) % 1440;
-          const endHour = Math.floor(actualEndMins / 60);
-          const endMinute = actualEndMins % 60;
-          const endStr = `${String(endHour).padStart(2, '0')}:${String(endMinute).padStart(2, '0')}`;
-          currentShift = `${shift.name} (${startStr} - ${endStr})`;
-
-          if (endMins > 1440 && currentMinutes < (endMins % 1440)) {
-            isNightRollover = true;
-          }
-          break;
-        }
-      }
-    } else {
-      // Fallback if no shifts configured
-      const h = timestamp.getHours();
-      isNightRollover = h >= 0 && h < 8;
-      if (isNightRollover) currentShift = 'Night';
-      else if (h >= 8 && h < 20) currentShift = 'Day';
-      else currentShift = 'Night';
-    }
-
-    // Night rollover: subtract 1 day from effective production date
-    const prodDate = new Date(timestamp);
-    if (isNightRollover) prodDate.setDate(prodDate.getDate() - 1);
-
-    // --- Julian Date Compression (Day of Year) ---
-    const startOfYear = new Date(prodDate.getFullYear(), 0, 0);
-    const diff = prodDate.getTime() - startOfYear.getTime();
-    const oneDay = 1000 * 60 * 60 * 24;
-    const dayOfYear = Math.floor(diff / oneDay);
-    const julian = dayOfYear.toString().padStart(3, '0');
-
-    // 4-Digit Lot: last digit of year + 3-digit Julian (e.g. 2026 → 6 + 182 → 6182)
-    const yearDigit = prodDate.getFullYear().toString().slice(-1);
-    const generated4DigitLot = `${yearDigit}${julian}`;
-
-    // Full System Lot: [Line][Side][Lot4Digit][Sequence]
-    const safeLine = lineId || 'XXX';
-    const safeSide = side || 'A';
-    const safeSeq = sequenceNo.padStart(3, '0') || '001';
-    const fullLot = `${safeLine}${safeSide}${generated4DigitLot}${safeSeq}`;
-
-    return {
-      effectiveDate: prodDate,
-      activeShift: currentShift,
-      lot4Digit: generated4DigitLot,
-      fullSystemLotNo: fullLot,
-    };
+    return { effectiveDate, activeShift, lot4Digit, fullSystemLotNo };
   }, [timestamp, lineId, side, sequenceNo, config?.shifts]);
 
   // Freeze fullSystemLotNo from initialData (amendment prefill) until the user
@@ -280,6 +223,21 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
 
   const { effectiveDate, activeShift, lot4Digit } = computedLot;
   const fullSystemLotNo = frozenLotNo ?? computedLot.fullSystemLotNo;
+
+  // ── Sequence Hint: non-binding advisory, never pre-fills or restricts ───────
+  // "Suggested next" = (max existing sequence for this Line+Side+YJJJ group) + 1.
+  const [suggestedNextSeq, setSuggestedNextSeq] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!lineId || !side || !lot4Digit) {
+      setSuggestedNextSeq(null);
+      return;
+    }
+    fetchSuggestedNextSequence(lineId, side, lot4Digit).then((result) => {
+      if (!cancelled) setSuggestedNextSeq(result);
+    });
+    return () => { cancelled = true; };
+  }, [lineId, side, lot4Digit]);
 
   // ── Auto-save: Push all computed + local state up to parent on every change ─
   // Fires whenever any field or computed lot value changes, so WizardPage always
@@ -495,6 +453,11 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
                 placeholder="001"
                 className="w-full h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all"
               />
+              {suggestedNextSeq !== null && (
+                <div className="text-[10px] text-muted font-mono mt-1">
+                  Suggested next for {lineId}/{side}/{lot4Digit}: {String(suggestedNextSeq).padStart(3, '0')}
+                </div>
+              )}
             </div>
 
             {/* Total Carton */}

@@ -3,6 +3,12 @@ import { useConfig, API_BASE_URL } from '../../context/ConfigContext';
 import { useAuth, authHeader } from '../../context/AuthContext';
 import { useToast } from '../../components/ui/ToastProvider';
 import {
+  resolveShiftAndEffectiveDate,
+  composeYJJJ,
+  composeFullLotNumber,
+  fetchSuggestedNextSequence,
+} from '../../utils/lotNumber';
+import {
   ShieldCheck, Barcode, Scaling, Activity, Calendar,
   Hash, CheckCircle2, XCircle, Plus, ChevronRight, Ruler, AlertTriangle, Trash2
 } from 'lucide-react';
@@ -366,17 +372,19 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
 
   // --- Grid Actions ---
   const handleAddRow = () => {
-    let nextSeq = '001';
+    // Sequence No is intentionally left blank — no auto-default, no
+    // auto-increment. Auto-incrementing would capture submission order, not
+    // true production order (operators consolidate multi-lot test results
+    // out of production order routinely); the business explicitly does not
+    // want that. Side/Sample Size/Total Carton remain convenience copies from
+    // the previous row since Sequence is the only field this requirement
+    // applies to.
     let prevSampleSize = '125';
     let prevTotalCarton = '18';
     let prevSide = 'A';
 
     if (rows.length > 0) {
       const lastRow = rows[rows.length - 1];
-      const seqNum = parseInt(lastRow.sequenceNo, 10);
-      if (!isNaN(seqNum)) {
-        nextSeq = String(seqNum + 1).padStart(3, '0');
-      }
       prevSampleSize = lastRow.sampleSize;
       prevTotalCarton = lastRow.totalCarton;
       prevSide = lastRow.side;
@@ -391,7 +399,7 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
 
     const newRow: BatchLotRow = {
       id: crypto.randomUUID(),
-      sequenceNo: nextSeq,
+      sequenceNo: '',
       side: prevSide,
       totalCarton: prevTotalCarton,
       sampleSize: prevSampleSize,
@@ -408,26 +416,34 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
   // --- Detail Modal Variables ---
   const activeRow = rows.find(r => r.id === selectedRowId);
 
-  const generateLotNo = (line: string, ts: Date, seq: string) => {
-    if (!line || !ts) return '';
-    const dateObj = new Date(ts);
-    const YY = dateObj.getFullYear().toString().slice(-2);
-    const MM = (dateObj.getMonth() + 1).toString().padStart(2, '0');
-    const DD = dateObj.getDate().toString().padStart(2, '0');
-    const lineStr = line.split(' ')[0].substring(0, 4);
-    return `${lineStr}${YY}${MM}${DD}${seq || ''}`;
-  };
+  // ── Shared lot-number/shift resolution (lotNumber.ts) ─────────────────────
+  // Single shared timestamp + config.shifts → one effectiveDate/activeShift/
+  // YJJJ for the whole batch; each row then composes its own full lot number
+  // from its own `side` + `sequenceNo` via composeFullLotNumber().
+  const { effectiveDate, activeShift } = useMemo(
+    () => resolveShiftAndEffectiveDate(timestamp, config?.shifts),
+    [timestamp, config?.shifts],
+  );
+  const yjjj = useMemo(() => composeYJJJ(effectiveDate), [effectiveDate]);
 
-  const generateJulianLotNo = (ts: Date) => {
-    if (!ts) return '';
-    const dateObj = new Date(ts);
-    const Y = dateObj.getFullYear().toString().slice(-1);
-    const start = new Date(dateObj.getFullYear(), 0, 0);
-    const diff = dateObj.getTime() - start.getTime();
-    const oneDay = 1000 * 60 * 60 * 24;
-    const day = Math.floor(diff / oneDay);
-    return `${Y}${day.toString().padStart(3, '0')}`;
-  };
+  // ── Sequence Hints: non-binding advisory, never pre-fills or restricts ─────
+  // Pre-fetched once per available Side (typically 2) when Line/date changes,
+  // rather than once per row, since multiple rows commonly share a Side.
+  const [sequenceHints, setSequenceHints] = useState<Record<string, number | null>>({});
+  useEffect(() => {
+    let cancelled = false;
+    const sides = config?.sides ?? [];
+    if (!lineId || !yjjj || sides.length === 0) {
+      setSequenceHints({});
+      return;
+    }
+    Promise.all(
+      sides.map(async (s) => [s.id, await fetchSuggestedNextSequence(lineId, s.id, yjjj)] as const),
+    ).then((entries) => {
+      if (!cancelled) setSequenceHints(Object.fromEntries(entries));
+    });
+    return () => { cancelled = true; };
+  }, [lineId, yjjj, config?.sides]);
 
   const hasRealData = (r: BatchLotRow) => {
     const dimsDirty = r.dirtySlots
@@ -444,13 +460,24 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
       return;
     }
 
+    // Side and Sequence No are required for a well-formed lot number —
+    // Sequence specifically has no auto-default (see handleAddRow), so a row
+    // with real inspection data but a blank sequence must block the whole
+    // batch rather than silently submit a malformed batchNumber.
+    const incompleteRow = validRows.find((row) => !row.side || !row.sequenceNo);
+    if (incompleteRow) {
+      const rowNum = rows.findIndex((r) => r.id === incompleteRow.id) + 1;
+      addToast('error', `Lot #${rowNum} is missing its Sequence No. — required before submitting the batch.`);
+      return;
+    }
+
     const submissions = validRows.map(row => ({
       productCode,
-      productionDate: timestamp.toISOString(),
+      productionDate: effectiveDate.toISOString(),
       samplingTime: timestamp.toISOString(),
       machineId: lineId,
-      shift: 'Shift 1',
-      batchNumber: generateLotNo(lineId, timestamp, row.sequenceNo),
+      shift: activeShift,
+      batchNumber: composeFullLotNumber(lineId, row.side, yjjj, row.sequenceNo),
       size,
       sampleSize: parseInt(row.sampleSize) || 125,
       dimensions: row.dimensions,
@@ -464,34 +491,46 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
 
     try {
       const results = await Promise.allSettled(
-        submissions.map(sub => 
+        submissions.map(sub =>
           fetch(`${API_BASE_URL}/api/submissions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...authHeader(user) },
             body: JSON.stringify(sub),
-          }).then(res => {
-            if (!res.ok) throw new Error(`Server error`);
+          }).then(async (res) => {
+            if (!res.ok) {
+              let message = `Server error (${res.status})`;
+              try {
+                const errJson = await res.json();
+                message = errJson?.error ?? message;
+              } catch (_) {}
+              throw new Error(message);
+            }
             return res.json();
           })
         )
       );
 
       let successCount = 0;
+      const failureMessages: string[] = [];
       results.forEach((result, idx) => {
         if (result.status === 'fulfilled') {
           successCount++;
           updateRowField(validRows[idx].id, 'dirtySlots', {});
           updateRowField(validRows[idx].id, 'dimensions', {});
           updateRowField(validRows[idx].id, 'defects', {});
+        } else {
+          const msg = result.reason instanceof Error ? result.reason.message : 'Unknown error';
+          const rowNum = rows.findIndex((r) => r.id === validRows[idx].id) + 1;
+          failureMessages.push(`Lot #${rowNum}: ${msg}`);
         }
       });
 
       if (successCount === validRows.length) {
         addToast('success', `Successfully submitted ${successCount} lots.`);
       } else if (successCount > 0) {
-        addToast('info', `Submitted ${successCount} lots. Some failed.`);
+        addToast('info', `Submitted ${successCount} lots. Failed: ${failureMessages.join('; ')}`);
       } else {
-        addToast('error', 'Failed to submit batch.');
+        addToast('error', `Failed to submit batch: ${failureMessages.join('; ')}`);
       }
     } catch (err) {
       console.error(err);
@@ -594,6 +633,10 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
               onChange={(e) => { if (e.target.value) setTimestamp(new Date(e.target.value)); }}
               className="w-full h-9 bg-canvas border border-gray-700 rounded-lg text-sm text-primary font-mono px-2 outline-none focus:border-brand-secondary [color-scheme:dark]"
             />
+            <div className="text-xs font-mono text-primary mt-1 flex items-center gap-1.5">
+              <div className={`w-1.5 h-1.5 rounded-full ${activeShift === 'Off-Shift' ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+              {activeShift}
+            </div>
           </div>
 
           <div className="space-y-1.5">
@@ -601,7 +644,7 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
               <Hash className="w-3 h-3" /> LOT (YJJJ)
             </label>
             <div className="w-full h-9 bg-surface-light/50 border border-transparent rounded-lg px-2 flex items-center text-sm font-mono text-brand-secondary font-bold cursor-not-allowed opacity-80">
-              {generateJulianLotNo(timestamp)}
+              {yjjj}
             </div>
           </div>
 
@@ -645,8 +688,9 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
                 const dimsHasData = row.dirtySlots ? Object.values(row.dirtySlots).some(slots => slots.some(isDirty => isDirty)) : false;
                 const defsHasData = Object.values(row.defects).some(v => v > 0);
                 const hasData = dimsHasData || defsHasData;
-                const lotNumber = generateLotNo(lineId, timestamp, row.sequenceNo);
-                
+                const lotNumber = composeFullLotNumber(lineId, row.side, yjjj, row.sequenceNo);
+                const rowHint = sequenceHints[row.side];
+
                 return (
                   <tr key={row.id} className="border-b border-gray-800/50 hover:bg-surface-light group">
                     <td className="py-2 px-3 text-center text-xs font-mono text-muted">{index + 1}</td>
@@ -659,6 +703,11 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
                         onBlur={(e) => updateRowField(row.id, 'sequenceNo', e.target.value.padStart(3, '0'))}
                         className="w-16 h-8 px-2 bg-canvas border border-gray-700 rounded text-sm text-primary font-mono focus:border-brand-secondary outline-none"
                       />
+                      {rowHint !== null && rowHint !== undefined && (
+                        <div className="text-[9px] font-mono text-muted leading-none mt-0.5 whitespace-nowrap">
+                          next: {String(rowHint).padStart(3, '0')}
+                        </div>
+                      )}
                     </td>
                     <td className="py-2 px-3">
                       <select
@@ -764,7 +813,7 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
                     {productCode} {size ? `- ${size}` : ''}
                   </span>
                   <span className="text-brand-secondary text-sm font-mono uppercase font-bold tracking-widest">
-                    {generateLotNo(lineId, timestamp, activeRow.sequenceNo)}
+                    {composeFullLotNumber(lineId, activeRow.side, yjjj, activeRow.sequenceNo)}
                   </span>
                 </div>
               </div>

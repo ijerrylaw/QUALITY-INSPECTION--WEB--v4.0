@@ -26,12 +26,29 @@ model Submission {
 
   // --- Batch / Product Metadata ---
   productCode         String
-  productionDate      String          // ISO date string, e.g. '2025-02-01'
-  samplingTime        String          // HH:MM string recorded at time of inspection
+  /// Full ISO 8601 datetime string (e.g. '2026-08-06T10:17:38.379Z') — the
+  /// operator-editable effective production date/time used to derive the
+  /// lot number's YJJJ component (ISO2859_MATH_ENGINE.md §4), NOT a bare
+  /// date-only string despite the field name.
+  productionDate      String
+  /// Full ISO 8601 datetime string, same shape as productionDate — NOT a
+  /// bare "HH:MM" string despite the field name. Usually equal to
+  /// productionDate; can differ when the operator edits one without the
+  /// other (e.g. amendment mode).
+  samplingTime        String
   submissionTimestamp String          // ISO 8601 with ms precision, set by server
   machineId           String
   shift               String
-  batchNumber         String
+  /// Full System Lot Number: [Line] + [Side] + [YJJJ] + [Sequence]
+  /// (ISO2859_MATH_ENGINE.md §4), e.g. 'A001Z6221007'. Composed client-side
+  /// from operator-selected Line/Side + the editable production date +
+  /// a required, operator-entered Sequence (never auto-defaulted or
+  /// auto-incremented — see StepMetadata.tsx/BatchEntry.tsx). This is NOT
+  /// invented by the app: it must match what the company's ERP separately
+  /// registers for the same physical lot, so composition is a convenience,
+  /// not a guess. @unique is enforced here as the authoritative backstop
+  /// behind the app-level uniqueness check in submissions.routes.ts.
+  batchNumber         String          @unique
   size                String          // Glove size: 'XS' | 'S' | 'M' | 'L' | 'XL'
   sampleSize          Int
 

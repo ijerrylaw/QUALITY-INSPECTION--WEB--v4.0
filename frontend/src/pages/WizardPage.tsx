@@ -359,9 +359,9 @@ export function WizardPage() {
         let errStr = response.statusText;
         try {
           const errJson = await response.json();
-          errStr = JSON.stringify(errJson);
+          errStr = errJson?.error ?? JSON.stringify(errJson);
         } catch(e) {}
-        throw new Error(`Server responded ${response.status}: ${errStr}`);
+        throw new Error(errStr);
       }
 
       addToast('success', `Lot ${inspectionData.fullSystemLotNo ?? ''} submitted successfully.`);

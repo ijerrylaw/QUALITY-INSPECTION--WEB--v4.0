@@ -56,12 +56,14 @@ The evaluation function determines the final PASS/FAIL verdict by mapping record
 
 ## 4. DATE & SHIFT ALGORITHMS
 
+* **Production Date is Operator-Editable:** The production date/time is a manual-override field in both wizards (not silently locked to "today"), so operators can record backdated or cross-shift-boundary lots. All the logic below (Julian compression, night-shift rollover, shift auto-display) recomputes live from whatever date/time is currently entered.
+
 * **Julian Date Compression:** Production dates are mathematically compressed into 3-digit Julian Days (e.g., Feb 1st = `032`) for use in lot number assembly.
 
 * **Night Shift Rollover Logic:** If an inspection occurs between Midnight (`00:00`) and the start of the Morning Shift, it is assigned to Shift 'Night', and exactly 1 day is subtracted from the effective Production Date.
 
-* **Lot Number Assembly:** Fully constructs lot codes using the formula:  
-  `[Line] + [Machine] + [JulianDate] + [Sequence]` → e.g., `A001A6218001`
+* **Lot Number Assembly:** Fully constructs lot codes using the formula:
+  `[Line] + [Side] + [YJJJ] + [Sequence]` → e.g., `A001A6218001` (Line `A001` + Side `A` + YJJJ `6218` + Sequence `001`). **Note:** this lot number is not invented by the app — it must match what the company's ERP separately registers for the same physical lot. The app's job is to let the operator record the correct number (format + uniqueness validated server-side, `Submission.batchNumber @unique`), not compute/guess it. Line and Side are operator-selected from Configuration Control; Sequence is a required, operator-entered 3-digit field with **no auto-default and no auto-increment** — auto-incrementing would capture submission order, not true production order, since operators routinely consolidate multi-lot test results out of production order. A non-binding "suggested next sequence" hint (max existing sequence + 1 for the same Line+Side+YJJJ group) is shown next to the field for reference only. Single Entry (`StepMetadata.tsx`) and Batch Entry (`BatchEntry.tsx`) share one composition implementation (`frontend/src/utils/lotNumber.ts`) so the two entry paths can never drift into incompatible formats again.
 
 * **Time Auto-Formatting:** Time inputs format to 2-digit zero-padded numbers (e.g., `08:00`). Shift duration badges use 1-minute subtract formatting (e.g., `08:00 – 19:59`).
 
