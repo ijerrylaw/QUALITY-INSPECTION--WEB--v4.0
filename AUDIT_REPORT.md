@@ -3403,3 +3403,42 @@ suggested-next value for a real post-cleanup Line/Side/date group; confirmed
 editing the production date in both wizards updates the YJJJ component and
 the displayed shift correctly, including across the existing night-rollover
 boundary.
+
+---
+
+## 16. FILTER and EXPORT CSV on Inspection Records — commit `43dbbe7`
+
+*(Backfilled: this entry was missed at the time of the original commit — see
+the Staff PIN Access session's opening sanity check, which caught the gap
+before starting new work.)*
+
+Both toolbar buttons on `/history` (Inspection Records) were purely
+decorative — no `onClick` at all. The only working search was a client-side
+substring match against whatever rows happened to already be loaded in
+memory, the same page-limited gap §14's pagination fix solved for browsing;
+a search box that only searched what was already fetched, on an endpoint
+that already had a hard row cap, made both older bugs mutually reinforcing.
+
+**Fix:** `GET /api/submissions` (`backend/src/routes/submissions.routes.ts`)
+gains optional filter query params — `search`, `dateFrom`, `dateTo`,
+`verdict`, `amendmentStatus` — applied identically to both the `findMany`
+and `count()` calls so `totalCount`/`hasMore` reflect the filtered set and
+Load More keeps paginating correctly under an active filter. Fully backward
+compatible: no params behaves exactly as before. `HistoryFeed.tsx`'s search
+box moved from client-side filtering to a debounced (300ms) server-side
+query param, unified with the same mechanism as the new filters — needed so
+CSV export can honor an active search term across rows that aren't
+currently loaded, not just what's on screen. Added a new FILTER panel (date
+range, verdict, amendment status) with an active-filter count badge,
+Apply/Clear actions, and outside-click-to-close. EXPORT CSV loops the same
+filtered endpoint until exhausted (not limited to loaded/paginated rows),
+builds a properly-escaped CSV client-side, and triggers a real browser
+download, with loading/disabled state during generation and an error toast
+on failure via the existing `useToast` pattern.
+
+Chose client-side CSV generation over a dedicated backend export endpoint to
+reuse the identical filter/query logic with zero duplication — at this
+app's real data volume the extra JSON transfer overhead is a non-issue.
+
+**Files touched:** `backend/src/routes/submissions.routes.ts`,
+`frontend/src/components/history/HistoryFeed.tsx`.
