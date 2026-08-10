@@ -42,6 +42,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { Prisma } from '../../generated/prisma/client';
 import { resolveVerdict, VerdictProfileNotFoundError } from '../engine/resolveVerdict';
 import prisma from '../lib/prismaClient';
 import { requireRole, ALL_ROLES } from '../middleware/auth';
@@ -51,6 +52,10 @@ const router = Router();
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** Valid AmendmentStatus enum values (DATA_SCHEMAS_AND_TYPES.md) — used to
+ *  validate the `amendmentStatus` filter query param on GET /api/submissions. */
+const AMENDMENT_STATUSES = ['UNMODIFIED', 'AMENDMENT_DRAFTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED'] as const;
 
 /** Required string-typed fields on every incoming submission payload */
 const REQUIRED_STRING_FIELDS = [
@@ -313,17 +318,34 @@ const MAX_PAGE_SIZE = 200;
 /**
  * Returns a page of submissions ordered by creation date descending.
  *
- * Query params (both optional, defensively parsed — an invalid/missing value
- * falls back to its default rather than erroring, so a caller with no params
- * at all keeps behaving exactly as this endpoint always has: page 1, 50 rows):
- *   page  — 1-based page number. Default 1.
- *   limit — rows per page. Default 50, clamped to a max of 200 (a per-page
- *           size guard, not a reintroduction of the old hard ceiling — every
- *           row remains reachable via `page`).
+ * Query params (all optional, defensively parsed — an invalid/missing value
+ * falls back to its default or is simply ignored, so a caller with no params
+ * at all keeps behaving exactly as this endpoint always has: page 1, 50 rows,
+ * no filtering):
+ *   page   — 1-based page number. Default 1.
+ *   limit  — rows per page. Default 50, clamped to a max of 200 (a per-page
+ *            size guard, not a reintroduction of the old hard ceiling — every
+ *            row remains reachable via `page`).
+ *   search — case-insensitive substring match against `batchNumber` OR
+ *            `productCode` (SQLite's LIKE is case-insensitive for ASCII by
+ *            default). Mirrors the search box previously implemented
+ *            client-side in HistoryFeed.tsx — moved server-side so it (and
+ *            CSV export, which reuses this same endpoint) aren't limited to
+ *            whatever page happens to be loaded in memory.
+ *   dateFrom / dateTo — yyyy-mm-dd. Filters on `productionDate` (the
+ *            operator-editable, rollover-adjusted "effective production
+ *            date" — see ISO2859_MATH_ENGINE.md §4), inclusive of the full
+ *            day at each end.
+ *   verdict — 'PASSED' | 'FAILED'. Any other value is ignored.
+ *   amendmentStatus — one of AMENDMENT_STATUSES. Any other value is ignored.
  *
  * `id` is folded in as a secondary sort key alongside `createdAt` because
  * SQLite's DateTime has finite resolution — two rows created in the same
  * instant would otherwise tie nondeterministically across page boundaries.
+ *
+ * The same `where` is applied to both `findMany` and `count()` below, so
+ * `totalCount`/`hasMore` reflect the filtered set — Load More paginates
+ * correctly under an active filter instead of counting against the whole table.
  */
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -337,14 +359,44 @@ router.get('/', async (req: Request, res: Response) => {
 
     const skip = (page - 1) * limit;
 
+    const where: Prisma.SubmissionWhereInput = {};
+
+    const search = typeof req.query['search'] === 'string' ? req.query['search'].trim() : '';
+    if (search) {
+      where.OR = [
+        { batchNumber: { contains: search } },
+        { productCode: { contains: search } },
+      ];
+    }
+
+    const dateFrom = typeof req.query['dateFrom'] === 'string' ? req.query['dateFrom'] : '';
+    const dateTo = typeof req.query['dateTo'] === 'string' ? req.query['dateTo'] : '';
+    if (dateFrom || dateTo) {
+      where.productionDate = {
+        ...(dateFrom && { gte: `${dateFrom}T00:00:00.000Z` }),
+        ...(dateTo && { lte: `${dateTo}T23:59:59.999Z` }),
+      };
+    }
+
+    const verdictParam = req.query['verdict'];
+    if (verdictParam === 'PASSED' || verdictParam === 'FAILED') {
+      where.verdict = verdictParam;
+    }
+
+    const amendmentStatusParam = req.query['amendmentStatus'];
+    if (typeof amendmentStatusParam === 'string' && (AMENDMENT_STATUSES as readonly string[]).includes(amendmentStatusParam)) {
+      where.amendmentStatus = amendmentStatusParam;
+    }
+
     const [submissions, totalCount] = await Promise.all([
       prisma.submission.findMany({
+        where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip,
         take: limit,
         include: { amendmentLogs: true },
       }),
-      prisma.submission.count(),
+      prisma.submission.count({ where }),
     ]);
 
     const hasMore = skip + submissions.length < totalCount;

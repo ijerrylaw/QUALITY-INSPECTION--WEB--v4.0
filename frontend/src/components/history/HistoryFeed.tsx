@@ -10,13 +10,14 @@
  * - §5.3  Inline Informational Alert: amber border-l-4 for no-profile warning.
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Search, Filter, Download, ChevronDown, ChevronRight,
-  Edit2, ShieldCheck, AlertTriangle,
+  Edit2, ShieldCheck, AlertTriangle, X,
 } from 'lucide-react';
 import { Button } from '../ui/Button';
+import { useToast } from '../ui/ToastProvider';
 import { API_BASE_URL, useConfig } from '../../context/ConfigContext';
 
 // ── Display-only helpers ──────────────────────────────────────────────────────
@@ -637,13 +638,60 @@ function DefectBreakdownPanel({
   );
 }
 
+// ── Filters ─────────────────────────────────────────────────────────────────
+
+interface FilterState {
+  dateFrom: string;
+  dateTo: string;
+  verdict: '' | 'PASSED' | 'FAILED';
+  amendmentStatus: '' | AmendmentStatus;
+}
+
+const EMPTY_FILTERS: FilterState = { dateFrom: '', dateTo: '', verdict: '', amendmentStatus: '' };
+
+function countActiveFilters(filters: FilterState): number {
+  return Object.values(filters).filter(Boolean).length;
+}
+
+/** Escapes a value for CSV — wraps in quotes (doubling any internal quotes)
+ *  whenever it contains a comma, quote, or newline. */
+function csvEscape(value: string | number | undefined | null): string {
+  const str = value === undefined || value === null ? '' : String(value);
+  return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+}
+
+const CSV_HEADERS = [
+  'Lot Number', 'Product Code', 'Production Date', 'Time', 'Shift', 'Size',
+  'Sample Size', 'Total Carton', 'Glove Weight (g)', 'Verdict', 'Status',
+  'Defect Count', 'Inspector',
+];
+
+function submissionToCsvRow(sub: Submission): string {
+  const dateStr = (sub.productionDate || '').split('T')[0];
+  const timeStr = (sub.samplingTime || '').split('T')[1]?.substring(0, 5) || '';
+  return [
+    sub.batchNumber, sub.productCode, dateStr, timeStr, sub.shift ?? '', sub.size ?? '',
+    sub.sampleSize, sub.totalCarton ?? '', sub.gloveWeight ?? '', sub.verdict, sub.amendmentStatus,
+    sumDefects(sub.defects), sub.userPrincipalName ?? '',
+  ].map(csvEscape).join(',');
+}
+
 // ── HistoryFeed ───────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 50;
+const EXPORT_PAGE_SIZE = 200;
+const SEARCH_DEBOUNCE_MS = 300;
 
 export function HistoryFeed() {
   const navigate = useNavigate();
+  const { addToast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+  const [draftFilters, setDraftFilters] = useState<FilterState>(EMPTY_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState<FilterState>(EMPTY_FILTERS);
+  const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const filterPanelRef = useRef<HTMLDivElement>(null);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -651,17 +699,49 @@ export function HistoryFeed() {
   const [hasMore, setHasMore] = useState(true);
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
 
+  // Debounce the search box so it doesn't fire a fetch on every keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearchTerm(searchTerm), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Close the filter panel on an outside click.
+  useEffect(() => {
+    if (!isFilterPanelOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (filterPanelRef.current && !filterPanelRef.current.contains(e.target as Node)) {
+        setIsFilterPanelOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isFilterPanelOpen]);
+
+  // Builds the query string shared by the live table fetch AND CSV export —
+  // search/filters are server-side (not limited to whatever's currently
+  // loaded in memory), so both stay in sync with exactly one source of truth.
+  const buildQueryParams = useCallback((pageNum: number, limit: number) => {
+    const params = new URLSearchParams({ page: String(pageNum), limit: String(limit) });
+    if (debouncedSearchTerm) params.set('search', debouncedSearchTerm);
+    if (appliedFilters.dateFrom) params.set('dateFrom', appliedFilters.dateFrom);
+    if (appliedFilters.dateTo) params.set('dateTo', appliedFilters.dateTo);
+    if (appliedFilters.verdict) params.set('verdict', appliedFilters.verdict);
+    if (appliedFilters.amendmentStatus) params.set('amendmentStatus', appliedFilters.amendmentStatus);
+    return params;
+  }, [debouncedSearchTerm, appliedFilters]);
+
   // Fetches one page (`replace: false`, appended + de-duped by id — used by
   // "Load More") or re-fetches the full depth already loaded and replaces
-  // the array outright (`replace: true` — used on mount and window focus,
-  // so tabbing back in doesn't silently truncate a deeply-paged view back
-  // down to PAGE_SIZE rows).
+  // the array outright (`replace: true` — used on mount, window focus, and
+  // whenever search/filters change, so tabbing back in doesn't silently
+  // truncate a deeply-paged view back down to PAGE_SIZE rows).
   const loadPage = useCallback((pageNum: number, options: { replace: boolean }) => {
     const limit = options.replace ? pageNum * PAGE_SIZE : PAGE_SIZE;
     const fetchPage = options.replace ? 1 : pageNum;
     if (options.replace) setLoading(true); else setLoadingMore(true);
 
-    fetch(`${API_BASE_URL}/api/submissions?page=${fetchPage}&limit=${limit}`)
+    const params = buildQueryParams(fetchPage, limit);
+    fetch(`${API_BASE_URL}/api/submissions?${params.toString()}`)
       .then((res) => res.json())
       .then((data) => {
         const incoming: Submission[] = data.submissions || [];
@@ -682,8 +762,11 @@ export function HistoryFeed() {
       .finally(() => {
         if (options.replace) setLoading(false); else setLoadingMore(false);
       });
-  }, []);
+  }, [buildQueryParams]);
 
+  // Refetches from page 1 on mount AND whenever search/filters change —
+  // `loadPage`'s identity changes whenever `buildQueryParams` does, which
+  // this effect depends on, so no separate effect is needed for that case.
   useEffect(() => { loadPage(1, { replace: true }); }, [loadPage]);
 
   useEffect(() => {
@@ -694,16 +777,60 @@ export function HistoryFeed() {
 
   const handleLoadMore = () => loadPage(page + 1, { replace: false });
 
-  const filteredSubmissions = useMemo(() => {
-    const query = searchTerm.toLowerCase();
-    return submissions
-      .filter(
-        (sub) =>
-          (sub.batchNumber || '').toLowerCase().includes(query) ||
-          (sub.productCode || '').toLowerCase().includes(query),
-      )
-      .sort((a, b) => getSortKey(b).localeCompare(getSortKey(a)));
-  }, [submissions, searchTerm]);
+  const handleApplyFilters = () => {
+    setAppliedFilters(draftFilters);
+    setIsFilterPanelOpen(false);
+  };
+
+  const handleClearFilters = () => {
+    setDraftFilters(EMPTY_FILTERS);
+    setAppliedFilters(EMPTY_FILTERS);
+    setIsFilterPanelOpen(false);
+  };
+
+  const activeFilterCount = countActiveFilters(appliedFilters);
+
+  // Server already returns filtered rows — this is just a presentation sort.
+  const sortedSubmissions = useMemo(
+    () => [...submissions].sort((a, b) => getSortKey(b).localeCompare(getSortKey(a))),
+    [submissions],
+  );
+
+  const handleExportCsv = async () => {
+    setIsExporting(true);
+    try {
+      const rows: Submission[] = [];
+      let currentPage = 1;
+      // Loop the same filtered endpoint until exhausted — every matching
+      // row is exported, not just whatever's currently loaded on screen.
+      while (true) {
+        const params = buildQueryParams(currentPage, EXPORT_PAGE_SIZE);
+        const res = await fetch(`${API_BASE_URL}/api/submissions?${params.toString()}`);
+        if (!res.ok) throw new Error(`Server responded ${res.status}`);
+        const data = await res.json();
+        rows.push(...((data.submissions as Submission[]) || []));
+        if (!data.hasMore) break;
+        currentPage += 1;
+      }
+
+      const csv = [CSV_HEADERS.map(csvEscape).join(','), ...rows.map(submissionToCsvRow)].join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `inspection-records-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      addToast('success', `Exported ${rows.length} record${rows.length !== 1 ? 's' : ''} to CSV.`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      addToast('error', `Export failed: ${msg}`);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const handleRowClick = (id: string) => {
     setExpandedRowId((prev) => (prev === id ? null : id));
@@ -729,13 +856,98 @@ export function HistoryFeed() {
           />
         </div>
         <div className="flex items-center gap-2 w-full sm:w-auto">
-          <Button variant="secondary" className="px-4 flex items-center gap-2 w-full sm:w-auto">
-            <Filter className="w-4 h-4" strokeWidth={2} />
-            FILTER
-          </Button>
-          <Button variant="secondary" className="px-4 flex items-center gap-2 w-full sm:w-auto">
+          <div className="relative" ref={filterPanelRef}>
+            <Button
+              variant="secondary"
+              className="px-4 flex items-center gap-2 w-full sm:w-auto"
+              onClick={() => { setDraftFilters(appliedFilters); setIsFilterPanelOpen((o) => !o); }}
+            >
+              <Filter className="w-4 h-4" strokeWidth={2} />
+              FILTER
+              {activeFilterCount > 0 && (
+                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-brand-primary text-white text-[10px] font-bold leading-none">
+                  {activeFilterCount}
+                </span>
+              )}
+            </Button>
+
+            {isFilterPanelOpen && (
+              <div className="absolute right-0 sm:right-0 left-0 sm:left-auto mt-2 w-full sm:w-80 bg-surface border border-gray-700 rounded-lg shadow-lg z-20 p-4 space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted">Date From</label>
+                    <input
+                      type="date"
+                      value={draftFilters.dateFrom}
+                      onChange={(e) => setDraftFilters((f) => ({ ...f, dateFrom: e.target.value }))}
+                      className="w-full h-9 px-2 bg-canvas border border-gray-700 rounded-lg text-sm text-primary font-mono outline-none focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary [color-scheme:dark]"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted">Date To</label>
+                    <input
+                      type="date"
+                      value={draftFilters.dateTo}
+                      onChange={(e) => setDraftFilters((f) => ({ ...f, dateTo: e.target.value }))}
+                      className="w-full h-9 px-2 bg-canvas border border-gray-700 rounded-lg text-sm text-primary font-mono outline-none focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary [color-scheme:dark]"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted">Verdict</label>
+                  <select
+                    value={draftFilters.verdict}
+                    onChange={(e) => setDraftFilters((f) => ({ ...f, verdict: e.target.value as FilterState['verdict'] }))}
+                    className="w-full h-9 px-2 bg-canvas border border-gray-700 rounded-lg text-sm text-primary font-mono outline-none focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary cursor-pointer"
+                  >
+                    <option value="">All</option>
+                    <option value="PASSED">PASS</option>
+                    <option value="FAILED">FAIL</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted">Status</label>
+                  <select
+                    value={draftFilters.amendmentStatus}
+                    onChange={(e) => setDraftFilters((f) => ({ ...f, amendmentStatus: e.target.value as FilterState['amendmentStatus'] }))}
+                    className="w-full h-9 px-2 bg-canvas border border-gray-700 rounded-lg text-sm text-primary font-mono outline-none focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary cursor-pointer"
+                  >
+                    <option value="">All</option>
+                    <option value="UNMODIFIED">Original</option>
+                    <option value="AMENDMENT_DRAFTED">Drafted</option>
+                    <option value="PENDING_APPROVAL">Awaiting Approval</option>
+                    <option value="APPROVED">Amended</option>
+                    <option value="REJECTED">Rejected</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-2 border-t border-gray-800">
+                  <button
+                    type="button"
+                    onClick={handleClearFilters}
+                    className="text-xs font-semibold uppercase tracking-wider text-muted hover:text-primary transition-colors flex items-center gap-1"
+                  >
+                    <X className="w-3.5 h-3.5" strokeWidth={2} />
+                    Clear Filters
+                  </button>
+                  <Button variant="primary" className="h-9 px-4 text-xs" onClick={handleApplyFilters}>
+                    APPLY
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <Button
+            variant="secondary"
+            className="px-4 flex items-center gap-2 w-full sm:w-auto"
+            onClick={handleExportCsv}
+            disabled={isExporting}
+          >
             <Download className="w-4 h-4" strokeWidth={2} />
-            EXPORT CSV
+            {isExporting ? 'EXPORTING…' : 'EXPORT CSV'}
           </Button>
         </div>
       </div>
@@ -779,8 +991,8 @@ export function HistoryFeed() {
                   Loading inspection records...
                 </td>
               </tr>
-            ) : filteredSubmissions.length > 0 ? (
-              filteredSubmissions.flatMap((sub) => {
+            ) : sortedSubmissions.length > 0 ? (
+              sortedSubmissions.flatMap((sub) => {
                 const dateStr = (sub.productionDate || '').split('T')[0];
                 const timeStr =
                   (sub.samplingTime || '').split('T')[1]?.substring(0, 5) ||
@@ -888,8 +1100,8 @@ export function HistoryFeed() {
             ) : (
               <tr>
                 <td colSpan={10} className="py-8 text-center text-muted text-sm font-sans">
-                  {searchTerm
-                    ? `No records found matching "${searchTerm}"`
+                  {searchTerm || activeFilterCount > 0
+                    ? 'No records match your search/filters.'
                     : 'No inspection records found.'}
                 </td>
               </tr>
