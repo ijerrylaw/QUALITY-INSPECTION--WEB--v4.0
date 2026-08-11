@@ -42,7 +42,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Wand2, Table, CheckCircle2, AlertCircle, ArrowLeft, ArrowRight, ClipboardCheck, FilePen, AlertTriangle } from 'lucide-react';
 import { useConfig, API_BASE_URL } from '../context/ConfigContext';
 import type { ProductDimensionDef } from '../context/ConfigContext';
-import { useAuth, authHeader } from '../context/AuthContext';
+import { useAuth, authHeader, authIdentity } from '../context/AuthContext';
 import { useToast } from '../components/ui/ToastProvider';
 import { useWizardGuard } from '../context/WizardGuardContext';
 import { isWizardDirty } from '../utils/wizardDirty';
@@ -332,6 +332,7 @@ export function WizardPage() {
 
       const amendmentPayload = {
         reason: amendmentReason.trim(),
+        ...authIdentity(user),
         newValues: {
           productCode:         inspectionData.productCode        ?? '',
           productionDate:      inspectionData.effectiveDate      ?? new Date().toISOString(),
@@ -399,8 +400,7 @@ export function WizardPage() {
       dimensionMins:        inspectionData.dimensionStats       ?? {},
       defects:              inspectionData.defects              ?? {},
       verdict:              (inspectionData.overallVerdict ?? 'PASS') as 'PASSED' | 'FAILED',
-      aadObjectId:          'mock-user-id',       // populated by AuthContext in production
-      userPrincipalName:    'operator@oneglove.com',       // populated by AuthContext in production
+      ...authIdentity(user),
       amendmentStatus:      'UNMODIFIED' as const,
       totalCarton:          inspectionData.totalCarton,
       gloveWeight:          inspectionData.gloveWeight,
