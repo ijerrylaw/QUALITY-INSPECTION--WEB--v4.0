@@ -107,9 +107,17 @@ export function isWizardDirty({
   }
 
   // ── New-submission mode: compare against untouched-state baselines ──────
+  // sequenceNo is the only Page 1 field with no auto-population path
+  // anywhere (explicitly "never auto-defaulted" per StepMetadata.tsx).
+  // totalCarton and gloveWeight are deliberately NOT checked here even
+  // though they start blank: StepMetadata.tsx auto-fills totalCarton to
+  // '18' on first load (its own hydrate-defaults effect) and gloveWeight
+  // from the product matrix's configured weightTarget whenever
+  // productCode/size are set (also true on first load, e.g. via Retain
+  // Context) — neither transition reflects the operator having entered
+  // anything, so treating "non-blank" as "dirty" for either would false-
+  // positive on a wizard nobody has touched yet.
   if (hasFieldChanged(true, '', inspectionData?.sequenceNo ?? '')) return true;
-  if (hasFieldChanged(true, '', (inspectionData?.totalCarton ?? '').toString())) return true;
-  if (hasFieldChanged(true, '', (inspectionData?.gloveWeight ?? '').toString())) return true;
 
   const dirtySlots: Record<string, boolean[]> = inspectionData?.dimensionDirtySlots ?? {};
   if (Object.values(dirtySlots).some((slots) => slots?.some(Boolean))) return true;
