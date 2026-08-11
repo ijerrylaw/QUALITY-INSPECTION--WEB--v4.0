@@ -176,3 +176,31 @@ with its full original context, reasoning, and verification trail.
     step in project workflow notes: always run `prisma generate` after any
     `db push`, or use `prisma migrate deploy` (which auto-regenerates) in
     production workflows.
+
+17. **`ConfigContext.tsx`'s `getResolvedProfile()` defaults every category's
+    `evalMode` to `'CUMULATIVE'` whenever neither `evalMode` nor
+    `evaluationMode` is set — on ANY profile, not just the zero-usable-profile
+    case the recent fix (commit `606b5e4`) addressed.**
+    `frontend/src/context/ConfigContext.tsx:392-393`:
+    ```
+    evalMode: cat.evalMode ?? cat.evaluationMode ?? 'CUMULATIVE',
+    evaluationMode: (cat.evaluationMode ?? cat.evalMode ?? 'CUMULATIVE') as EvaluationMode,
+    ```
+    This runs for every category on every profile this function resolves,
+    including real, admin-authored profiles that simply have a category left
+    without an evalMode set (e.g. mid-edit in `QualityRules.tsx`, or a
+    category added via some path that doesn't set the field). Such a
+    category silently displays and behaves as `CUMULATIVE` — a real,
+    quantitative evaluation mode — rather than surfacing as unset/misconfigured.
+    Distinct from finding #10 (which was about the backend's and frontend's
+    two independent *hardcoded fallback profiles* disagreeing with each
+    other): this is about `getResolvedProfile()`'s category-normalization
+    step silently masking a missing field on otherwise-real profile data.
+    First flagged during the zero-usable-profile fix (see `hasUsableCategories()`'s
+    doc comment at `ConfigContext.tsx:155-158`, which already calls out that
+    callers must pass the raw profile, never this function's output, to avoid
+    exactly this masking) but not yet logged as its own finding until now.
+    Not yet scoped — needs a decision on what an unset evalMode *should* do
+    (surface as an error/warning in `QualityRules.tsx`? require the field at
+    save time? keep the default but only for the documented zero-state case?)
+    before a fix is drafted.
