@@ -5,6 +5,7 @@ import { ToastProvider } from './components/ui/ToastProvider';
 import { AuthProvider, useAuth, rolesInGroups } from './context/AuthContext';
 import type { UserRole } from './context/AuthContext';
 import { ConfigProvider } from './context/ConfigContext';
+import { WizardGuardProvider } from './context/WizardGuardContext';
 import { LoginPage } from './pages/LoginPage';
 import { WizardPage } from './pages/WizardPage';
 import { HistoryPage } from './pages/HistoryPage';
@@ -30,12 +31,14 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-canvas text-primary">
-      <Sidebar />
-      <main className="flex-1 overflow-y-scroll bg-canvas">
-        {children}
-      </main>
-    </div>
+    <WizardGuardProvider>
+      <div className="flex h-screen w-screen overflow-hidden bg-canvas text-primary">
+        <Sidebar />
+        <main className="flex-1 overflow-y-scroll bg-canvas">
+          {children}
+        </main>
+      </div>
+    </WizardGuardProvider>
   );
 }
 
