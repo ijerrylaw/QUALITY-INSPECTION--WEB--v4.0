@@ -441,6 +441,24 @@ const MAX_PAGE_SIZE = 200;
  *            day at each end.
  *   verdict — 'PASSED' | 'FAILED'. Any other value is ignored.
  *   amendmentStatus — one of AMENDMENT_STATUSES. Any other value is ignored.
+ *   lineId — exact match against `machineId` (the real column
+ *            `WizardPage.tsx` writes the operator's chosen Production Line
+ *            into — same column `sequence-hint` already filters on).
+ *   inspector — case-insensitive substring match against the submitter's
+ *            display name — `pinUser.name`, `displayName`, or
+ *            `userPrincipalName`, the same three fields in the same
+ *            fallback order `lib/identity.ts`'s `displayNameOf()` uses for
+ *            the `inspectorName` this endpoint already returns.
+ *   side — single-character match. NOT a stored column — `side` only exists
+ *            embedded inside `batchNumber` ([Line][Side][YJJJ][Sequence],
+ *            ISO2859_MATH_ENGINE.md §4). Derived the same way
+ *            `WizardPage.tsx`'s amendment-reopen logic already does:
+ *            `batchNumber.slice(machineId.length, machineId.length + 1)`,
+ *            since `machineId` is a real column holding the exact Line
+ *            prefix. Because Prisma can't express a per-row-length
+ *            substring in a `where`, this filter is applied AFTER fetching
+ *            every row matching the other filters (still server-side, just
+ *            not a native SQL predicate) — see the branch below.
  *
  * `id` is folded in as a secondary sort key alongside `createdAt` because
  * SQLite's DateTime has finite resolution — two rows created in the same
@@ -463,13 +481,19 @@ router.get('/', async (req: Request, res: Response) => {
     const skip = (page - 1) * limit;
 
     const where: Prisma.SubmissionWhereInput = {};
+    // Independent OR-blocks (search, inspector) can't both live on `where.OR`
+    // directly — the second would silently clobber the first. Collected here
+    // and merged into `where.AND` below instead.
+    const andConditions: Prisma.SubmissionWhereInput[] = [];
 
     const search = typeof req.query['search'] === 'string' ? req.query['search'].trim() : '';
     if (search) {
-      where.OR = [
-        { batchNumber: { contains: search } },
-        { productCode: { contains: search } },
-      ];
+      andConditions.push({
+        OR: [
+          { batchNumber: { contains: search } },
+          { productCode: { contains: search } },
+        ],
+      });
     }
 
     const dateFrom = typeof req.query['dateFrom'] === 'string' ? req.query['dateFrom'] : '';
@@ -491,19 +515,73 @@ router.get('/', async (req: Request, res: Response) => {
       where.amendmentStatus = amendmentStatusParam;
     }
 
-    const [submissions, totalCount] = await Promise.all([
-      prisma.submission.findMany({
+    const lineId = typeof req.query['lineId'] === 'string' ? req.query['lineId'].trim() : '';
+    if (lineId) {
+      where.machineId = lineId;
+    }
+
+    const inspector = typeof req.query['inspector'] === 'string' ? req.query['inspector'].trim() : '';
+    if (inspector) {
+      // Mirrors lib/identity.ts's displayNameOf() fallback chain exactly
+      // (pinUser.name → displayName → userPrincipalName) — otherwise a row
+      // whose only identity string is userPrincipalName (displayName null,
+      // no pinUser — e.g. legacy/sample SSO rows) would be invisible to this
+      // filter despite the table showing that same value as its Inspector.
+      andConditions.push({
+        OR: [
+          { pinUser: { name: { contains: inspector } } },
+          { displayName: { contains: inspector } },
+          { userPrincipalName: { contains: inspector } },
+        ],
+      });
+    }
+
+    if (andConditions.length > 0) {
+      where.AND = andConditions;
+    }
+
+    // `side` isn't a stored column (see the doc comment above) — Prisma can't
+    // express a per-row-length substring in a `where`, so when it's active
+    // this fetches every row matching the OTHER filters (unbounded), derives
+    // Side in JS, filters, then paginates the filtered set manually. When
+    // `side` is absent, the normal DB-level skip/take path below is
+    // untouched — no behavior change, no performance cost for the common case.
+    const sideParam = typeof req.query['side'] === 'string' ? req.query['side'].trim() : '';
+
+    let submissions;
+    let totalCount;
+
+    if (sideParam) {
+      const candidates = await prisma.submission.findMany({
         where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        skip,
-        take: limit,
         include: {
           ...SUBMISSION_IDENTITY_INCLUDE,
           amendmentLogs: { include: AMENDMENT_LOG_IDENTITY_INCLUDE },
         },
-      }),
-      prisma.submission.count({ where }),
-    ]);
+      });
+      const filtered = candidates.filter((sub) => {
+        const linePrefix = sub.machineId ?? '';
+        const derivedSide = sub.batchNumber.slice(linePrefix.length, linePrefix.length + 1);
+        return derivedSide === sideParam;
+      });
+      totalCount = filtered.length;
+      submissions = filtered.slice(skip, skip + limit);
+    } else {
+      [submissions, totalCount] = await Promise.all([
+        prisma.submission.findMany({
+          where,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip,
+          take: limit,
+          include: {
+            ...SUBMISSION_IDENTITY_INCLUDE,
+            amendmentLogs: { include: AMENDMENT_LOG_IDENTITY_INCLUDE },
+          },
+        }),
+        prisma.submission.count({ where }),
+      ]);
+    }
 
     const hasMore = skip + submissions.length < totalCount;
 

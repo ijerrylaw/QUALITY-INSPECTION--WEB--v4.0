@@ -209,6 +209,19 @@ function sumDefects(raw: Record<string, number> | string | undefined): number {
     .reduce((acc, [, n]) => acc + (Number(n) || 0), 0);
 }
 
+/**
+ * Side isn't a stored column — only embedded inside `batchNumber`
+ * ([Line][Side][YJJJ][Sequence], ISO2859_MATH_ENGINE.md §4). Mirrors the
+ * same derivation `WizardPage.tsx`'s amendment-reopen logic and the backend's
+ * `GET /api/submissions` side filter both already use: `machineId` is a real
+ * column holding the exact Line prefix, so Side is the single character
+ * right after it.
+ */
+function deriveSide(sub: Submission): string {
+  const linePrefix = sub.machineId ?? '';
+  return (sub.batchNumber ?? '').slice(linePrefix.length, linePrefix.length + 1);
+}
+
 function getSortKey(sub: Submission): string {
   const date = (sub.productionDate || '').split('T')[0];
   const time = (sub.samplingTime || '').split('T')[1]?.substring(0, 5) ?? sub.samplingTime ?? '';
@@ -645,9 +658,14 @@ interface FilterState {
   dateTo: string;
   verdict: '' | 'PASSED' | 'FAILED';
   amendmentStatus: '' | AmendmentStatus;
+  lineId: string;
+  side: string;
+  inspector: string;
 }
 
-const EMPTY_FILTERS: FilterState = { dateFrom: '', dateTo: '', verdict: '', amendmentStatus: '' };
+const EMPTY_FILTERS: FilterState = {
+  dateFrom: '', dateTo: '', verdict: '', amendmentStatus: '', lineId: '', side: '', inspector: '',
+};
 
 function countActiveFilters(filters: FilterState): number {
   return Object.values(filters).filter(Boolean).length;
@@ -661,7 +679,7 @@ function csvEscape(value: string | number | undefined | null): string {
 }
 
 const CSV_HEADERS = [
-  'Lot Number', 'Product Code', 'Production Date', 'Time', 'Shift', 'Size',
+  'Lot Number', 'Product Code', 'Production Date', 'Time', 'Line', 'Side', 'Shift', 'Size',
   'Sample Size', 'Total Carton', 'Glove Weight (g)', 'Verdict', 'Status',
   'Defect Count', 'Inspector',
 ];
@@ -670,7 +688,7 @@ function submissionToCsvRow(sub: Submission): string {
   const dateStr = (sub.productionDate || '').split('T')[0];
   const timeStr = (sub.samplingTime || '').split('T')[1]?.substring(0, 5) || '';
   return [
-    sub.batchNumber, sub.productCode, dateStr, timeStr, sub.shift ?? '', sub.size ?? '',
+    sub.batchNumber, sub.productCode, dateStr, timeStr, sub.machineId ?? '', deriveSide(sub), sub.shift ?? '', sub.size ?? '',
     sub.sampleSize, sub.totalCarton ?? '', sub.gloveWeight ?? '', sub.verdict, sub.amendmentStatus,
     sumDefects(sub.defects), sub.inspectorName ?? '',
   ].map(csvEscape).join(',');
@@ -685,6 +703,7 @@ const SEARCH_DEBOUNCE_MS = 300;
 export function HistoryFeed() {
   const navigate = useNavigate();
   const { addToast } = useToast();
+  const { config } = useConfig();
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [draftFilters, setDraftFilters] = useState<FilterState>(EMPTY_FILTERS);
@@ -727,6 +746,9 @@ export function HistoryFeed() {
     if (appliedFilters.dateTo) params.set('dateTo', appliedFilters.dateTo);
     if (appliedFilters.verdict) params.set('verdict', appliedFilters.verdict);
     if (appliedFilters.amendmentStatus) params.set('amendmentStatus', appliedFilters.amendmentStatus);
+    if (appliedFilters.lineId) params.set('lineId', appliedFilters.lineId);
+    if (appliedFilters.side) params.set('side', appliedFilters.side);
+    if (appliedFilters.inspector) params.set('inspector', appliedFilters.inspector);
     return params;
   }, [debouncedSearchTerm, appliedFilters]);
 
@@ -921,6 +943,46 @@ export function HistoryFeed() {
                     <option value="APPROVED">Amended</option>
                     <option value="REJECTED">Rejected</option>
                   </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted">Line</label>
+                    <select
+                      value={draftFilters.lineId}
+                      onChange={(e) => setDraftFilters((f) => ({ ...f, lineId: e.target.value }))}
+                      className="w-full h-9 px-2 bg-canvas border border-gray-700 rounded-lg text-sm text-primary font-mono outline-none focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary cursor-pointer"
+                    >
+                      <option value="">All</option>
+                      {(config?.lines ?? []).map((line) => (
+                        <option key={line.id} value={line.id}>{line.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted">Side</label>
+                    <select
+                      value={draftFilters.side}
+                      onChange={(e) => setDraftFilters((f) => ({ ...f, side: e.target.value }))}
+                      className="w-full h-9 px-2 bg-canvas border border-gray-700 rounded-lg text-sm text-primary font-mono outline-none focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary cursor-pointer"
+                    >
+                      <option value="">All</option>
+                      {(config?.sides ?? []).map((side) => (
+                        <option key={side.id} value={side.id}>{side.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted">Inspector</label>
+                  <input
+                    type="text"
+                    value={draftFilters.inspector}
+                    onChange={(e) => setDraftFilters((f) => ({ ...f, inspector: e.target.value }))}
+                    placeholder="Name..."
+                    className="w-full h-9 px-3 bg-canvas border border-gray-700 rounded-lg text-sm text-primary font-mono outline-none focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary"
+                  />
                 </div>
 
                 <div className="flex items-center justify-between gap-2 pt-2 border-t border-gray-800">
