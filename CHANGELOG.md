@@ -1327,6 +1327,69 @@ seeding state — mirroring the same category-eval-mode split
 `combinedDefects`/`encodeQualitative` already apply on the way out, just
 applied on the way in too.
 
+### 5.14 Amendment "Original: X" prefill/note gaps — SIDE/sequence parsing, shared change-tracking mechanism, sparse-map and raw/decoded comparison bugs
+
+**Severity: Medium. Status: FIXED and verified (live + code trace), 2026-08-11.**
+
+Follow-up to §5.5, which explicitly deferred two related items: (1) side/
+sequenceNo not being recoverable in amendment mode since they're only
+embedded in the composed batchNumber string, and (2) any resulting
+"parse it back out" work being "deferred as out of scope... better done
+deliberately, not as a side effect." This entry closes both.
+
+**Part 1 — side/sequenceNo parsing (resolves §5.5's deferred gap):**
+`WizardPage.tsx`'s amendment-fetch mapping never parsed `side`/`sequenceNo`
+back out of `batchNumber`, so both always showed placeholder defaults in
+amend mode regardless of which fields the operator changed. Fixed by
+parsing the fixed-width suffix of `batchNumber` (last 3 = sequence,
+preceding 4 = lot4Digit, preceding 1 = side), anchored by `machineId`
+(Line)'s known length — exactly the approach §5.5 pre-specified.
+Commit 8606e19.
+
+**Part 2 — shared change-tracking mechanism + sparse-map/comparison bugs:**
+Investigation of a reported "Page 1/Page 3 prefill" issue found the real
+mechanism was an inline "Original: X" note shown next to a field once
+changed during amendment — not a prefill failure. This note pattern was
+hand-copied four independent times (StepDimensions.tsx, StepMetadata.tsx
+x2, StepDefects.tsx x2), each with slightly different guard/label/
+fallback logic, with no shared comparator. Extracted into
+`utils/fieldDiff.tsx` (`hasFieldChanged` + `OriginalValueNote`), migrated
+all 4 call sites onto it. Two real bugs surfaced and fixed in the process:
+
+- **Sparse-map zero/NIL suppression**: the `defects` JSON only stores
+  keys for defects the operator actually touched — an untouched defect
+  is implicitly 0 (quantitative) or NIL (qualitative) by omission, not
+  by an explicit stored value. The old guard (`!== undefined`) treated
+  "key absent" as "no original data to compare," permanently suppressing
+  the note for any defect that started untouched. Fixed by treating
+  absence in the sparse map as its implicit default value, not as
+  missing data.
+- **Raw-vs-decoded qualitative comparison**: the qualitative note
+  compared the current decoded state (`'PASS'`/`'FAIL'`/`'NIL'`) against
+  the *raw encoded* original value (`0`/`1`/`2`) instead of the already-
+  decoded `originalData.qualitative` map — a type mismatch that could
+  never evaluate equal, so the note misfired on every unchanged
+  qualitative toggle, not just the sparse-zero case. Fixed by comparing
+  against the correct decoded map.
+
+Commits: c43e98c (shared mechanism), 35aef3f (StepDimensions.tsx,
+behavior-preserving), 0e58d6b (StepMetadata.tsx, behavior-preserving),
+656fc34 (StepDefects.tsx, both bugs fixed).
+
+**Verification:** 4 of 5 required checks verified live via a real test
+submission (lot A003A6223777) built specifically with an untouched
+defect; the qualitative-toggle check was verified by full code trace
+instead, since no profile currently configured in this environment
+defines a PASS/FAIL/NIL category — flagged separately as a test-coverage
+gap, not a defect in this fix. Typecheck clean throughout. Dev.db
+restored to baseline (14 submissions, 0 amendment logs) after test
+cleanup.
+
+**Scope note (deliberately not done here):** the "Original: X" note is
+NOT extended to the 7 Step 1 fields that never had it (profileId,
+productCode, size, lineId, side, sequenceNo, timestamp) — that's a
+coverage-expansion decision deferred to a later session, not a bug.
+
 ## 6. Step 11 — End-to-End Verification Pass (Phase 1+2 close-out)
 
 **Status: COMPLETE, 2026-08-08.** Per `cozy-wondering-volcano.md`'s
