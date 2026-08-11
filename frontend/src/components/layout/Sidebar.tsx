@@ -12,8 +12,9 @@
  */
 
 import { useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth, rolesInGroups } from '../../context/AuthContext';
+import { useWizardGuard } from '../../context/WizardGuardContext';
 import { PinChangeModal } from '../auth/PinChangeModal';
 import {
   ClipboardCheck,
@@ -27,7 +28,10 @@ import {
   PanelLeftOpen,
   Factory,
   LogOut,
-  KeyRound
+  KeyRound,
+  AlertTriangle,
+  X,
+  Check,
 } from 'lucide-react';
 
 interface SidebarItem {
@@ -62,8 +66,33 @@ export function Sidebar() {
   const { user, logout } = useAuth();
   const canChangePin = user?.loginMethod === 'PIN';
 
+  // ── Discard-unsaved-wizard-work navigation guard ─────────────────────────
+  // Only relevant when currently on /wizard with unsaved work — moving
+  // between the wizard's own internal steps never calls navigate() (see
+  // WizardPage.tsx's handleTabClick/handleNextStep/handleBackStep), so this
+  // never fires for in-wizard step changes, only for actual route changes
+  // away from /wizard triggered here.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { isWizardDirty } = useWizardGuard();
+  const [pendingTo, setPendingTo] = useState<string | null>(null);
+
+  const handleNavClick = (e: React.MouseEvent, to: string) => {
+    if (location.pathname === '/wizard' && isWizardDirty && to !== '/wizard') {
+      e.preventDefault();
+      setPendingTo(to);
+    }
+  };
+
+  const confirmDiscardAndNavigate = () => {
+    if (pendingTo) navigate(pendingTo);
+    setPendingTo(null);
+  };
+
+  const cancelDiscard = () => setPendingTo(null);
+
   // Filter items based on user role
-  const visibleItems = sidebarItems.filter(item => 
+  const visibleItems = sidebarItems.filter(item =>
     user ? item.roles.includes(user.role) : false
   );
 
@@ -119,6 +148,7 @@ export function Sidebar() {
               <NavLink
                 key={item.to}
                 to={item.to}
+                onClick={(e) => handleNavClick(e, item.to)}
                 className={({ isActive }) =>
                   `h-12 px-3.5 rounded-lg flex items-center gap-3.5 transition-all text-xs font-semibold uppercase tracking-wide outline-none relative ${
                     isActive
@@ -216,6 +246,44 @@ export function Sidebar() {
       )}
 
       <PinChangeModal open={showPinChange} onClose={() => setShowPinChange(false)} />
+
+      {/* ── Discard Unsaved Wizard Work Confirmation ────────────────────────── */}
+      {pendingTo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-canvas border border-gray-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
+            <div className="flex items-start gap-4 p-4 border-b border-gray-800">
+              <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-6 h-6 text-amber-400" strokeWidth={2} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold uppercase tracking-wide text-primary mb-1">
+                  UNSAVED CHANGES DETECTED
+                </h3>
+                <p className="text-sm text-muted">
+                  You have unsaved entries in the Quality Entry Wizard. If you navigate away now, these changes will be permanently discarded.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-surface flex items-center justify-end gap-3">
+              <button
+                onClick={cancelDiscard}
+                className="h-10 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-white font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none"
+              >
+                <X className="w-4 h-4" strokeWidth={2} />
+                <span>RETURN TO WIZARD</span>
+              </button>
+              <button
+                onClick={confirmDiscardAndNavigate}
+                className="h-10 px-5 rounded-lg bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none border border-rose-500/50 shadow-sm"
+              >
+                <Check className="w-4 h-4" strokeWidth={2} />
+                <span>DISCARD CHANGES</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
