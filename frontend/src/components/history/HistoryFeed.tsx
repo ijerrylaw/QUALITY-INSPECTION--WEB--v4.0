@@ -180,7 +180,7 @@ interface Submission {
   sampleSize: number;
   defects?: Record<string, number> | string;
   verdict: 'PASSED' | 'FAILED';
-  userPrincipalName?: string;
+  inspectorName?: string;
   amendmentStatus: AmendmentStatus;
   totalCarton?: number;
   gloveWeight?: number;
@@ -672,7 +672,7 @@ function submissionToCsvRow(sub: Submission): string {
   return [
     sub.batchNumber, sub.productCode, dateStr, timeStr, sub.shift ?? '', sub.size ?? '',
     sub.sampleSize, sub.totalCarton ?? '', sub.gloveWeight ?? '', sub.verdict, sub.amendmentStatus,
-    sumDefects(sub.defects), sub.userPrincipalName ?? '',
+    sumDefects(sub.defects), sub.inspectorName ?? '',
   ].map(csvEscape).join(',');
 }
 
@@ -1083,7 +1083,7 @@ export function HistoryFeed() {
 
                     {/* 9. INSPECTOR */}
                     <td className="py-3 px-3 border-b border-gray-700/50 text-sm text-muted max-w-[160px] truncate font-sans">
-                      {sub.userPrincipalName || '—'}
+                      {sub.inspectorName || '—'}
                     </td>
                   </tr>
                 );

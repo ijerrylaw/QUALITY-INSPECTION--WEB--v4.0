@@ -186,3 +186,30 @@ export function useAuth() {
 export function authHeader(user: User | null): Record<string, string> {
   return user ? { 'X-User-Role': user.role } : {};
 }
+
+/** The identity fragment shape the backend's resolveIdentity() (backend/src/lib/identity.ts) expects. */
+export type IdentityPayload =
+  | { loginMethod: 'PIN'; pinUserId: string }
+  | { loginMethod: 'M365'; aadObjectId: string; userPrincipalName: string; displayName: string };
+
+/**
+ * Single source of truth for the identity fragment spread into every
+ * submission/amendment write payload. Branches on `user.loginMethod` so
+ * call sites never have to know the difference between a PIN user (a real
+ * PinUser row, identified by `pinUserId`) and an M365/SSO user (free-text
+ * `aadObjectId`/`userPrincipalName`/`displayName`, since SSO users have no
+ * row in this database). Returns `{}` when there's no logged-in user, which
+ * the backend rejects with a 400 rather than writing an unattributed row.
+ */
+export function authIdentity(user: User | null): Partial<IdentityPayload> {
+  if (!user) return {};
+  if (user.loginMethod === 'PIN') {
+    return { loginMethod: 'PIN', pinUserId: user.id };
+  }
+  return {
+    loginMethod: 'M365',
+    aadObjectId: user.id,
+    userPrincipalName: user.email ?? '',
+    displayName: user.name,
+  };
+}

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { ShieldAlert, Check, X, ArrowRight, User, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { API_BASE_URL } from '../../context/ConfigContext';
-import { useAuth, authHeader } from '../../context/AuthContext';
+import { useAuth, authHeader, authIdentity } from '../../context/AuthContext';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -12,6 +12,7 @@ interface AmendmentLog {
   originalValues: string; // JSON string
   newValues: string;      // JSON string
   requestedBy: string;
+  requestedByName?: string;
   requestedAt: string;
   supervisorNote?: string;
   status: string;
@@ -59,6 +60,7 @@ export function ApprovalsQueue() {
       const res = await fetch(`${API_BASE_URL}/api/amendments/${submissionId}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeader(user) },
+        body: JSON.stringify(authIdentity(user)),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       // Refresh list after action
@@ -147,7 +149,7 @@ export function ApprovalsQueue() {
                     {amend.batchNumber || amend.id}
                   </td>
                   <td className="py-3.5 px-4 text-sm border-b border-gray-800/50 text-muted font-sans">
-                    {log?.requestedBy ?? '—'}
+                    {log?.requestedByName ?? '—'}
                   </td>
                   <td className="py-3.5 px-4 text-sm border-b border-gray-800/50 font-mono text-muted">
                     {log?.requestedAt ? new Date(log.requestedAt).toLocaleString() : '—'}
