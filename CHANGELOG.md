@@ -1567,6 +1567,100 @@ should be independently re-verified, not inherited.
 **Not yet done:** branch not merged to master. Merge decision pending
 planning-chat review.
 
+### 5.18 Real MSAL/Entra ID SSO login — msal-browser@5.18.0 popup handoff bridge
+
+**Severity: High (feature was completely non-functional — every popup
+login attempt hung forever, no workaround). Status: IMPLEMENTED and
+verified end-to-end via a real Microsoft 365 login, 2026-08-11. NOT YET
+MERGED to master — branch feat/real-msal-entra-login.**
+
+Replaced the dev-only `MOCK_M365_IDENTITIES` mock (§11, §5.17's known
+limitations) with real `@azure/msal-browser`/`@azure/msal-react` talking
+to real Entra ID, per credentials received 2026-08-10
+(NAVIGATION_AND_RBAC.md §3.1). New `M365UserRole` table maps
+`aadObjectId -> role`, auto-provisioning a `role: null` ("pending") row
+on first login rather than rejecting an unmapped user outright — a
+Group A admin assigns a real role via a new panel on `/system`. First
+real end-to-end test surfaced a second, unrelated bug below.
+
+**The bug — structural, not flaky.** After entering real credentials, a
+real MSAL popup opened, the user completed a genuine Microsoft sign-in,
+and the popup correctly landed back on the app's redirect URI with a
+real authorization code in the URL hash. From there the popup never
+closed and the opener's "Authenticating..." never resolved — on every
+single attempt, unconditionally, not intermittently. Root-caused by
+reading `node_modules/@azure/msal-browser`'s actual runtime source
+(`dist/app/PublicClientApplication.mjs`,
+`dist/interaction_client/PopupClient.mjs`,
+`dist/redirect_bridge/index.mjs`), not inferred from symptoms alone:
+
+- msal-browser v5 replaced the older approach (opener directly polls
+  `popupWindow.location.href`) with a `BroadcastChannel`-based bridge.
+  `loginPopup()` on the opener side calls `waitForBridgeResponse()`,
+  which opens a `BroadcastChannel` keyed to the request's `state` and
+  just waits for a message on it.
+- Posting that message is the job of a separate function,
+  `broadcastResponseToMainFrame()`, shipped under its own package
+  subpath export (`@azure/msal-browser/redirect-bridge`) specifically
+  for apps — like this one — whose `redirectUri` is the app's own root
+  rather than a dedicated blank landing page. Nothing in the library
+  calls this function automatically.
+- The app's `main.tsx` had no knowledge of this and unconditionally
+  booted the full React SPA on every page load, including inside the
+  popup once it navigated to the redirect URI. `handleRedirectPromise()`
+  correctly no-ops there (it's scoped to genuine full-page-redirect
+  flows and rejects the response because its embedded state says
+  `interactionType: 'popup'`, not `'redirect'`) — but nothing else ever
+  posted to the `BroadcastChannel` either. Result: the opener's promise
+  was structurally guaranteed to hang forever, on every attempt,
+  regardless of network conditions or retries — not a race condition.
+
+**The fix** (`frontend/src/main.tsx`): before the normal bootstrap
+(`msalInstance.initialize()` → `handleRedirectPromise()` → React
+render), check `BrowserUtils.isInPopup() || BrowserUtils.isInIframe()`
+(both exported from `@azure/msal-browser`, and both only return `true`
+when the current URL actually carries a response tagged with that
+interaction type — safe on normal navigation). If true, dynamically
+import `broadcastResponseToMainFrame` from
+`@azure/msal-browser/redirect-bridge` and call it instead of rendering
+the app; it posts the response to the opener's `BroadcastChannel` and
+self-closes the window. Falls through to normal bootstrap if the
+broadcast itself throws, rather than leaving the window blank. Also
+covers `acquireTokenSilent`'s hidden-iframe path (used for the
+post-login Graph `jobTitle` fetch), which hits the same redirect URI
+and would have hit the identical hang.
+
+**Verification:**
+- Confirmed the missing call by reading the library's own source before
+  writing any fix — not a guess-and-check patch.
+- Typecheck clean (backend + frontend); production build shows the new
+  `@azure/msal-browser/redirect-bridge` import correctly resolved into
+  its own code-split chunk, confirming it resolves under the real
+  bundler, not just under `tsc`.
+- Live-verified via a real Microsoft 365 login (real Tenant ID/Client
+  ID, real popup, real Microsoft account): popup closed automatically,
+  main tab correctly resolved through the full chain (Graph `jobTitle`
+  fetch → `POST /api/auth/m365-login` → role lookup) and landed on the
+  new `PendingAccessPage` with the correct real email, exactly as
+  designed for a first-time login with no role assigned yet. That
+  specific outcome is only reachable if the bridge fired correctly, so
+  it's treated as confirmation of the fix, not a lucky retry — the
+  before-state was a guaranteed, unconditional hang with no code path
+  to reach that page at all.
+- Not independently reproduced in an automated/sandboxed browser
+  (popups are blocked there outright) — the live confirmation above is
+  from the developer's real browser, not an automated check.
+- Existing PIN login path regression-tested through the real UI after
+  the `User.role: UserRole | null` type widening this feature required
+  (App.tsx, AuthContext.tsx, Sidebar.tsx) — unaffected.
+
+**Flag for future maintenance:** this fix is specific to
+`@azure/msal-browser@5.18.0`'s current popup/bridge architecture. If
+this library is ever upgraded, re-check whether the
+`BroadcastChannel`/`redirect-bridge` mechanism still works the same way
+— a future MSAL version could change or remove it, silently
+reintroducing this exact hang.
+
 ## 6. Step 11 — End-to-End Verification Pass (Phase 1+2 close-out)
 
 **Status: COMPLETE, 2026-08-08.** Per `cozy-wondering-volcano.md`'s
