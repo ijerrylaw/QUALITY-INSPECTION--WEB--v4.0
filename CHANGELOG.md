@@ -1429,6 +1429,60 @@ changed back) — DOM query confirmed exactly the 3 real changes
 highlighted and the revert correctly excluded. Dev.db restored to
 baseline (14 submissions, 0 amendment logs) after cleanup.
 
+### 5.16 Sidebar navigation guard — warn before discarding unsaved wizard changes
+
+**Severity: Feature (not a bug fix). Status: SHIPPED and verified, 2026-08-11.**
+
+Closes the amend-record improvement cluster (items 1-5 from real-usage
+feedback): sidebar navigation away from an in-progress wizard (new
+submission OR amendment) now shows a "Discard changes?" confirmation if
+the wizard is dirty, matching the "no autosave, discard-on-cancel" model
+already in place — this is purely a navigation guard, no persistence
+added.
+
+**Dirty detection:**
+- Amendment mode: reuses `hasFieldChanged` (§5.14) — dirty if any field
+  differs from `originalData`. No second comparator written.
+- New submission mode: no original to compare against, so dirty means
+  "has anything been entered beyond auto-populated defaults." Only
+  `sequenceNo` is used for this check — `totalCarton` and `gloveWeight`
+  are excluded, since both auto-populate from config/product-matrix on
+  load independent of operator action (confirmed to false-positive on a
+  genuinely untouched wizard before this exclusion — caught live during
+  verification, fixed in 0dc7ee2). If new auto-populating fields are
+  added later, they'll need the same exclusion, or this check will
+  regress to false-positiving again.
+
+**Scope boundaries:**
+- Between-step navigation within the wizard (1→2→3→4, Back/Next) never
+  triggers the guard — confirmed step navigation only sets local
+  `currentStep` state and never calls `navigate()`, so no special-casing
+  was needed.
+- A clean/untouched wizard navigates immediately with no confirmation.
+
+**Implementation:** `react-router-dom` v7's `useBlocker` isn't available
+under this app's declarative `<BrowserRouter>` router (would require
+migrating to `createBrowserRouter` — not warranted for this feature).
+Instead: a shared `WizardGuardContext` (Sidebar and WizardPage are
+siblings, not parent/child) publishes dirty state, and `Sidebar.tsx`
+intercepts nav clicks directly. No generic Modal/Dialog component exists
+in the codebase — the confirm dialog's visual shell was copied from
+`ConfigPage.tsx`'s existing nav-away-while-dirty modal (the only
+precedent found).
+
+Commits: ec1a17b (wizardDirty.ts comparator), fd26004
+(WizardGuardContext.tsx), 96345f2 (WizardPage.tsx publishes dirty state),
+79fb7de (App.tsx provider wiring), 4d37eaf (Sidebar.tsx interception +
+dialog), 0dc7ee2 (bug fix — exclude auto-populated fields from new-entry
+dirty check).
+
+**Verification:** all live browser + DOM state inspection, both modes
+(clean/dirty × Cancel/Confirm), plus confirmed within-wizard step
+navigation never triggers the guard while dirty. No test submissions or
+amendment logs were created during this pass (all scenarios ended in
+Cancel or pre-submit Discard) — dev.db confirmed unchanged at baseline
+(14 submissions, 0 amendment logs) throughout.
+
 ## 6. Step 11 — End-to-End Verification Pass (Phase 1+2 close-out)
 
 **Status: COMPLETE, 2026-08-08.** Per `cozy-wondering-volcano.md`'s
