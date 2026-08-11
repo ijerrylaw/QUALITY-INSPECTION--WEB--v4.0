@@ -37,9 +37,11 @@ import {
 import { useToast } from '../../components/ui/ToastProvider';
 import { useConfig, API_BASE_URL } from '../../context/ConfigContext';
 import type { AQLCategory } from '../../context/ConfigContext';
+import { SubmissionSummary } from './SubmissionSummary';
 
 export interface StepReviewSubmitProps {
   inspectionData: Record<string, any>;
+  originalData?: Record<string, any> | null;
   onSubmit: (retainContext: boolean) => void;
   onBack: () => void;
   onUpdate?: (partial: Record<string, any>) => void;
@@ -111,7 +113,7 @@ interface CategoryVerdictRow {
 // COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function StepReviewSubmit({ inspectionData, onSubmit, onUpdate }: StepReviewSubmitProps) {
+export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpdate }: StepReviewSubmitProps) {
   const { addToast } = useToast();
   const { getResolvedProfile } = useConfig();
 
@@ -238,6 +240,9 @@ export function StepReviewSubmit({ inspectionData, onSubmit, onUpdate }: StepRev
 
   return (
     <form id="wizard-step-form" onSubmit={handleSubmit} className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+
+      {/* ── Pre-Submit Summary — additive, sits above the existing review content ── */}
+      <SubmissionSummary inspectionData={inspectionData} originalData={originalData} />
 
       {/* ── Hero Verdict Banner — UI_DESIGN_SYSTEM.md §5.1 ──────────────────── */}
       <div className={`p-6 rounded-xl border flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm ${
