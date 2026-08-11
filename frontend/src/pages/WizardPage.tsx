@@ -37,12 +37,15 @@
  * Data Shape: DATA_SCHEMAS_AND_TYPES.md → Submission interface
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Wand2, Table, CheckCircle2, AlertCircle, ArrowLeft, ArrowRight, ClipboardCheck, FilePen, AlertTriangle } from 'lucide-react';
 import { useConfig, API_BASE_URL } from '../context/ConfigContext';
+import type { ProductDimensionDef } from '../context/ConfigContext';
 import { useAuth, authHeader } from '../context/AuthContext';
 import { useToast } from '../components/ui/ToastProvider';
+import { useWizardGuard } from '../context/WizardGuardContext';
+import { isWizardDirty } from '../utils/wizardDirty';
 
 import { StepMetadata } from './wizard/StepMetadata';
 import { StepDimensions } from './wizard/StepDimensions';
@@ -50,6 +53,10 @@ import { StepDefects } from './wizard/StepDefects';
 import { StepReviewSubmit } from './wizard/StepReviewSubmit';
 import { BatchEntry } from './wizard/BatchEntry';
 import type { BatchEntryHandle } from './wizard/BatchEntry';
+
+/** Mirrors StepDimensions.tsx's fixed-row sentinel IDs — see that file for the source of truth. */
+const FIXED_DIM_LENGTH = '__fixed_length__';
+const FIXED_DIM_PALM = '__fixed_palm__';
 
 type EntryMode = 'GUIDED' | 'SPREADSHEET';
 
@@ -121,6 +128,48 @@ export function WizardPage() {
   const handleUpdate = useCallback((partial: Record<string, any>) => {
     setInspectionData((prev) => ({ ...prev, ...partial }));
   }, []);
+
+  // ── Sidebar navigation guard: share "is this entry dirty" with Sidebar.tsx ─
+  // via WizardGuardContext, so it can warn before discarding on a nav click.
+  // Field enumeration (which dimensions/defects exist for the active
+  // product/profile) mirrors StepDimensions.tsx/SubmissionSummary.tsx's own
+  // derivation from config — only the leaf comparison (hasFieldChanged) is
+  // shared, per fieldDiff.tsx's existing convention.
+  const activeProfile = useMemo(
+    () => getResolvedProfile(inspectionData?.profileId),
+    [getResolvedProfile, inspectionData?.profileId],
+  );
+  const matrixEntry = config?.productMatrixConfig?.[inspectionData?.productCode ?? ''] ?? null;
+  const activeDimensions = useMemo((): ProductDimensionDef[] => {
+    const fixed: ProductDimensionDef[] = [
+      { id: FIXED_DIM_LENGTH, name: 'GLOVE LENGTH', unit: 'mm' },
+      { id: FIXED_DIM_PALM, name: 'PALM WIDTH', unit: 'mm' },
+    ];
+    const dynamic =
+      matrixEntry?.dimensionDefs && matrixEntry.dimensionDefs.length > 0
+        ? matrixEntry.dimensionDefs
+        : config?.dimensions ?? [];
+    return [...fixed, ...dynamic];
+  }, [matrixEntry, config?.dimensions]);
+
+  const { setWizardDirty } = useWizardGuard();
+  const dirty = useMemo(
+    () =>
+      entryMode === 'GUIDED'
+        ? isWizardDirty({
+            inspectionData,
+            originalData,
+            activeDimensions,
+            defectDefinitions: activeProfile?.defectDefinitions ?? [],
+            aqlCategories: activeProfile?.aqlCategories ?? [],
+          })
+        : false, // Batch Entry grid mode has its own state, not covered by this guard.
+    [entryMode, inspectionData, originalData, activeDimensions, activeProfile],
+  );
+  useEffect(() => {
+    setWizardDirty(dirty);
+    return () => setWizardDirty(false);
+  }, [dirty, setWizardDirty]);
 
   // ── Pre-fill wizard from an existing submission when in amendment mode ────
   // Fetches the single target record by ID directly — independent of however
