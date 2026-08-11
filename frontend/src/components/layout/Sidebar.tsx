@@ -91,9 +91,12 @@ export function Sidebar() {
 
   const cancelDiscard = () => setPendingTo(null);
 
-  // Filter items based on user role
+  // Filter items based on user role. A null role (pending M365 assignment)
+  // never sees any nav item — App.tsx's ProtectedRoute renders
+  // PendingAccessPage instead of Sidebar in that case, but this stays
+  // correct in isolation too.
   const visibleItems = sidebarItems.filter(item =>
-    user ? item.roles.includes(user.role) : false
+    user && user.role ? item.roles.includes(user.role) : false
   );
 
   return (
@@ -182,7 +185,7 @@ export function Sidebar() {
                 user.role === 'SUPERVISOR' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
                 'bg-brand-primary/20 text-brand-secondary border border-brand-secondary/30'
               }`}>
-                {user.role.substring(0, 2)}
+                {(user.role ?? '??').substring(0, 2)}
               </div>
               {!collapsed && (
                 <div className="flex flex-col truncate min-w-0">

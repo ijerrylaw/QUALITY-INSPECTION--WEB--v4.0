@@ -1,4 +1,5 @@
 import { SystemSettings } from '../components/system/SystemSettings';
+import { M365UserRolesPanel } from '../components/system/M365UserRolesPanel';
 
 export function SystemPage() {
   return (
@@ -12,6 +13,10 @@ export function SystemPage() {
             Microsoft 365 / Azure AD integration, SharePoint sync, and User RBAC permissions.
           </p>
         </div>
+      </div>
+
+      <div className="pt-2">
+        <M365UserRolesPanel />
       </div>
 
       <div className="pt-2">

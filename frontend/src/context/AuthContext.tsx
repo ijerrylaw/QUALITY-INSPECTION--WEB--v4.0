@@ -1,6 +1,8 @@
-import { createContext, useContext, useState, useCallback } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
+import type { AccountInfo } from '@azure/msal-browser';
 import { API_BASE_URL } from './ConfigContext';
+import { msalInstance, loginRequest, graphRequest, GRAPH_ME_ENDPOINT } from '../lib/msalConfig';
 
 // Define the valid roles in the system
 export type UserRole = 'OPERATOR' | 'LEADER' | 'SUPERVISOR' | 'EXECUTIVE' | 'MANAGER' | 'ADMIN';
@@ -44,84 +46,126 @@ export interface User {
   /** Real job title, e.g. "Plant Director", "Line Leader" — display/audit only, never used for permission checks. */
   title: string;
   email?: string;
-  role: UserRole;
+  /**
+   * null only ever occurs for an M365 login whose aadObjectId has no row (or
+   * a role: null row) in the backend's M365UserRole table yet — a real,
+   * Entra-authenticated person who hasn't been assigned a role by a Group A
+   * admin. Every consumer of `role` must treat null as "no access", not
+   * "some access" — see App.tsx's ProtectedRoute pending-access gate, which
+   * is the single place this is enforced for the whole app. PIN logins never
+   * produce null; the backend only ever returns a real Group-C role for them.
+   */
+  role: UserRole | null;
   tenantId: string;
   facilityId: string;
   /** Which login path resolved this session — idle-expiry only applies to 'PIN' (shared floor tablets). */
   loginMethod: 'M365' | 'PIN';
 }
 
-interface MockM365Identity {
-  id: string;
-  name: string;
-  title: string;
-  email: string;
-  role: UserRole;
-}
-
-/**
- * Dev-only mock Microsoft 365 identities (AUDIT_REPORT.md §11, Task 6). Real
- * Azure AD/Entra ID login is blocked pending Jerry's IT manager providing real
- * credentials. The `import.meta.env.DEV ? [...] : []` conditional is written
- * at the ARRAY LITERAL's definition site (not just around its usages) so
- * `vite build`'s minifier can constant-fold the ternary and drop the whole
- * literal from production bundles — verified via
- * `npm run build --workspace=frontend && grep 'System Administrator' dist/assets/*.js`
- * (must return no matches). Covers both Group A/B and the Group-C-via-M365
- * (Supervisor) case so all three groups are reachable through this path for
- * testing, unlike the old mock which always resolved to ADMIN.
- */
-export const MOCK_M365_IDENTITIES: readonly MockM365Identity[] = import.meta.env.DEV
-  ? [
-      { id: 'usr_admin_001', name: 'System Administrator', title: 'IT Administrator', email: 'admin@oneglove.com', role: 'ADMIN' },
-      { id: 'usr_director_001', name: 'Amir Hassan', title: 'Plant Director', email: 'amir.hassan@oneglove.com', role: 'ADMIN' },
-      { id: 'usr_manager_001', name: 'Lee Mei Ling', title: 'QA Manager', email: 'lee.meiling@oneglove.com', role: 'MANAGER' },
-      { id: 'usr_exec_001', name: 'Farah Aziz', title: 'QA Executive', email: 'farah.aziz@oneglove.com', role: 'EXECUTIVE' },
-      { id: 'usr_supervisor_001', name: 'Wong Wei Ming', title: 'Shift Supervisor', email: 'wong.weiming@oneglove.com', role: 'SUPERVISOR' },
-    ]
-  : [];
-
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
-  loginWithM365: (mockIdentityId: string) => Promise<void>;
+  loginWithM365: () => Promise<void>;
   loginWithPIN: (pin: string) => Promise<void>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const MOCK_TENANT_ID = 'TENANT_ONEGLOVE_01';
+// PIN logins have no real tenant concept (NAVIGATION_AND_RBAC.md §1 — vestigial
+// display field, never sent to the backend). M365 logins use the real Entra
+// tenant ID from the account instead — see resolveM365User below.
+const PIN_PLACEHOLDER_TENANT_ID = 'TENANT_ONEGLOVE_01';
+
+/**
+ * Fetches jobTitle from Microsoft Graph (not available as an ID token claim
+ * in this tenant — NAVIGATION_AND_RBAC.md §3.1) and resolves the account's
+ * role via POST /api/auth/m365-login. Shared by loginWithM365 (fresh popup
+ * login) and the silent-reauth-on-mount effect (existing cached account) so
+ * both paths re-resolve role from the backend rather than trusting a stale
+ * cached value — an admin may have (re)assigned the role since last session.
+ *
+ * If the Graph call fails, login still proceeds with an empty title — title
+ * is display/audit only and is never read by any permission check (see the
+ * User.title doc comment above), so a Graph hiccup must not block access.
+ */
+async function resolveM365User(account: AccountInfo): Promise<User> {
+  let jobTitle = '';
+  try {
+    const tokenResponse = await msalInstance.acquireTokenSilent({ ...graphRequest, account });
+    const graphRes = await fetch(GRAPH_ME_ENDPOINT, {
+      headers: { Authorization: `Bearer ${tokenResponse.accessToken}` },
+    });
+    if (graphRes.ok) {
+      const graphData = (await graphRes.json()) as { jobTitle?: string | null };
+      jobTitle = graphData.jobTitle ?? '';
+    } else {
+      console.warn('[AuthContext] Microsoft Graph User.Read call returned', graphRes.status);
+    }
+  } catch (graphError) {
+    console.warn('[AuthContext] Failed to fetch jobTitle from Microsoft Graph; proceeding without it.', graphError);
+  }
+
+  const res = await fetch(`${API_BASE_URL}/api/auth/m365-login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      aadObjectId: account.localAccountId,
+      userPrincipalName: account.username,
+      displayName: account.name ?? account.username,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error('Failed to resolve Microsoft 365 role assignment.');
+  }
+
+  const { role } = (await res.json()) as { role: UserRole | null };
+
+  return {
+    id: account.localAccountId,
+    name: account.name ?? account.username,
+    title: jobTitle,
+    email: account.username,
+    role,
+    tenantId: account.tenantId ?? PIN_PLACEHOLDER_TENANT_ID,
+    facilityId: 'GLOBAL',
+    loginMethod: 'M365',
+  };
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  // Guards against double-firing the silent-reauth effect under StrictMode's
+  // dev double-invoke and against a stray run after an explicit logout.
+  const silentReauthAttempted = useRef(false);
 
-  // Dev-only mock M365 login (see MOCK_M365_IDENTITIES above). Self-guards
-  // against any non-UI call path once real Azure AD wiring lands — the UI
-  // itself hides this behind the same import.meta.env.DEV check.
-  const loginWithM365 = useCallback(async (mockIdentityId: string) => {
-    if (!import.meta.env.DEV) {
-      throw new Error('Mock Microsoft 365 login is disabled outside development builds.');
+  // Session persistence on page refresh/browser restart — standard MSAL.js
+  // pattern: if a cached account exists, silently re-establish `user` state
+  // (and re-resolve role from the backend) without a visible login prompt.
+  useEffect(() => {
+    if (silentReauthAttempted.current) return;
+    silentReauthAttempted.current = true;
+
+    const accounts = msalInstance.getAllAccounts();
+    const account = accounts[0];
+    if (!account) return;
+
+    msalInstance.setActiveAccount(account);
+    resolveM365User(account)
+      .then(setUser)
+      .catch((err) => {
+        console.warn('[AuthContext] Silent M365 re-auth failed; user must sign in again.', err);
+      });
+  }, []);
+
+  const loginWithM365 = useCallback(async () => {
+    const loginResponse = await msalInstance.loginPopup(loginRequest);
+    if (!loginResponse.account) {
+      throw new Error('Microsoft 365 login did not return an account.');
     }
-
-    // Simulate network delay
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    const identity = MOCK_M365_IDENTITIES.find((i) => i.id === mockIdentityId);
-    if (!identity) {
-      throw new Error('Unknown mock identity.');
-    }
-
-    setUser({
-      id: identity.id,
-      name: identity.name,
-      title: identity.title,
-      email: identity.email,
-      role: identity.role,
-      tenantId: MOCK_TENANT_ID,
-      facilityId: 'GLOBAL',
-      loginMethod: 'M365',
-    });
+    msalInstance.setActiveAccount(loginResponse.account);
+    setUser(await resolveM365User(loginResponse.account));
   }, []);
 
   // Real PIN login — verified server-side against backend/src/routes/pinUsers.routes.ts's
@@ -144,14 +188,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       name: identity.name,
       title: identity.jobTitle,
       role: identity.role,
-      tenantId: MOCK_TENANT_ID,
+      tenantId: PIN_PLACEHOLDER_TENANT_ID,
       facilityId: 'KLANG_PLANT',
       loginMethod: 'PIN',
     });
   }, []);
 
   const logout = useCallback(() => {
+    const account = msalInstance.getActiveAccount();
     setUser(null);
+    if (account) {
+      msalInstance.logoutPopup({ account }).catch((err) => {
+        console.warn('[AuthContext] MSAL logout popup failed:', err);
+      });
+    }
   }, []);
 
   return (
@@ -181,10 +231,13 @@ export function useAuth() {
  * Claimed-role request header for the backend's requireRole() middleware
  * (backend/src/middleware/auth.ts, AUDIT_REPORT.md §9.1/§10 Part 1). Not a
  * verified token — just the currently logged-in user's role, mirroring the
- * mock-auth maturity of the rest of this app's login flows.
+ * mock-auth maturity of the rest of this app's login flows. Omitted entirely
+ * for a pending (role: null) M365 user — App.tsx's ProtectedRoute never lets
+ * such a user reach any route that would call an API needing this header,
+ * but the guard here keeps this function correct in isolation too.
  */
 export function authHeader(user: User | null): Record<string, string> {
-  return user ? { 'X-User-Role': user.role } : {};
+  return user && user.role ? { 'X-User-Role': user.role } : {};
 }
 
 /** The identity fragment shape the backend's resolveIdentity() (backend/src/lib/identity.ts) expects. */

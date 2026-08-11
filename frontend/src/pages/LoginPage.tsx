@@ -1,15 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth, MOCK_M365_IDENTITIES } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/ui/ToastProvider';
 import { Button } from '../components/ui/Button';
 import { ShieldCheck, HardHat, Delete } from 'lucide-react';
-
-// Dev-only mock M365 login is gated on import.meta.env.DEV (AUDIT_REPORT.md
-// §11, Task 6) — vite build dead-code-eliminates this whole branch out of
-// production bundles, so it can't accidentally run once real Azure AD
-// credentials are wired in.
-const MOCK_M365_ENABLED = import.meta.env.DEV;
 
 export function LoginPage() {
   const { loginWithM365, loginWithPIN } = useAuth();
@@ -17,14 +11,16 @@ export function LoginPage() {
   const navigate = useNavigate();
 
   const [pin, setPin] = useState<string>('');
-  const [selectedMockIdentity, setSelectedMockIdentity] = useState<string>(MOCK_M365_IDENTITIES[0]?.id ?? '');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Handle M365 Login
+  // Handle M365 Login — real MSAL popup flow (AuthContext.tsx's
+  // loginWithM365). A role of null (pending admin assignment) still lands
+  // here successfully; App.tsx's ProtectedRoute shows PendingAccessPage in
+  // that case, so no branching is needed on this page.
   const handleM365Login = async () => {
     try {
       setIsLoggingIn(true);
-      await loginWithM365(selectedMockIdentity);
+      await loginWithM365();
       addToast('success', 'Logged in successfully via Microsoft 365.');
       navigate('/wizard'); // Default page shall be entry wizard
     } catch (error) {
@@ -103,56 +99,21 @@ export function LoginPage() {
             </p>
           </div>
 
-          {MOCK_M365_ENABLED ? (
-            <>
-              {/* Dev-only mock identity picker — simulates whichever real Azure
-                  AD user would be signing in, since real Entra ID is not wired
-                  up yet. Compiled out of production builds along with the
-                  button below (import.meta.env.DEV). */}
-              <div className="space-y-3 text-left">
-                <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider pl-1">
-                  [DEV] Mock Identity
-                </label>
-                <select
-                  className="w-full h-14 bg-surface border border-gray-700 rounded-xl px-4 text-primary focus:outline-none focus:border-brand-secondary transition-colors appearance-none"
-                  value={selectedMockIdentity}
-                  onChange={(e) => setSelectedMockIdentity(e.target.value)}
-                  disabled={isLoggingIn}
-                >
-                  {MOCK_M365_IDENTITIES.map((identity) => (
-                    <option key={identity.id} value={identity.id}>
-                      {identity.name} — {identity.title}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="pt-6">
-                <Button
-                  className="w-full h-14 text-base"
-                  onClick={handleM365Login}
-                  disabled={isLoggingIn}
-                >
-                  <svg className="w-6 h-6 mr-3" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect x="1" y="1" width="9" height="9" fill="#F25022"/>
-                    <rect x="11" y="1" width="9" height="9" fill="#7FBA00"/>
-                    <rect x="1" y="11" width="9" height="9" fill="#00A4EF"/>
-                    <rect x="11" y="11" width="9" height="9" fill="#FFB900"/>
-                  </svg>
-                  {isLoggingIn ? 'Authenticating...' : 'Sign in with Microsoft 365'}
-                </Button>
-              </div>
-            </>
-          ) : (
-            <div className="pt-6">
-              <Button className="w-full h-14 text-base" disabled>
-                Sign in with Microsoft 365
-              </Button>
-              <p className="mt-3 text-xs text-gray-500">
-                Pending Azure AD configuration.
-              </p>
-            </div>
-          )}
+          <div className="pt-6">
+            <Button
+              className="w-full h-14 text-base"
+              onClick={handleM365Login}
+              disabled={isLoggingIn}
+            >
+              <svg className="w-6 h-6 mr-3" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="1" y="1" width="9" height="9" fill="#F25022"/>
+                <rect x="11" y="1" width="9" height="9" fill="#7FBA00"/>
+                <rect x="1" y="11" width="9" height="9" fill="#00A4EF"/>
+                <rect x="11" y="11" width="9" height="9" fill="#FFB900"/>
+              </svg>
+              {isLoggingIn ? 'Authenticating...' : 'Sign in with Microsoft 365'}
+            </Button>
+          </div>
         </div>
       </div>
 

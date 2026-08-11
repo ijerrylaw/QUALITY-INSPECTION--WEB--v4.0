@@ -246,6 +246,32 @@ model PinUser {
 }
 
 // ============================================================
+// M365 USER ROLE
+// aadObjectId -> role mapping for real Entra ID SSO logins (Group A/B
+// only — ADMIN/EXECUTIVE/MANAGER). Auto-provisioned with role: null on a
+// user's first successful MSAL login (POST /api/auth/m365-login); an
+// admin (Group A, /system) later assigns a real role via PATCH
+// /api/m365-users/:id. Mirrors the PinUser pattern but for SSO users,
+// who have no PinUser row of their own.
+// ============================================================
+model M365UserRole {
+  id                String   @id @default(cuid())
+  aadObjectId       String   @unique
+  userPrincipalName String
+  displayName       String
+
+  /// null = pending assignment (no access yet). 'ADMIN' | 'EXECUTIVE' |
+  /// 'MANAGER' once an admin assigns one — enforced in route validation,
+  /// not the DB (same convention as PinUser.role).
+  role              String?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([role])
+}
+
+// ============================================================
 // APP CONFIG
 // Maps to: export interface AppConfig
 // A SINGLETON table (only one row should ever exist).
