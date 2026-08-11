@@ -8,8 +8,11 @@
  *  GET    /api/pin-users              List all PIN users (active + inactive).
  *  POST   /api/pin-users              Create a new PIN user.
  *  PATCH  /api/pin-users/:id/deactivate  Deactivate a PIN user (frees the PIN for reuse).
+ *  DELETE /api/pin-users/:id          Hard-delete a PIN user — only allowed when
+ *        the user has zero Submission/AmendmentLog history (409 otherwise,
+ *        pointing the caller at Deactivate instead).
  *
- *  All three above require Group A or B (requireGroup('A', 'B')) — matches
+ *  All four above require Group A or B (requireGroup('A', 'B')) — matches
  *  Jerry's rule that department managers (Group B) typically manage their own
  *  staff; Group C (including Supervisors) cannot reach this screen at all.
  *
@@ -128,6 +131,38 @@ pinUsersRouter.patch('/:id/deactivate', requireGroup('A', 'B'), async (req: Requ
   } catch (error) {
     console.error('[PATCH /api/pin-users/:id/deactivate] Error:', error);
     res.status(500).json({ error: 'Failed to deactivate PIN user' });
+  }
+});
+
+// DELETE /api/pin-users/:id — hard delete, gated on zero submission/amendment
+// history. History-bearing users must go through /:id/deactivate instead
+// (see PinUser model doc in schema.prisma — deactivate-only preserves audit
+// trail attribution).
+pinUsersRouter.delete('/:id', requireGroup('A', 'B'), async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params['id']);
+    const existing = await prisma.pinUser.findUnique({ where: { id } });
+    if (!existing) {
+      res.status(404).json({ error: 'PIN user not found' });
+      return;
+    }
+
+    const [submissionCount, requestedCount, reviewedCount] = await Promise.all([
+      prisma.submission.count({ where: { pinUserId: id } }),
+      prisma.amendmentLog.count({ where: { requestedByPinUserId: id } }),
+      prisma.amendmentLog.count({ where: { reviewedByPinUserId: id } }),
+    ]);
+
+    if (submissionCount > 0 || requestedCount > 0 || reviewedCount > 0) {
+      res.status(409).json({ error: 'This user has submission history — use Deactivate instead.' });
+      return;
+    }
+
+    await prisma.pinUser.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[DELETE /api/pin-users/:id] Error:', error);
+    res.status(500).json({ error: 'Failed to delete PIN user' });
   }
 });
 

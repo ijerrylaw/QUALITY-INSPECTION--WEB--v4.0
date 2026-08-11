@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { UserPlus, UserX, RefreshCw, Eye, EyeOff } from 'lucide-react';
+import { UserPlus, UserX, RefreshCw, Eye, EyeOff, Trash2, AlertTriangle, X } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { API_BASE_URL } from '../../context/ConfigContext';
@@ -35,6 +35,9 @@ export function PinAdminPanel() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [showDeactivated, setShowDeactivated] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const visibleUsers = showDeactivated ? pinUsers : pinUsers.filter((pu) => pu.active);
 
@@ -107,6 +110,35 @@ export function PinAdminPanel() {
     } catch (err) {
       console.error('[PinAdminPanel] Deactivate failed:', err);
     }
+  };
+
+  const handleDelete = async (id: string) => {
+    setDeleting(true);
+    setDeleteError(null);
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE_URL}/api/pin-users/${id}`, {
+        method: 'DELETE',
+        headers: { ...authHeader(user) },
+      });
+    } catch (err) {
+      console.error('[PinAdminPanel] Delete failed (network):', err);
+      setDeleteError('Something went wrong — please try again.');
+      setDeleting(false);
+      return;
+    }
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      console.error('[PinAdminPanel] Delete failed:', res.status, data);
+      setDeleteError(data.error || 'Something went wrong — please try again.');
+      setDeleting(false);
+      return;
+    }
+
+    setConfirmDeleteId(null);
+    setDeleting(false);
+    fetchPinUsers();
   };
 
   return (
@@ -234,15 +266,27 @@ export function PinAdminPanel() {
                     </Badge>
                   </td>
                   <td className="px-6 py-3 text-right">
-                    {pu.active && (
+                    <div className="inline-flex items-center gap-2">
+                      {pu.active && (
+                        <Button
+                          variant="danger"
+                          className="px-3 h-8 inline-flex items-center gap-1.5"
+                          onClick={() => handleDeactivate(pu.id)}
+                        >
+                          <UserX className="w-3.5 h-3.5" /> Deactivate
+                        </Button>
+                      )}
                       <Button
                         variant="danger"
                         className="px-3 h-8 inline-flex items-center gap-1.5"
-                        onClick={() => handleDeactivate(pu.id)}
+                        onClick={() => {
+                          setDeleteError(null);
+                          setConfirmDeleteId(pu.id);
+                        }}
                       >
-                        <UserX className="w-3.5 h-3.5" /> Deactivate
+                        <Trash2 className="w-3.5 h-3.5" /> Delete
                       </Button>
-                    )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -250,6 +294,57 @@ export function PinAdminPanel() {
           </table>
         </div>
       </div>
+
+      {/* ── Delete Confirmation Modal — matches QualityRules.tsx's delete-profile
+           modal pattern (bg-black/70 backdrop, bg-canvas card, rose AlertTriangle
+           icon, cancel/confirm pair) ── */}
+      {confirmDeleteId && (() => {
+        const target = pinUsers.find((pu) => pu.id === confirmDeleteId);
+        return (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className="bg-canvas border border-gray-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
+              <div className="flex items-start gap-4 p-4 border-b border-gray-800">
+                <div className="w-12 h-12 rounded-full bg-rose-500/10 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-6 h-6 text-rose-400" strokeWidth={2} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold uppercase tracking-wide text-primary mb-1">
+                    DELETE STAFF MEMBER?
+                  </h3>
+                  <p className="text-sm text-muted">
+                    Are you sure you want to permanently delete{' '}
+                    <span className="font-bold text-white uppercase">{target?.name}</span>? This cannot be undone.
+                  </p>
+                  {deleteError && (
+                    <p className="text-xs text-danger mt-2">{deleteError}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-4 bg-surface flex items-center justify-end gap-3">
+                <button
+                  onClick={() => {
+                    setConfirmDeleteId(null);
+                    setDeleteError(null);
+                  }}
+                  className="h-10 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-white font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none"
+                >
+                  <X className="w-4 h-4" strokeWidth={2} />
+                  <span>CANCEL</span>
+                </button>
+                <button
+                  onClick={() => confirmDeleteId && handleDelete(confirmDeleteId)}
+                  disabled={deleting}
+                  className="h-10 px-5 rounded-lg bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none border border-rose-500/50 shadow-sm disabled:opacity-50"
+                >
+                  <Trash2 className="w-4 h-4" strokeWidth={2} />
+                  <span>{deleting ? 'DELETING...' : 'CONFIRM DELETE'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
