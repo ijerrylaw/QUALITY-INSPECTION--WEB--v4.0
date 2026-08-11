@@ -37,15 +37,32 @@ Six roles exist, unchanged from the original design. On top of them sits a coars
 
 ## 3. AUTHENTICATION: LOGIN METHODS
 
-### 3.1 Microsoft 365 / Azure AD — mocked in dev
+### 3.1 Microsoft 365 / Azure AD — credentials received, MSAL.js wiring pending
 
-* Real Entra ID/MSAL sign-in is blocked pending Jerry's IT manager providing real Azure credentials (Tenant ID, Client ID, Client Secret) — not yet available.
+**Credentials received:** Tenant ID and Client ID obtained from IT on 2026-08-10. **Real MSAL.js implementation is not yet started** — that work is queued as a separate task, pending its own `/grill-me` session before code begins.
+
+**App Registration details (confirmed):**
+* App type: Single-Page Application (SPA) — no Client Secret required or issued (correct for MSAL.js in a browser context).
+* Redirect URI (dev): `http://localhost:4001` — will need a second production redirect URI once a production URL is finalized.
+* API permissions granted: `openid`, `profile`, `email`, `User.Read` (standard Microsoft Graph read-only access to the authenticated user's own basic profile only — no files, calendar, mail, or other-user access).
+* **jobTitle is NOT available as an ID token claim** in this tenant's Entra configuration — it must be fetched via a separate `User.Read` call to Microsoft Graph after sign-in, not read directly from the ID token.
+
+**Access control (Entra scope):**
+* SSO is restricted to users in a dedicated Entra ID security group containing only Manager/Executive/Admin-tier staff (Group A and Group B in this app — corresponding to `ADMIN`, `EXECUTIVE`, `MANAGER` roles).
+* Supervisors and below (Group C: `SUPERVISOR`, `LEADER`, `OPERATOR`) continue using PIN login exclusively. SSO does not need to, and will not, cover floor-tier roles.
+
+**Current state in code:**
 * **Dev-only mock** (`frontend/src/context/AuthContext.tsx`'s `MOCK_M365_IDENTITIES`) — 5 identities deliberately spanning all three permission groups (2× Group A, 2× Group B, 1× Group C via a Supervisor identity), so every group is reachable through this login path for testing. The old mock always resolved to `ADMIN` regardless of which name was picked.
 * **Gated so it can never leak into production**, three layers:
   1. `LoginPage.tsx` renders the mock-identity picker only when `import.meta.env.DEV` (Vite's build-time dev/prod flag); otherwise a disabled button reads "Pending Azure AD configuration."
   2. `AuthContext.loginWithM365` self-guards independently (`if (!import.meta.env.DEV) throw`), in case anything ever calls it outside the gated UI path.
   3. `MOCK_M365_IDENTITIES` itself is defined behind the same `import.meta.env.DEV` ternary at its own declaration site (not just around its usages), so `vite build`'s minifier drops the array from the production bundle entirely. Verified via `npm run build --workspace=frontend` + grepping the built JS for all five mock names/emails/ids — confirmed `0` matches.
-* **When real credentials arrive**, the isolated swap is: replace `loginWithM365`'s body with a real MSAL popup/redirect flow that resolves a role from real Azure AD group/claim data, and remove the dev gate. Nothing else on this page — `requireGroup`, `X-User-Role`, `RoleRoute`, `Sidebar`, the PIN system — needs to change; all of it is independent of *how* a role was obtained.
+
+**When MSAL.js wiring is implemented**, the isolated swap will be: replace `loginWithM365`'s body with real MSAL popup/redirect flow that:
+* Exchanges an authorization code for an ID token (containing `openid`, `profile`, `email` claims plus any app-specific claims).
+* Fetches `jobTitle` via a separate `User.Read` call to Microsoft Graph (not from the token).
+* Resolves the authenticated user's role by checking their Entra ID group membership against the configured security group, then maps that to `role` (`ADMIN` / `EXECUTIVE` / `MANAGER` only — others remain in `role: 'SUPERVISOR'` and get PIN login instead).
+* Remove the dev gate. Nothing else on this page — `requireGroup`, `X-User-Role`, `RoleRoute`, `Sidebar`, the PIN system — needs to change; all of it is independent of *how* a role was obtained.
 
 ### 3.2 PIN Login — real, not mocked
 
