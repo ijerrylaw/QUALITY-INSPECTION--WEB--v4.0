@@ -38,6 +38,7 @@ import {
   composeFullLotNumber,
   fetchSuggestedNextSequence,
 } from '../../utils/lotNumber';
+import { OriginalValueNote } from '../../utils/fieldDiff';
 import {
   Activity,
   Clock,
@@ -479,11 +480,11 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
                 placeholder="01"
                 className="w-full h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all"
               />
-              {originalData?.totalCarton !== undefined && String(originalData.totalCarton) !== String(totalCarton) && (
-                <div className="text-[10px] text-muted font-mono mt-1">
-                  Original: {originalData.totalCarton || '—'}
-                </div>
-              )}
+              <OriginalValueNote
+                hasOriginal={originalData?.totalCarton !== undefined}
+                originalValue={originalData?.totalCarton}
+                currentValue={totalCarton}
+              />
             </div>
 
             {/* Sample Size */}
@@ -505,11 +506,11 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
                 </select>
                 <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
-              {originalData?.sampleSize !== undefined && String(originalData.sampleSize) !== String(sampleSize) && (
-                <div className="text-[10px] text-muted font-mono mt-1">
-                  Original: {originalData.sampleSize || '—'}
-                </div>
-              )}
+              <OriginalValueNote
+                hasOriginal={originalData?.sampleSize !== undefined}
+                originalValue={originalData?.sampleSize}
+                currentValue={sampleSize}
+              />
             </div>
 
             {/* Glove Weight (auto-extracted, user-editable override) */}
@@ -536,11 +537,11 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
                 placeholder="e.g. 5.2"
                 className="w-full h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all"
               />
-              {originalData?.gloveWeight !== undefined && String(originalData.gloveWeight) !== String(gloveWeight) && (
-                <div className="text-[10px] text-muted font-mono mt-1">
-                  Original: {originalData.gloveWeight || '—'}
-                </div>
-              )}
+              <OriginalValueNote
+                hasOriginal={originalData?.gloveWeight !== undefined}
+                originalValue={originalData?.gloveWeight}
+                currentValue={gloveWeight}
+              />
             </div>
 
           </div>
