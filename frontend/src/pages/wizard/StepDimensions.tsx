@@ -33,6 +33,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { Ruler, CheckCircle2, AlertTriangle, AlertCircle, Info } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastProvider';
 import { useConfig } from '../../context/ConfigContext';
+import { OriginalValueNote } from '../../utils/fieldDiff';
 import type { ProductDimensionDef } from '../../context/ConfigContext';
 
 export interface StepDimensionsProps {
@@ -423,11 +424,13 @@ export function StepDimensions({
                         <div className={`mt-0.5 text-[9px] font-mono font-bold tracking-tighter text-rose-500 text-center leading-none ${isFail && delta !== null ? '' : 'invisible'}`}>
                           {isFail && delta !== null ? `${delta}${dim.unit}` : `0.0${dim.unit}`}
                         </div>
-                        {originalData?.dimensions?.[dim.id]?.[idx] !== undefined && String(originalData.dimensions[dim.id][idx]) !== String(val) && (
-                          <div className="mt-0.5 text-[9px] text-muted font-mono text-center leading-none">
-                            Org: {originalData.dimensions[dim.id][idx] || '—'}
-                          </div>
-                        )}
+                        <OriginalValueNote
+                          hasOriginal={originalData?.dimensions?.[dim.id]?.[idx] !== undefined}
+                          originalValue={originalData?.dimensions?.[dim.id]?.[idx]}
+                          currentValue={val}
+                          label="Org"
+                          className="mt-0.5 text-[9px] text-muted font-mono text-center leading-none"
+                        />
                       </div>
                     );
                   })}
