@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useConfig } from '../../context/ConfigContext';
+import { OriginalValueNote } from '../../utils/fieldDiff';
 import type { AQLCategory, DefectDefinition } from '../../context/ConfigContext';
 
 export interface StepDefectsProps {
@@ -361,11 +362,13 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
                             NIL
                           </button>
                         </div>
-                        {originalData?.defects?.[defect.id] !== undefined && String(originalData.defects[defect.id]) !== String(state) && (
-                          <div className="mt-2 text-[10px] text-muted font-mono text-center">
-                            Original: {originalData.defects[defect.id] || 'NIL'}
-                          </div>
-                        )}
+                        <OriginalValueNote
+                          hasOriginal={originalData != null}
+                          originalValue={originalData?.qualitative?.[defect.id] ?? 'NIL'}
+                          currentValue={state}
+                          emptyDisplay="NIL"
+                          className="mt-2 text-[10px] text-muted font-mono text-center"
+                        />
                       </div>
                     );
                   }
@@ -408,11 +411,13 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
                           <Plus className="w-4 h-4" strokeWidth={2.5} />
                         </motion.button>
                       </div>
-                      {originalData?.defects?.[defect.id] !== undefined && Number(originalData.defects[defect.id]) !== count && (
-                        <div className="mt-2 text-[10px] text-muted font-mono text-center">
-                          Original: {originalData.defects[defect.id] || '0'}
-                        </div>
-                      )}
+                      <OriginalValueNote
+                        hasOriginal={originalData != null}
+                        originalValue={originalData?.defects?.[defect.id] ?? 0}
+                        currentValue={count}
+                        emptyDisplay="0"
+                        className="mt-2 text-[10px] text-muted font-mono text-center"
+                      />
                     </div>
                   );
                 })}
