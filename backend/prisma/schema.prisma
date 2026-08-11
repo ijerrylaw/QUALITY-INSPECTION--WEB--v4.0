@@ -69,11 +69,28 @@ model Submission {
   // --- Verdict & Compliance ---
   verdict             String          // 'PASSED' | 'FAILED'
 
-  // --- Microsoft 365 / Azure AD Identity ---
-  /// Azure AD Object ID pulled securely from the MS365 token
-  aadObjectId         String
-  /// UPN (email) pulled securely from the MS365 token
-  userPrincipalName   String
+  // --- Submitting-user identity (mixed model) ---
+  // Exactly ONE side is populated per row, decided by the login method that
+  // created it: a PIN login sets `pinUserId` (a real FK); an M365/SSO login
+  // sets the three string fields below. Both sides are nullable because
+  // neither applies universally. Rows created before this model existed have
+  // the SSO strings populated with hardcoded placeholder literals and
+  // `pinUserId` null — deliberately left untouched, not backfilled.
+
+  /// Azure AD Object ID from the MS365 token — SSO-originated rows only.
+  aadObjectId         String?
+  /// UPN (email) from the MS365 token — SSO-originated rows only. Always a
+  /// true UPN/email, never a display name (see `displayName` below).
+  userPrincipalName   String?
+  /// Human-readable name of the SSO user, captured at submit time so history
+  /// stays readable without a live Azure AD lookup. Kept separate from
+  /// `userPrincipalName` so that field keeps meaning strictly "the UPN".
+  /// SSO-originated rows only — for PIN rows the name comes from PinUser.name.
+  displayName         String?
+
+  /// FK to the PinUser who submitted — PIN-originated rows only.
+  pinUserId           String?
+  pinUser             PinUser?        @relation("SubmissionPinUser", fields: [pinUserId], references: [id])
 
   // --- Amendment Workflow ---
   amendmentStatus     String          @default("UNMODIFIED")
@@ -102,6 +119,7 @@ model Submission {
   @@index([submissionTimestamp])
   @@index([machineId, shift])
   @@index([amendmentStatus])
+  @@index([pinUserId])
 }
 
 // ============================================================
@@ -121,12 +139,28 @@ model AmendmentLog {
   /// Serialized JSON snapshot of the proposed new field values
   newValues       String      // JSON — Partial<Submission>
 
-  /// Who authored the amendment draft (UPN / email)
-  requestedBy     String
+  // --- Requester identity (mixed model — see Submission's identity block) ---
+  // Exactly one side is populated: `requestedByPinUserId` for a PIN login, or
+  // `requestedBy`/`requestedByDisplayName` for an M365/SSO login.
+
+  /// Who authored the amendment draft — true UPN/email, SSO-originated only.
+  requestedBy     String?
+  /// Human-readable name of the SSO requester, captured at draft time.
+  requestedByDisplayName String?
+  /// FK to the PinUser who authored the draft — PIN-originated only.
+  requestedByPinUserId   String?
+  requestedByPinUser     PinUser? @relation("AmendmentRequestedByPinUser", fields: [requestedByPinUserId], references: [id])
   requestedAt     String      // ISO 8601 timestamp
 
-  /// Who approved or rejected the amendment (UPN / email)
+  // --- Reviewer identity (same mixed model as the requester above) ---
+
+  /// Who approved or rejected — true UPN/email, SSO-originated only.
   reviewedBy      String?
+  /// Human-readable name of the SSO reviewer, captured at review time.
+  reviewedByDisplayName  String?
+  /// FK to the PinUser who reviewed — PIN-originated only.
+  reviewedByPinUserId    String?
+  reviewedByPinUser      PinUser? @relation("AmendmentReviewedByPinUser", fields: [reviewedByPinUserId], references: [id])
   reviewedAt      String?     // ISO 8601 timestamp
 
   /// 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED'
@@ -157,6 +191,8 @@ model AmendmentLog {
   createdAt       DateTime    @default(now())
 
   @@index([submissionId])
+  @@index([requestedByPinUserId])
+  @@index([reviewedByPinUserId])
 }
 
 // ============================================================
@@ -193,6 +229,15 @@ model PinUser {
   /// Deactivated users are kept (not deleted) for audit history; their PIN
   /// becomes free for reuse since uniqueness is only enforced among active rows.
   active    Boolean  @default(true)
+
+  // --- Back-relations (required by Prisma for the named relations below) ---
+  // These make PIN-originated work attributable to a real person. Never
+  // include these (or this model) in an API response without an explicit
+  // `select` — PinUser carries pinHash/pinSalt, which must never be
+  // serialized to a client.
+  submissions       Submission[]   @relation("SubmissionPinUser")
+  amendmentRequests AmendmentLog[] @relation("AmendmentRequestedByPinUser")
+  amendmentReviews  AmendmentLog[] @relation("AmendmentReviewedByPinUser")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
