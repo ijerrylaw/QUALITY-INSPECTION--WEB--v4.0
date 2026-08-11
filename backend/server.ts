@@ -22,6 +22,7 @@ import prisma from './src/lib/prismaClient';
 import configRouter from './src/routes/config.routes';
 import submissionsRouter, { amendmentsRouter, verdictRouter } from './src/routes/submissions.routes';
 import { pinUsersRouter, pinAuthRouter } from './src/routes/pinUsers.routes';
+import { m365UsersRouter, m365AuthRouter } from './src/routes/m365Users.routes';
 
 const app = express();
 const PORT = process.env['PORT'] ? Number(process.env['PORT']) : 4009;
@@ -59,6 +60,8 @@ app.use('/api/amendments', amendmentsRouter);
 app.use('/api/verdict', verdictRouter);
 app.use('/api/pin-users', pinUsersRouter);
 app.use('/api/auth', pinAuthRouter);
+app.use('/api/m365-users', m365UsersRouter);
+app.use('/api/auth', m365AuthRouter);
 
 // ── 404 Fallback ──────────────────────────────────────────────────────────────
 app.use((_req, res) => {
@@ -80,4 +83,7 @@ app.listen(PORT, () => {
   console.log(`  PIN Users:   GET   http://localhost:${PORT}/api/pin-users`);
   console.log(`  PIN Users:   POST  http://localhost:${PORT}/api/pin-users`);
   console.log(`  PIN Login:   POST  http://localhost:${PORT}/api/auth/pin-login`);
+  console.log(`  M365 Users:  GET   http://localhost:${PORT}/api/m365-users`);
+  console.log(`  M365 Users:  PATCH http://localhost:${PORT}/api/m365-users/:id`);
+  console.log(`  M365 Login:  POST  http://localhost:${PORT}/api/auth/m365-login`);
 });
