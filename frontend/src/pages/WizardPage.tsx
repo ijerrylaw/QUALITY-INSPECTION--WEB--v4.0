@@ -173,11 +173,23 @@ export function WizardPage() {
           qualitative[def.id] = QUALITATIVE_DECODING[rawDefects[def.id] as number] ?? 'NIL';
         }
 
+        // `side` and `sequenceNo` aren't persisted as their own columns — only
+        // embedded inside the composed batchNumber ([Line]+[Side]+[YJJJ]+[Sequence]).
+        // Since `machineId` (Line) is a real column, its length marks where the
+        // fixed-width Side(1) + YJJJ(4) + Sequence(3) suffix begins, letting us
+        // recover both without guessing.
+        const linePrefix = target.machineId ?? '';
+        const batchSuffix = (target.batchNumber ?? '').slice(linePrefix.length);
+        const parsedSide = batchSuffix.length >= 8 ? batchSuffix.slice(0, 1) : '';
+        const parsedSequenceNo = batchSuffix.length >= 8 ? batchSuffix.slice(-3) : '';
+
         // Map Submission fields → wizard inspectionData fields
         const mappedData = {
           profileId:        target.profileId        ?? '',
           productCode:      target.productCode      ?? '',
-          lineId:           target.machineId        ?? '',
+          lineId:           linePrefix,
+          side:             parsedSide,
+          sequenceNo:       parsedSequenceNo,
           shift:            target.shift            ?? '',
           size:             target.size             ?? '',
           sampleSize:       target.sampleSize       ?? 0,
