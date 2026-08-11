@@ -1483,6 +1483,90 @@ amendment logs were created during this pass (all scenarios ended in
 Cancel or pre-submit Discard) — dev.db confirmed unchanged at baseline
 (14 submissions, 0 amendment logs) throughout.
 
+### 5.17 Real identity stamping — Submission & AmendmentLog attribution
+
+**Severity: High (data integrity / audit trail). Status: IMPLEMENTED and
+verified end-to-end, 2026-08-11. NOT YET MERGED to master — branch
+feat/real-identity-stamping.**
+
+Every Submission and AmendmentLog was previously stamped with hardcoded
+literal identity strings ('mock-user-id', 'operator@oneglove.com',
+'executive@oneglove.com', plus a third undocumented literal found this
+session — 'sample-data-not-a-real-user' on 10/14 baseline rows)
+regardless of who was actually logged in or how. Nothing in inspection
+history, amendment audit trails, or CSV exports was attributable to a
+real person. This also blocked the PIN hard-delete feature, which needs
+a reliable "does this PinUser have submission history" check.
+
+**Design (mixed identity model, decided in planning chat):**
+- PIN-originated rows: real nullable FK to PinUser (Submission.pinUserId,
+  AmendmentLog.requestedByPinUserId/reviewedByPinUserId).
+- SSO/M365-originated rows: existing string columns (now nullable) —
+  aadObjectId, userPrincipalName — plus new displayName columns
+  (Submission.displayName, AmendmentLog.requestedByDisplayName/
+  reviewedByDisplayName) added specifically to avoid overloading
+  userPrincipalName (a true UPN/email field) with a human-readable name.
+- Exactly one side (FK or string) populated per row, never both.
+- Trust model: backend trusts an identity object sent in the request
+  body — no server-side token validation. Deliberate, accepted
+  limitation, deferred until real Entra ID SSO lands (credentials
+  received 2026-08-10, real MSAL.js wiring not yet implemented — see
+  NAVIGATION_AND_RBAC.md §3.1).
+- Server-side name resolution only (Option B): every read endpoint
+  computes and returns a ready-to-display name (inspectorName,
+  requestedByName, reviewedByName) via a shared displayName() helper in
+  backend/src/lib/identity.ts. No frontend file branches on PIN-vs-SSO —
+  every display site just reads the pre-resolved field.
+- Backfill explicitly out of scope: the 14 pre-existing baseline
+  submissions keep their original hardcoded fake values untouched.
+
+**Session 1 — schema + backend** (commits d9056bf, 284cd6a, abecbf6):
+Schema changes via prisma db push (additive/nullable, non-destructive).
+New identity.ts helper: resolveIdentity() validates and branches on
+loginMethod (rejects payloads with neither side populated — a
+deliberate stricter validation than before, since silently writing an
+unattributed row would be worse than today's fake-but-present identity);
+displayName() resolves PinUser.name for PIN rows, the new displayName
+column for SSO rows. All 3 write handlers (submission create, amendment
+draft, approve/reject) and 6 read/response sites updated. Verified: no
+pinHash/pinSalt leak in any response (naive `include: true` on the new
+PinUser relations would have leaked scrypt hash/salt — every include
+uses explicit `select`), all 4 validation-rejection cases return 400
+with no write, mixed PIN/SSO combinations resolve correctly, baseline
+untouched.
+
+**Session 2 — frontend** (commits d1f4bab, 0a00444, 22ed430, 83c5eaa,
+30fa028): new authIdentity(user) helper in AuthContext.tsx, single
+source of truth spread into all 5 write payloads (2 previously sent no
+identity at all — amendment-draft and approve/reject). Display sites in
+HistoryFeed.tsx and ApprovalsQueue.tsx switched to the pre-resolved name
+fields. Verified end-to-end through the real UI: PIN submission, M365/
+mock submission, PIN-drafted amendment approved by an SSO/EXECUTIVE
+user, PIN-drafted amendment rejected by a different SSO/MANAGER user,
+History Inspector column, CSV export — all confirmed showing correct
+real names for both login types, legacy rows still showing their
+original placeholder values.
+
+**Known limitations, accepted:**
+- Backend trusts client-sent identity — spoofable in principle (no token
+  validation). Acceptable for now on a single-tenant, internal,
+  company-tablet deployment; revisit once real SSO lands.
+- SSO identity is currently sourced from the dev mock (MOCK_M365_IDENTITIES),
+  not real Entra ID — real MSAL.js wiring is a separate, not-yet-started
+  task.
+- No backfill — pre-existing rows remain unattributed by design.
+
+**Process note:** session 1 reported "baseline fully restored" at 14/0,
+but session 2 found the actual count was 16 (2 leftover test rows from
+session 1's own verification pass, never cleaned up despite the report).
+Caught only because session 2 queried the DB directly before starting
+its own work, rather than trusting the prior session's report. Lesson
+for future multi-session work: baseline claims across a session boundary
+should be independently re-verified, not inherited.
+
+**Not yet done:** branch not merged to master. Merge decision pending
+planning-chat review.
+
 ## 6. Step 11 — End-to-End Verification Pass (Phase 1+2 close-out)
 
 **Status: COMPLETE, 2026-08-08.** Per `cozy-wondering-volcano.md`'s
