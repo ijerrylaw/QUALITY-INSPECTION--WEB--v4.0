@@ -7,6 +7,7 @@ import type { UserRole } from './context/AuthContext';
 import { ConfigProvider } from './context/ConfigContext';
 import { WizardGuardProvider } from './context/WizardGuardContext';
 import { LoginPage } from './pages/LoginPage';
+import { PendingAccessPage } from './pages/PendingAccessPage';
 import { WizardPage } from './pages/WizardPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { ApprovalsPage } from './pages/ApprovalsPage';
@@ -23,11 +24,18 @@ const GROUP_A_ROLES = rolesInGroups('A');
 
 // Protected Route Wrapper
 function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const location = useLocation();
 
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // An M365 login with no assigned role yet (auto-provisioned pending row,
+  // see AuthContext.tsx's resolveM365User) gets no access at all — not even
+  // Wizard/History — until a Group A admin assigns one via /system.
+  if (user?.loginMethod === 'M365' && user.role === null) {
+    return <PendingAccessPage />;
   }
 
   return (
@@ -46,7 +54,7 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
 function RoleRoute({ children, allowedRoles }: { children: ReactNode, allowedRoles: UserRole[] }) {
   const { user } = useAuth();
   
-  if (!user || !allowedRoles.includes(user.role)) {
+  if (!user || !user.role || !allowedRoles.includes(user.role)) {
     return <Navigate to="/wizard" replace />;
   }
   
