@@ -1390,6 +1390,45 @@ NOT extended to the 7 Step 1 fields that never had it (profileId,
 productCode, size, lineId, side, sequenceNo, timestamp) — that's a
 coverage-expansion decision deferred to a later session, not a bug.
 
+### 5.15 Pre-submit change summary at Review & Submit
+
+**Severity: Feature (not a bug fix). Status: SHIPPED and verified, 2026-08-11.**
+
+Added a summary card at the top of the Review & Submit step (Step 4),
+built on `fieldDiff.tsx`'s `hasFieldChanged` (introduced in §5.14) as its
+sole comparison mechanism — no second diff logic was written.
+
+**Amendment mode**: lists every field across all three wizard pages
+(batch setup, all ~40 dimension slots, every defect/qualitative
+definition in the active profile). Fields differing from the original
+record at submit time are amber-highlighted with old→new values shown;
+unchanged fields remain listed but unhighlighted. A field changed then
+reverted back to its original value before reaching Review & Submit
+correctly shows as unchanged, since hasFieldChanged only compares current
+vs. original state, never touch history.
+
+**New submission mode**: same summary location/structure, no
+originalData to compare against, so no highlighting — a plain listing of
+everything being submitted.
+
+Color choice (amber) follows UI_DESIGN_SYSTEM.md §4.9 — rose/emerald are
+reserved for pass/fail semantics, amber is the correct "changed/needs
+review" color, consistent with the existing amendment-mode banner already
+on this page.
+
+Commits: ff6f56b (new SubmissionSummary.tsx), c80bf66 (wired into
+StepReviewSubmit.tsx, additive), 8a1726b (WizardPage.tsx passes
+originalData through).
+
+**Verification**: live browser + DOM inspection, both modes. New-
+submission mode confirmed zero highlighted elements. Amendment mode
+confirmed via a real submit-then-reopen lot (A003A6223333) with 3 real
+changes (totalCarton, one dimension slot, a previously-untouched/sparse
+defect) plus 1 deliberate revert (a second dimension slot changed then
+changed back) — DOM query confirmed exactly the 3 real changes
+highlighted and the revert correctly excluded. Dev.db restored to
+baseline (14 submissions, 0 amendment logs) after cleanup.
+
 ## 6. Step 11 — End-to-End Verification Pass (Phase 1+2 close-out)
 
 **Status: COMPLETE, 2026-08-08.** Per `cozy-wondering-volcano.md`'s
