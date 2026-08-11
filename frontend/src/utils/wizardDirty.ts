@@ -1,0 +1,125 @@
+/**
+ * @file wizardDirty.ts
+ * @description Single "does the in-progress wizard entry have unsaved work"
+ * check, used by the sidebar navigation guard (Sidebar.tsx via
+ * WizardGuardContext) to decide whether to warn before discarding.
+ *
+ * Reuses `hasFieldChanged` from `fieldDiff.tsx` — the same comparator behind
+ * the inline "Original: X" notes (§5.14) and the pre-submit summary
+ * (§5.15) — for every leaf comparison. No second comparison mechanism is
+ * introduced here; this module only supplies the "which fields exist, and
+ * what do we compare them against" enumeration, the same way
+ * StepDimensions.tsx/StepDefects.tsx/SubmissionSummary.tsx each derive
+ * their own field list from config.
+ *
+ * Two distinct notions of "dirty", both expressed through the same
+ * `hasFieldChanged(hasOriginal, originalValue, currentValue)` call:
+ *
+ * - Amendment mode: `originalValue` is the real original submission's
+ *   value; dirty means "differs from what was actually persisted."
+ * - New-submission mode: there is no original submission, so
+ *   `originalValue` is a synthetic empty/default baseline instead; dirty
+ *   means "differs from the field's untouched starting state." Fields that
+ *   can be legitimately pre-populated by "Retain Context" from a prior lot
+ *   (productCode, size, lineId, side, sampleSize, profileId) are
+ *   deliberately excluded from this check — a freshly-loaded wizard
+ *   carrying retained context is not "dirty" on its own; nothing new has
+ *   been entered yet. Dimension slots use the wizard's own
+ *   `dimensionDirtySlots` touched-tracking rather than a value comparison,
+ *   since slots are pre-filled with the spec target value by default, not
+ *   left blank — a plain "differs from empty" check would misfire on
+ *   every load.
+ */
+
+import { hasFieldChanged } from './fieldDiff';
+import type { AQLCategory, DefectDefinition, ProductDimensionDef } from '../context/ConfigContext';
+
+const SLOTS_PER_DIM = 5;
+
+/** Fields compared directly against the original record in amendment mode. */
+const AMEND_COMPARABLE_FIELDS = [
+  'profileId',
+  'productCode',
+  'size',
+  'lineId',
+  'side',
+  'sequenceNo',
+  'shift',
+  'sampleSize',
+  'totalCarton',
+  'gloveWeight',
+  'timestamp',
+] as const;
+
+function isQualitativeCategory(categoryId: string, aqlCategories: AQLCategory[]): boolean {
+  const cat = aqlCategories.find((c) => c.id === categoryId);
+  return (cat?.aql ?? cat?.aqlLevel ?? '').toUpperCase() === 'PASS/FAIL/NIL';
+}
+
+export interface WizardDirtyInput {
+  inspectionData: Record<string, any>;
+  originalData?: Record<string, any> | null;
+  activeDimensions: ProductDimensionDef[];
+  defectDefinitions: DefectDefinition[];
+  aqlCategories: AQLCategory[];
+}
+
+export function isWizardDirty({
+  inspectionData,
+  originalData,
+  activeDimensions,
+  defectDefinitions,
+  aqlCategories,
+}: WizardDirtyInput): boolean {
+  const currentDimensions: Record<string, string[]> = inspectionData?.dimensions ?? {};
+  const currentDefects: Record<string, number> = inspectionData?.defects ?? {};
+  const currentQualitative: Record<string, string> = inspectionData?.qualitative ?? {};
+  const qualitativeIds = new Set(
+    defectDefinitions.filter((d) => isQualitativeCategory(d.categoryId, aqlCategories)).map((d) => d.id),
+  );
+
+  // ── Amendment mode: compare against the real original record ────────────
+  if (originalData != null) {
+    for (const key of AMEND_COMPARABLE_FIELDS) {
+      if (hasFieldChanged(true, originalData[key], inspectionData?.[key])) return true;
+    }
+
+    const originalDimensions: Record<string, string[]> = originalData.dimensions ?? {};
+    for (const dim of activeDimensions) {
+      for (let i = 0; i < SLOTS_PER_DIM; i++) {
+        if (hasFieldChanged(true, originalDimensions[dim.id]?.[i], currentDimensions[dim.id]?.[i])) return true;
+      }
+    }
+
+    const originalDefects: Record<string, number> = originalData.defects ?? {};
+    const originalQualitative: Record<string, string> = originalData.qualitative ?? {};
+    for (const defect of defectDefinitions) {
+      if (qualitativeIds.has(defect.id)) {
+        if (hasFieldChanged(true, originalQualitative[defect.id] ?? 'NIL', currentQualitative[defect.id] ?? 'NIL')) {
+          return true;
+        }
+      } else if (hasFieldChanged(true, originalDefects[defect.id] ?? 0, currentDefects[defect.id] ?? 0)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  // ── New-submission mode: compare against untouched-state baselines ──────
+  if (hasFieldChanged(true, '', inspectionData?.sequenceNo ?? '')) return true;
+  if (hasFieldChanged(true, '', (inspectionData?.totalCarton ?? '').toString())) return true;
+  if (hasFieldChanged(true, '', (inspectionData?.gloveWeight ?? '').toString())) return true;
+
+  const dirtySlots: Record<string, boolean[]> = inspectionData?.dimensionDirtySlots ?? {};
+  if (Object.values(dirtySlots).some((slots) => slots?.some(Boolean))) return true;
+
+  const hasNonZeroQuantCount = Object.entries(currentDefects).some(
+    ([id, count]) => !qualitativeIds.has(id) && typeof count === 'number' && count > 0,
+  );
+  if (hasNonZeroQuantCount) return true;
+
+  if (Object.values(currentQualitative).some((state) => state !== 'NIL')) return true;
+
+  return false;
+}
