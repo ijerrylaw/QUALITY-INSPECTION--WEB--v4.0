@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { useConfig, API_BASE_URL } from '../../context/ConfigContext';
-import { useAuth, authHeader } from '../../context/AuthContext';
+import { useAuth, authHeader, authIdentity } from '../../context/AuthContext';
 import { useToast } from '../../components/ui/ToastProvider';
 import {
   resolveShiftAndEffectiveDate,
@@ -483,8 +483,7 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
       dimensions: row.dimensions,
       dimensionMins: {},
       defects: row.defects,
-      aadObjectId: 'mock-user-id',
-      userPrincipalName: 'operator@oneglove.com',
+      ...authIdentity(user),
       totalCarton: parseInt(row.totalCarton) || 0,
       profileId,
     }));
