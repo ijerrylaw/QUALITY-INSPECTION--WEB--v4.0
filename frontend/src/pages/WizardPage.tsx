@@ -669,6 +669,7 @@ export function WizardPage() {
                 onBack={handleBackStep}
                 onUpdate={handleUpdate}
                 inspectionData={inspectionData}
+                originalData={originalData}
                 onSubmit={handleSubmit}
               />
             )}
