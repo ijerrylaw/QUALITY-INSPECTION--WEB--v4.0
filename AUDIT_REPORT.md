@@ -54,10 +54,12 @@ with its full original context, reasoning, and verification trail.
    error and no log line anywhere.
    → `CHANGELOG.md` §7.3, §7.5.
 
-6. **Tenant-scoped admin role question is unanswered.** Whether a future
-   role tier above or alongside `ADMIN` is ever wanted — even within one
-   single-tenant-per-deployment install — is raised nowhere in the docs
-   or code, and has no stated answer either way.
+6. ~~**Tenant-scoped admin role question is unanswered.**~~ **Closed, no
+   action.** Whether a future role tier above or alongside `ADMIN` is ever
+   wanted — even within one single-tenant-per-deployment install — is
+   raised nowhere in the docs or code. Group A (IT Admin/C-Suite/Directors)
+   covers the current single-tenant-per-deployment architecture. Revisit
+   if/when commercialization introduces multi-deployment oversight needs.
    → `CHANGELOG.md` §8.2, §8.6 (Q2), ranked item #5.
 
 7. **`GET /api/amendments/pending` has no pagination or row limit.**
@@ -83,6 +85,42 @@ with its full original context, reasoning, and verification trail.
     (`resolveVerdict.ts`) sets `CUMULATIVE` for BARRIER / `''` for
     PACKAGING; the frontend's separate hardcoded fallback
     (`ConfigContext.tsx`) sets `'N/A'` for both. Never reconciled.
+
+    **Diagnosed 2026-08-11:**
+    - **Backend** — `backend/src/engine/resolveVerdict.ts:37-59`
+      (`HARDCODED_DEFAULT_PROFILE` const), consumed at two call sites inside
+      `resolveVerdict()`: (a) line 238, when an explicit `profileId ===
+      'prof_default'` is requested but not found in AppConfig's
+      `inspectionProfiles`; (b) line 268, the final safety net when *no*
+      AppConfig profile has usable rules at all (`categories.length === 0`
+      or none carry both `aqlLevel` and `evaluationMode`). Server-side, runs
+      inside verdict computation — shared by all four routes that call
+      `resolveVerdict()` (`POST /api/submissions`, `POST
+      /api/verdict/preview`, `POST /api/submissions/:id/amendments`, `POST
+      /api/amendments/:id/approve`). This is the profile that actually
+      grades a submission.
+    - **Frontend** — `frontend/src/context/ConfigContext.tsx:291-315`, inside
+      `fetchConfig()`. Triggers only when the `GET /api/config` response's
+      `inspectionProfiles` array is missing or empty (a genuinely
+      zero-profile AppConfig). Injects a display-only profile object into
+      React state so the wizard's profile dropdown and category displays are
+      never empty. Never sent to the backend for grading — it only shapes
+      what the UI shows.
+    - **Reachability:** same real-world trigger (a zero-usable-profile
+      AppConfig — e.g. a fresh install before any admin-authored profile
+      exists), but through two independent layers. In that state, the
+      wizard displays the frontend's injected profile (BARRIER/PACKAGING as
+      `N/A`, read by UI logic like `StepDefects.tsx`'s `isQualitativeAql()`
+      gate — see `CHANGELOG.md` §12.2 — to decide toggle-vs-counter
+      rendering) while the user's actual submission is graded server-side
+      against the backend's own hardcoded profile (BARRIER as `CUMULATIVE`,
+      a quantitative zero-tolerance count). So the same zero-state user flow
+      can show one evaluation mode in the UI and grade under a different one
+      — reachable together, not just theoretically overlapping.
+    - **Read: drift, not deliberate.** `resolveVerdict.ts:27`'s own comment
+      states *"Mirrors ConfigContext.tsx getResolvedProfile() fallback"* —
+      confirming these two were intended to stay identical. They no longer
+      are. Unintentional drift, not two purposefully different behaviors.
     → `CHANGELOG.md` §3.B3 (secondary finding).
 
 11. **Confirmed live, 2026-08-10: an unrecognized explicit `profileId`

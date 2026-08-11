@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
-import { useConfig, API_BASE_URL } from '../../context/ConfigContext';
+import { useConfig, API_BASE_URL, hasUsableCategories } from '../../context/ConfigContext';
 import { useAuth, authHeader, authIdentity } from '../../context/AuthContext';
 import { useToast } from '../../components/ui/ToastProvider';
 import {
@@ -10,7 +10,7 @@ import {
 } from '../../utils/lotNumber';
 import {
   ShieldCheck, Barcode, Scaling, Activity, Calendar,
-  Hash, CheckCircle2, XCircle, Plus, ChevronRight, Ruler, AlertTriangle, Trash2
+  Hash, CheckCircle2, XCircle, Plus, ChevronRight, Ruler, AlertTriangle, AlertCircle, Trash2
 } from 'lucide-react';
 
 interface BatchLotRow {
@@ -346,6 +346,15 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
 
   // --- Shared Metadata ---
   const [profileId, setProfileId] = useState<string>('');
+
+  // ── Zero-usable-dimension entry gate ────────────────────────────────────
+  // Raw lookup (not getResolvedProfile()) — see hasUsableCategories() docstring
+  // for why the normalised/defaulted form would hide exactly this condition.
+  const selectedProfile = useMemo(
+    () => config?.inspectionProfiles?.find((p) => p.id === profileId) ?? null,
+    [config?.inspectionProfiles, profileId],
+  );
+  const isProfileUnusable = Boolean(profileId) && !hasUsableCategories(selectedProfile);
   const [productCode, setProductCode] = useState<string>('');
   const [size, setSize] = useState<string>('');
   const [lineId, setLineId] = useState<string>('');
@@ -457,6 +466,11 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
     const validRows = rows.filter(hasRealData);
     if (validRows.length === 0) {
       addToast('info', 'No lots have data entered yet.');
+      return;
+    }
+
+    if (isProfileUnusable) {
+      addToast('error', 'This product profile has no usable inspection categories configured — contact an admin before inspecting this lot.');
       return;
     }
 
@@ -648,6 +662,21 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
           </div>
 
         </div>
+
+        {/* ── Zero-Usable-Dimension Blocking Banner ───────────────────────── */}
+        {isProfileUnusable && (
+          <div className="mt-3 p-3 rounded-lg border border-l-4 border-amber-500/20 border-l-amber-500 bg-amber-500/5 flex gap-3 text-sm">
+            <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" strokeWidth={2} />
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-amber-400">PROFILE NOT USABLE</p>
+              <p className="text-xs text-muted mt-1">
+                This product profile has no usable inspection categories configured — contact an admin
+                before inspecting this lot. Go to <strong>Configuration Control → Quality Rules</strong> to
+                fix its AQL categories.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── BATCH GRID (Tier 2 Container) ─────────────────────────────────── */}

@@ -43,7 +43,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Prisma } from '../../generated/prisma/client';
-import { resolveVerdict, VerdictProfileNotFoundError } from '../engine/resolveVerdict';
+import { resolveVerdict, VerdictProfileNotFoundError, VerdictNoUsableProfileError } from '../engine/resolveVerdict';
 import prisma from '../lib/prismaClient';
 import {
   PIN_USER_DISPLAY_SELECT,
@@ -322,6 +322,10 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
     } catch (err) {
       if (err instanceof VerdictProfileNotFoundError) {
         res.status(404).json({ error: err.message });
+        return;
+      }
+      if (err instanceof VerdictNoUsableProfileError) {
+        res.status(500).json({ error: err.message, code: 'NO_USABLE_PROFILE' });
         return;
       }
       throw err;
@@ -689,6 +693,12 @@ router.post('/:id/amendments', requireRole(...ALL_ROLES), async (req: Request, r
           `'${submissionId}': ${err.message}`,
         );
         // recomputedVerdict/recomputedCategoryResults stay null — draft still proceeds.
+      } else if (err instanceof VerdictNoUsableProfileError) {
+        console.error(
+          `[POST /api/submissions/:id/amendments] Recompute preview unavailable for submission ` +
+          `'${submissionId}' — system-wide config problem: ${err.message}`,
+        );
+        // recomputedVerdict/recomputedCategoryResults stay null — draft still proceeds.
       } else {
         throw err;
       }
@@ -833,6 +843,14 @@ amendmentsRouter.post('/:id/approve', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN
         res.status(422).json({
           error: 'Cannot verify this amendment — its inspection profile could not be resolved. ' +
                  'Nothing was changed; resolve the profile reference before approving.',
+          details: err.message,
+        });
+        return;
+      }
+      if (err instanceof VerdictNoUsableProfileError) {
+        res.status(422).json({
+          error: 'Cannot verify this amendment — no AppConfig profile has usable AQL rules configured. ' +
+                 'Nothing was changed; fix the inspection profile configuration before approving.',
           details: err.message,
         });
         return;
@@ -1045,13 +1063,22 @@ verdictRouter.post('/preview', async (req: Request, res: Response) => {
       return;
     }
 
-    const result = await resolveVerdict({
-      profileId: (body['profileId'] as string | null | undefined) ?? null,
-      productCode: body['productCode'] as string | undefined,
-      sampleSize: Number(body['sampleSize']),
-      defectCounts: body['defects'] as Record<string, number>,
-      onUnresolvedProfile: 'fallback',
-    });
+    let result;
+    try {
+      result = await resolveVerdict({
+        profileId: (body['profileId'] as string | null | undefined) ?? null,
+        productCode: body['productCode'] as string | undefined,
+        sampleSize: Number(body['sampleSize']),
+        defectCounts: body['defects'] as Record<string, number>,
+        onUnresolvedProfile: 'fallback',
+      });
+    } catch (err) {
+      if (err instanceof VerdictNoUsableProfileError) {
+        res.status(500).json({ error: err.message, code: 'NO_USABLE_PROFILE' });
+        return;
+      }
+      throw err;
+    }
 
     res.json(result);
   } catch (err) {

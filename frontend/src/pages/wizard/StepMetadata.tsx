@@ -31,7 +31,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useConfig } from '../../context/ConfigContext';
+import { useConfig, hasUsableCategories } from '../../context/ConfigContext';
 import {
   resolveShiftAndEffectiveDate,
   composeYJJJ,
@@ -51,6 +51,7 @@ import {
   SplitSquareHorizontal,
   ChevronDown,
   ShieldCheck,
+  AlertCircle,
 } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastProvider';
 
@@ -67,6 +68,15 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
 
   // ── Form State ───────────────────────────────────────────────────────────
   const [profileId, setProfileId] = useState<string>(initialData?.profileId || '');
+
+  // ── Zero-usable-dimension entry gate ────────────────────────────────────
+  // Raw lookup (not getResolvedProfile()) — see hasUsableCategories() docstring
+  // for why the normalised/defaulted form would hide exactly this condition.
+  const selectedProfile = useMemo(
+    () => config?.inspectionProfiles?.find((p) => p.id === profileId) ?? null,
+    [config?.inspectionProfiles, profileId],
+  );
+  const isProfileUnusable = Boolean(profileId) && !hasUsableCategories(selectedProfile);
   const [productCode, setProductCode] = useState<string>(
     initialData?.productCode || localStorage.getItem('wizard_productCode') || ''
   );
@@ -287,6 +297,10 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
     e.preventDefault();
 
     if (!profileId) { addToast('error', 'Inspection Profile is required.'); return; }
+    if (isProfileUnusable) {
+      addToast('error', 'This product profile has no usable inspection categories configured — contact an admin before inspecting this lot.');
+      return;
+    }
     if (!productCode) { addToast('error', 'Product Code is required.'); return; }
     if (!size) { addToast('error', 'Glove Size is required.'); return; }
     if (!lineId) { addToast('error', 'Production Line is required.'); return; }
@@ -349,6 +363,21 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
               <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
           </div>
+
+          {/* ── Zero-Usable-Dimension Blocking Banner ─────────────────────── */}
+          {isProfileUnusable && (
+            <div className="p-3 rounded-lg border border-l-4 border-amber-500/20 border-l-amber-500 bg-amber-500/5 flex gap-3 text-sm">
+              <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" strokeWidth={2} />
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-amber-400">PROFILE NOT USABLE</p>
+                <p className="text-xs text-muted mt-1">
+                  This product profile has no usable inspection categories configured — contact an admin
+                  before inspecting this lot. Go to <strong>Configuration Control → Quality Rules</strong> to
+                  fix its AQL categories.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-6 pt-1">
 

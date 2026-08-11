@@ -125,6 +125,22 @@ export class VerdictProfileNotFoundError extends Error {
   }
 }
 
+/**
+ * Thrown when AppConfig has real, admin-authored profiles but none of them
+ * has usable AQL rules — distinct from the true first-run bootstrap case
+ * (AppConfig.inspectionProfiles completely empty), which still silently
+ * falls back to HARDCODED_DEFAULT_PROFILE below. See AUDIT_REPORT.md
+ * finding #10 — this should be unreachable in normal operation once the
+ * wizard blocks entry against an unusable profile (frontend StepMetadata.tsx
+ * / BatchEntry.tsx), but must fail loudly, not silently, if it is ever hit.
+ */
+export class VerdictNoUsableProfileError extends Error {
+  constructor() {
+    super('No AppConfig profile has usable AQL rules configured.');
+    this.name = 'VerdictNoUsableProfileError';
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // RESOLVE + EVALUATE
 // ─────────────────────────────────────────────────────────────────────────────
@@ -233,8 +249,12 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
   if (profileId) {
     let profile = profilesList.find((p: any) => p.id === profileId);
 
-    // Sentinel for the UI-configured global standard default
-    if (!profile && profileId === 'prof_default') {
+    // Sentinel for the UI-configured global standard default — only for the
+    // true first-run bootstrap case (AppConfig has zero profiles at all).
+    // If profilesList is non-empty but 'prof_default' specifically isn't in
+    // it, fall through to the standard not-found handling below instead of
+    // silently grading against the hardcoded profile.
+    if (!profile && profileId === 'prof_default' && profilesList.length === 0) {
       profile = HARDCODED_DEFAULT_PROFILE;
     }
 
@@ -264,11 +284,22 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
       categories        = normalized.categories;
       defectDefinitions = normalized.defectDefinitions;
       evaluationProfileId = String(usableAppConfigProfile.id);
-    } else {
+    } else if (profilesList.length === 0) {
+      // True first-run bootstrap: AppConfig has no profiles configured yet.
+      // Legitimate, intentional fallback — see AUDIT_REPORT.md finding #13.
       const normalized  = normalizeForEngine(HARDCODED_DEFAULT_PROFILE);
       categories        = normalized.categories;
       defectDefinitions = normalized.defectDefinitions;
       evaluationProfileId = 'prof_default';
+    } else {
+      // AppConfig has real, admin-authored profiles, but none of them is
+      // usable. Not the bootstrap case — fail loudly instead of silently
+      // grading against the hardcoded profile. See AUDIT_REPORT.md finding #10.
+      console.error(
+        '[resolveVerdict] No usable profile found — AppConfig has ' +
+        `${profilesList.length} profile(s) configured but none has usable AQL rules.`,
+      );
+      throw new VerdictNoUsableProfileError();
     }
   }
 

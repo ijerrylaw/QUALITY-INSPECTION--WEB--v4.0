@@ -146,6 +146,26 @@ export interface InspectionProfile {
   defectDefinitions: DefectDefinition[];
 }
 
+/**
+ * A profile is usable for AQL evaluation only if at least one category has
+ * both aqlLevel and evaluationMode configured (checking both field-name
+ * variants). Mirrors `hasUsableRules()` in `backend/src/engine/resolveVerdict.ts`
+ * exactly — kept in sync deliberately, see AUDIT_REPORT.md finding #10.
+ *
+ * Callers must pass the RAW profile object (e.g. from
+ * `config.inspectionProfiles.find(...)`), never `getResolvedProfile()`'s
+ * output — its category normalisation defaults a missing evalMode to
+ * 'CUMULATIVE', which would mask exactly the unusable state this checks for.
+ */
+export function hasUsableCategories(profile: { aqlCategories?: AQLCategory[] } | null | undefined): boolean {
+  return (profile?.aqlCategories ?? []).some((c) => {
+    const aqlLevel       = c.aqlLevel       ?? c.aql;
+    const evaluationMode = c.evaluationMode ?? c.evalMode;
+    return aqlLevel && String(aqlLevel).trim() !== ''
+        && evaluationMode && String(evaluationMode).trim() !== '';
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // APP CONFIG  (DATA_SCHEMAS_AND_TYPES.md §3)
 // ─────────────────────────────────────────────────────────────────────────────
