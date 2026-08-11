@@ -45,6 +45,12 @@ import { Router, Request, Response } from 'express';
 import { Prisma } from '../../generated/prisma/client';
 import { resolveVerdict, VerdictProfileNotFoundError } from '../engine/resolveVerdict';
 import prisma from '../lib/prismaClient';
+import {
+  PIN_USER_DISPLAY_SELECT,
+  displayNameOf,
+  resolveIdentity,
+  type PinUserDisplay,
+} from '../lib/identity';
 import { requireRole, ALL_ROLES } from '../middleware/auth';
 
 const router = Router();
@@ -57,7 +63,13 @@ const router = Router();
  *  validate the `amendmentStatus` filter query param on GET /api/submissions. */
 const AMENDMENT_STATUSES = ['UNMODIFIED', 'AMENDMENT_DRAFTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED'] as const;
 
-/** Required string-typed fields on every incoming submission payload */
+/**
+ * Required string-typed fields on every incoming submission payload.
+ *
+ * Identity fields are deliberately absent — which of them are required
+ * depends on the caller's loginMethod, so they're validated by
+ * resolveIdentity() (lib/identity.ts) rather than by this flat list.
+ */
 const REQUIRED_STRING_FIELDS = [
   'productCode',
   'productionDate',
@@ -66,9 +78,74 @@ const REQUIRED_STRING_FIELDS = [
   'shift',
   'batchNumber',
   'size',
-  'aadObjectId',
-  'userPrincipalName',
 ] as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IDENTITY JOINS & DISPLAY-NAME MAPPING
+//
+// Every endpoint that returns a Submission or AmendmentLog resolves the
+// creator's name server-side, so no client ever has to know whether a row
+// came from a PIN login or an SSO one. Clients read `inspectorName` /
+// `requestedByName` / `reviewedByName` and nothing else.
+//
+// The `select` in these includes is load-bearing, not stylistic: PinUser
+// carries pinHash/pinSalt, and `include: { pinUser: true }` would serialize
+// them straight into the response body.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SUBMISSION_IDENTITY_INCLUDE = {
+  pinUser: { select: PIN_USER_DISPLAY_SELECT },
+} as const;
+
+const AMENDMENT_LOG_IDENTITY_INCLUDE = {
+  requestedByPinUser: { select: PIN_USER_DISPLAY_SELECT },
+  reviewedByPinUser: { select: PIN_USER_DISPLAY_SELECT },
+} as const;
+
+interface AmendmentLogIdentityFields {
+  requestedBy: string | null;
+  requestedByDisplayName: string | null;
+  requestedByPinUser: PinUserDisplay | null;
+  reviewedBy: string | null;
+  reviewedByDisplayName: string | null;
+  reviewedByPinUser: PinUserDisplay | null;
+}
+
+interface SubmissionIdentityFields {
+  userPrincipalName: string | null;
+  displayName: string | null;
+  pinUser: PinUserDisplay | null;
+}
+
+/** Adds requestedByName/reviewedByName to an AmendmentLog. */
+function withAmendmentLogNames<T extends AmendmentLogIdentityFields>(log: T) {
+  return {
+    ...log,
+    requestedByName: displayNameOf({
+      pinUser: log.requestedByPinUser,
+      displayName: log.requestedByDisplayName,
+      userPrincipalName: log.requestedBy,
+    }),
+    reviewedByName: displayNameOf({
+      pinUser: log.reviewedByPinUser,
+      displayName: log.reviewedByDisplayName,
+      userPrincipalName: log.reviewedBy,
+    }),
+  };
+}
+
+/** Adds inspectorName to a Submission, and names to any amendment logs it carries. */
+function withSubmissionNames<
+  T extends SubmissionIdentityFields & { amendmentLogs?: AmendmentLogIdentityFields[] },
+>(submission: T) {
+  return {
+    ...submission,
+    inspectorName: displayNameOf(submission),
+    ...(submission.amendmentLogs && {
+      amendmentLogs: submission.amendmentLogs.map(withAmendmentLogNames),
+    }),
+  };
+}
 
 /**
  * Normalizes a `defects`/`dimensions` value that may arrive as a JSON string
@@ -146,16 +223,24 @@ async function isKnownProfileId(profileId: string): Promise<boolean> {
  *   "dimensions":     { "thickness": [0.12, 0.11], "length": [280, 281] },
  *   "dimensionMins":  { "thickness": 0.10, "length": 270 },
  *   "defects":        { "def-id-1": 2, "def-id-2": 0 },
- *   "aadObjectId":    "azure-ad-object-id",
- *   "userPrincipalName": "operator@factory.com",
  *   "profileId":      "optional-profile-cuid",   // optional
  *   "totalCarton":    1200,                        // optional
- *   "gloveWeight":    5.2                          // optional
+ *   "gloveWeight":    5.2,                         // optional
+ *
+ *   // Identity — shape depends on how the submitter logged in.
+ *   // PIN login:
+ *   "loginMethod":    "PIN",
+ *   "pinUserId":      "pin-user-cuid",
+ *   // ...or M365/SSO login:
+ *   "loginMethod":       "M365",
+ *   "aadObjectId":       "azure-ad-object-id",
+ *   "userPrincipalName": "operator@factory.com",
+ *   "displayName":       "Amir Hassan"            // optional
  * }
  *
  * Response 201 (JSON):
  * {
- *   "submission": { ... },
+ *   "submission": { ..., "inspectorName": "Ahmad Razak" },
  *   "verdict": "PASSED" | "FAILED",
  *   "categoryResults": [ ... ]
  * }
@@ -191,10 +276,20 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
       missingFields.push('defects (must be a key:count object)');
     }
 
+    // Identity is validated separately because which fields are required
+    // depends on how the submitter logged in. Rejecting here is deliberate:
+    // a submission with no resolvable identity would be permanently
+    // unattributable, which is worse than refusing to record it.
+    const identityResult = resolveIdentity(body);
+    if (!identityResult.ok) {
+      missingFields.push(...identityResult.missingFields);
+    }
+
     if (missingFields.length > 0) {
       res.status(400).json({ error: 'Missing or malformed required fields', missingFields });
       return;
     }
+    const identity = identityResult.ok ? identityResult.identity : null;
 
     const sampleSize = Number(body['sampleSize']);
     if (!Number.isFinite(sampleSize) || sampleSize < 2) {
@@ -284,13 +379,17 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
           dimensionMins:       JSON.stringify(body['dimensionMins']),
           defects:             JSON.stringify(defectCounts),
           verdict,
-          aadObjectId:         String(body['aadObjectId']),
-          userPrincipalName:   String(body['userPrincipalName']),
+          // Exactly one identity side is populated — see lib/identity.ts.
+          pinUserId:           identity?.pinUserId ?? null,
+          aadObjectId:         identity?.aadObjectId ?? null,
+          userPrincipalName:   identity?.userPrincipalName ?? null,
+          displayName:         identity?.displayName ?? null,
           amendmentStatus:     'UNMODIFIED',
           totalCarton:  body['totalCarton'] != null ? Number(body['totalCarton']) : null,
           gloveWeight:  body['gloveWeight']  != null ? Number(body['gloveWeight'])  : null,
           profileId:    validDbProfileId,
         },
+        include: SUBMISSION_IDENTITY_INCLUDE,
       });
     } catch (err) {
       if (isUniqueConstraintViolation(err, 'batchNumber')) {
@@ -300,7 +399,7 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
       throw err;
     }
 
-    res.status(201).json({ submission: newSubmission, verdict, categoryResults });
+    res.status(201).json({ submission: withSubmissionNames(newSubmission), verdict, categoryResults });
 
   } catch (err) {
     console.error('[POST /api/submissions]', err);
@@ -394,14 +493,24 @@ router.get('/', async (req: Request, res: Response) => {
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip,
         take: limit,
-        include: { amendmentLogs: true },
+        include: {
+          ...SUBMISSION_IDENTITY_INCLUDE,
+          amendmentLogs: { include: AMENDMENT_LOG_IDENTITY_INCLUDE },
+        },
       }),
       prisma.submission.count({ where }),
     ]);
 
     const hasMore = skip + submissions.length < totalCount;
 
-    res.status(200).json({ submissions, count: submissions.length, page, limit, totalCount, hasMore });
+    res.status(200).json({
+      submissions: submissions.map(withSubmissionNames),
+      count: submissions.length,
+      page,
+      limit,
+      totalCount,
+      hasMore,
+    });
   } catch (err) {
     console.error('[GET /api/submissions]', err);
     res.status(500).json({ error: 'Internal server error', details: String(err) });
@@ -471,7 +580,11 @@ router.get('/:id', async (req: Request, res: Response) => {
     const submission = await prisma.submission.findUnique({
       where: { id: submissionId },
       include: {
-        amendmentLogs: { orderBy: { createdAt: 'asc' } },
+        ...SUBMISSION_IDENTITY_INCLUDE,
+        amendmentLogs: {
+          orderBy: { createdAt: 'asc' },
+          include: AMENDMENT_LOG_IDENTITY_INCLUDE,
+        },
       },
     });
 
@@ -480,7 +593,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    res.status(200).json({ submission });
+    res.status(200).json({ submission: withSubmissionNames(submission) });
   } catch (err) {
     console.error('[GET /api/submissions/:id]', err);
     res.status(500).json({ error: 'Internal server error', details: String(err) });
@@ -506,7 +619,10 @@ router.get('/:id', async (req: Request, res: Response) => {
  *   "newValues": {
  *     "productCode": "...",
  *     // ... full submission payload
- *   }
+ *   },
+ *   // Requester identity, same shape as POST /api/submissions:
+ *   "loginMethod": "PIN" | "M365",
+ *   "pinUserId": "..."   // PIN, or aadObjectId/userPrincipalName/displayName for M365
  * }
  */
 router.post('/:id/amendments', requireRole(...ALL_ROLES), async (req: Request, res: Response) => {
@@ -523,6 +639,18 @@ router.post('/:id/amendments', requireRole(...ALL_ROLES), async (req: Request, r
       res.status(400).json({ error: 'newValues payload is required' });
       return;
     }
+
+    // Who is asking for this change — an amendment with no attributable
+    // requester defeats the point of the audit trail it creates.
+    const identityResult = resolveIdentity(req.body as Record<string, unknown>);
+    if (!identityResult.ok) {
+      res.status(400).json({
+        error: 'Missing or malformed required fields',
+        missingFields: identityResult.missingFields,
+      });
+      return;
+    }
+    const requester = identityResult.identity;
 
     // 1. Fetch the original submission
     const originalSubmission = await prisma.submission.findUnique({
@@ -577,7 +705,9 @@ router.post('/:id/amendments', requireRole(...ALL_ROLES), async (req: Request, r
           submissionId,
           originalValues: JSON.stringify(originalSubmission),
           newValues: JSON.stringify(body.newValues),
-          requestedBy: 'operator@oneglove.com', // Mock authentication for now
+          requestedByPinUserId:   requester.pinUserId,
+          requestedBy:            requester.userPrincipalName,
+          requestedByDisplayName: requester.displayName,
           requestedAt: new Date().toISOString(),
           supervisorNote: body.reason.trim(),
           status: 'PENDING_APPROVAL',
@@ -586,13 +716,14 @@ router.post('/:id/amendments', requireRole(...ALL_ROLES), async (req: Request, r
           recomputedFailedDimensions,
           recomputedDimensionResults,
         },
+        include: AMENDMENT_LOG_IDENTITY_INCLUDE,
       }),
     ]);
 
     res.status(201).json({
       message: 'Amendment submitted successfully for approval.',
       submission: transaction[0],
-      amendmentLog: transaction[1],
+      amendmentLog: withAmendmentLogNames(transaction[1]),
       recomputedVerdict,
     });
   } catch (err) {
@@ -618,15 +749,17 @@ amendmentsRouter.get('/pending', async (_req: Request, res: Response) => {
     const pending = await prisma.submission.findMany({
       where: { amendmentStatus: 'PENDING_APPROVAL' },
       include: {
+        ...SUBMISSION_IDENTITY_INCLUDE,
         amendmentLogs: {
           orderBy: { createdAt: 'desc' },
           take: 1,
+          include: AMENDMENT_LOG_IDENTITY_INCLUDE,
         },
       },
       orderBy: { updatedAt: 'desc' },
     });
 
-    res.json({ amendments: pending });
+    res.json({ amendments: pending.map(withSubmissionNames) });
   } catch (err) {
     console.error('[GET /api/amendments/pending]', err);
     res.status(500).json({ error: 'Internal server error', details: String(err) });
@@ -639,10 +772,22 @@ amendmentsRouter.get('/pending', async (_req: Request, res: Response) => {
 // for persistence. Both values are stored on the AmendmentLog for audit.
 // If the amendment's profile can't be resolved, approval hard-fails: this is
 // the one place a verdict is permanently written, so we never guess here.
-// The reviewer is mocked until Azure AD integration is complete.
+// The reviewer's identity comes from the request body (see lib/identity.ts).
 amendmentsRouter.post('/:id/approve', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Request, res: Response) => {
   try {
     const submissionId = String(req.params['id']);
+
+    // Who is approving — this is the accountability record for a permanent
+    // change to a verdict, so it must name a real reviewer.
+    const identityResult = resolveIdentity(req.body as Record<string, unknown>);
+    if (!identityResult.ok) {
+      res.status(400).json({
+        error: 'Missing or malformed required fields',
+        missingFields: identityResult.missingFields,
+      });
+      return;
+    }
+    const reviewer = identityResult.identity;
 
     // 1. Find the latest pending AmendmentLog for this submission
     const amendmentLog = await prisma.amendmentLog.findFirst({
@@ -754,18 +899,22 @@ amendmentsRouter.post('/:id/approve', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN
           ...(newValues['gloveWeight']          != null && { gloveWeight:         parseFloat(String(newValues['gloveWeight'])) }),
           ...(newValues['profileId']            != null && { profileId:           validDbProfileId }),
         },
+        include: SUBMISSION_IDENTITY_INCLUDE,
       }),
       prisma.amendmentLog.update({
         where: { id: amendmentLog.id },
         data: {
           status:     'APPROVED',
-          reviewedBy: 'executive@oneglove.com', // Mock until Azure AD integration
+          reviewedByPinUserId:   reviewer.pinUserId,
+          reviewedBy:            reviewer.userPrincipalName,
+          reviewedByDisplayName: reviewer.displayName,
           reviewedAt: now,
           recomputedVerdict:          recomputed.verdict,
           recomputedCategoryResults:  JSON.stringify(recomputed.categoryResults),
           recomputedFailedDimensions: recomputed.failedDimensions,
           recomputedDimensionResults: JSON.stringify(recomputed.dimensionResults),
         },
+        include: AMENDMENT_LOG_IDENTITY_INCLUDE,
       }),
       ]);
     } catch (err) {
@@ -786,8 +935,8 @@ amendmentsRouter.post('/:id/approve', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN
 
     res.json({
       message: 'Amendment approved and merged successfully.',
-      submission: updatedSubmission,
-      amendmentLog: updatedLog,
+      submission: withSubmissionNames(updatedSubmission),
+      amendmentLog: withAmendmentLogNames(updatedLog),
       verdictRecompute: {
         clientSupplied: clientSuppliedVerdict,
         serverRecomputed: recomputed.verdict,
@@ -807,6 +956,17 @@ amendmentsRouter.post('/:id/reject', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'
     const submissionId = String(req.params['id']);
     const body = req.body as { reason?: string };
 
+    // Who is rejecting — same accountability requirement as approval.
+    const identityResult = resolveIdentity(req.body as Record<string, unknown>);
+    if (!identityResult.ok) {
+      res.status(400).json({
+        error: 'Missing or malformed required fields',
+        missingFields: identityResult.missingFields,
+      });
+      return;
+    }
+    const reviewer = identityResult.identity;
+
     // 1. Find the latest pending AmendmentLog
     const amendmentLog = await prisma.amendmentLog.findFirst({
       where: { submissionId, status: 'PENDING_APPROVAL' },
@@ -825,22 +985,26 @@ amendmentsRouter.post('/:id/reject', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'
       prisma.submission.update({
         where: { id: submissionId },
         data: { amendmentStatus: 'REJECTED' },
+        include: SUBMISSION_IDENTITY_INCLUDE,
       }),
       prisma.amendmentLog.update({
         where: { id: amendmentLog.id },
         data: {
           status:        'REJECTED',
-          reviewedBy:    'executive@oneglove.com', // Mock until Azure AD integration
+          reviewedByPinUserId:   reviewer.pinUserId,
+          reviewedBy:            reviewer.userPrincipalName,
+          reviewedByDisplayName: reviewer.displayName,
           reviewedAt:    now,
           supervisorNote: body.reason?.trim() ?? amendmentLog.supervisorNote,
         },
+        include: AMENDMENT_LOG_IDENTITY_INCLUDE,
       }),
     ]);
 
     res.json({
       message: 'Amendment rejected.',
-      submission: updatedSubmission,
-      amendmentLog: updatedLog,
+      submission: withSubmissionNames(updatedSubmission),
+      amendmentLog: withAmendmentLogNames(updatedLog),
     });
   } catch (err) {
     console.error('[POST /api/amendments/:id/reject]', err);
