@@ -20,11 +20,12 @@ with its full original context, reasoning, and verification trail.
 
 1. **Submission-identity-stamping gap.** `Submission.aadObjectId`/
    `userPrincipalName` are hardcoded literals (`'mock-user-id'`,
-   `'operator@oneglove.com'`) on every submission, regardless of login
-   method (PIN or M365) — no submission today is attributable to any real
-   user. Blocks building a reliable "does this user have submission
-   history" check (concretely, this is what blocked PIN hard-delete in
-   the Staff PIN Access task).
+   `'operator@oneglove.com'`, `'sample-data-not-a-real-user'`) on every
+   submission, regardless of login method (PIN or M365) — no submission
+   today is attributable to any real user. The third literal appears on
+   10 of the 14 baseline rows. Blocks building a reliable "does this user
+   have submission history" check (concretely, this is what blocked PIN
+   hard-delete in the Staff PIN Access task).
    First flagged: Staff PIN Access session. → `CHANGELOG.md` §17.
 
 2. **Real defect taxonomy seeded for `prof_default` only.** MEDLINE,
@@ -117,3 +118,23 @@ with its full original context, reasoning, and verification trail.
     — low-stakes remainder of a larger question that was otherwise
     superseded by the single-tenant-per-deployment correction.
     → `CHANGELOG.md` §5.4, §9.2.
+
+14. **No qualitative (PASS/FAIL/NIL) defect category exists on any
+    currently configured profile.** This code path has zero live test
+    coverage. Flag for manual test pass when a profile first adds a
+    qualitative-tier defect to confirm the entire verdict chain works
+    end-to-end for this dimension type.
+
+15. **Amendment discard-guard's new-entry dirty-check is fragile.** The
+    dirty-check logic is anchored to `sequenceNo` being the only field
+    with no auto-population path. This is a hidden dependency: a future
+    config change that adds auto-population elsewhere would silently
+    bypass the dirty-check unless a matching exclusion is added. Recommend
+    adding a code comment noting this dependency at minimum.
+
+16. **`prisma db push` does not auto-regenerate the Prisma client.** This
+    has caused integration bugs twice (schema changes persisted but client
+    still used old types). Recommend documenting this as a required manual
+    step in project workflow notes: always run `prisma generate` after any
+    `db push`, or use `prisma migrate deploy` (which auto-regenerates) in
+    production workflows.
