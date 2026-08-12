@@ -27,31 +27,60 @@ interface PendingAmendment {
 
 // ── ApprovalsQueue ────────────────────────────────────────────────────────────
 
+// Mirrors HistoryFeed.tsx's PAGE_SIZE/loadPage() pagination pattern — same
+// backend page/limit contract (GET /api/amendments/pending, AUDIT_REPORT.md).
+const PAGE_SIZE = 50;
+
 export function ApprovalsQueue() {
   const { user } = useAuth();
   const [amendments, setAmendments] = useState<PendingAmendment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
   const [selectedAmend, setSelectedAmend] = useState<PendingAmendment | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
   // ── Fetch pending amendments from real backend ────────────────────────────
-  const fetchPending = () => {
-    setLoading(true);
-    fetch(`${API_BASE_URL}/api/amendments/pending`)
+  // `replace: true` (mount, and after approve/reject) re-fetches page 1 at
+  // whatever depth was already loaded, so a mutation that shrinks the pending
+  // set can't leave stale rows or break "Load More" depth. `replace: false`
+  // (Load More) fetches the next page and appends with id-based de-dupe —
+  // same convention as HistoryFeed.tsx's loadPage().
+  const loadPage = (pageNum: number, options: { replace: boolean }) => {
+    const limit = options.replace ? pageNum * PAGE_SIZE : PAGE_SIZE;
+    const fetchPage = options.replace ? 1 : pageNum;
+    if (options.replace) setLoading(true); else setLoadingMore(true);
+
+    fetch(`${API_BASE_URL}/api/amendments/pending?page=${fetchPage}&limit=${limit}`)
       .then((res) => res.json())
       .then((data) => {
-        setAmendments(data.amendments ?? []);
-        setLoading(false);
+        const incoming: PendingAmendment[] = data.amendments ?? [];
+        if (options.replace) {
+          setAmendments(incoming);
+        } else {
+          setAmendments((prev) => {
+            const existingIds = new Set(prev.map((a) => a.id));
+            return [...prev, ...incoming.filter((a) => !existingIds.has(a.id))];
+          });
+        }
+        setPage(pageNum);
+        setHasMore(Boolean(data.hasMore));
       })
       .catch((err) => {
         console.error('[ApprovalsQueue] Failed to fetch pending amendments:', err);
-        setLoading(false);
+      })
+      .finally(() => {
+        if (options.replace) setLoading(false); else setLoadingMore(false);
       });
   };
 
   useEffect(() => {
-    fetchPending();
+    loadPage(1, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleLoadMore = () => loadPage(page + 1, { replace: false });
 
   // ── Approve / Reject ──────────────────────────────────────────────────────
   const handleAction = async (submissionId: string, action: 'approve' | 'reject') => {
@@ -63,9 +92,10 @@ export function ApprovalsQueue() {
         body: JSON.stringify(authIdentity(user)),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      // Refresh list after action
+      // Refresh list after action — re-fetches at the current loaded depth
+      // rather than resetting to page 1.
       setSelectedAmend(null);
-      fetchPending();
+      loadPage(page, { replace: true });
     } catch (err) {
       console.error(`[ApprovalsQueue] ${action} failed:`, err);
     } finally {
@@ -105,7 +135,7 @@ export function ApprovalsQueue() {
         <h3 className="text-xl font-bold text-primary uppercase">No Pending Approvals</h3>
         <p className="text-muted mt-2 text-sm">All amendment requests have been processed.</p>
         <button
-          onClick={fetchPending}
+          onClick={() => loadPage(1, { replace: true })}
           className="mt-6 h-9 px-4 rounded-lg bg-canvas border border-brand-primary/50 text-brand-secondary hover:bg-brand-primary/10 hover:border-brand-primary font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none mx-auto"
         >
           <RefreshCw className="w-3.5 h-3.5" strokeWidth={2} />
@@ -171,6 +201,14 @@ export function ApprovalsQueue() {
           </tbody>
         </table>
       </div>
+
+      {!loading && hasMore && (
+        <div className="flex justify-center pt-2">
+          <Button variant="secondary" onClick={handleLoadMore} disabled={loadingMore} className="px-8">
+            {loadingMore ? 'LOADING…' : 'LOAD MORE'}
+          </Button>
+        </div>
+      )}
 
       {/* Diff Viewer Modal */}
       {selectedAmend && (() => {

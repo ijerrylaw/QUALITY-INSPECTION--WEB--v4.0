@@ -77,7 +77,9 @@
 ### Amendments & Approvals (Group A/B Routes)
 
 * `GET /api/amendments/pending`
-  * **Role:** Returns all submissions where `amendmentStatus === 'PENDING_APPROVAL'`, with the most recent `AmendmentLog` included for the diff viewer.
+  * **Role:** Returns submissions where `amendmentStatus === 'PENDING_APPROVAL'`, with the most recent `AmendmentLog` included for the diff viewer. Ordered by `updatedAt` descending (`id` descending as a tiebreaker).
+  * **Query params:** `page` (1-based, default `1`), `limit` (default `50`, capped at `200`) — same pagination contract as `GET /api/submissions`.
+  * **Response 200:** `{ amendments[], count, page, limit, totalCount, hasMore }` — `amendments` is the page's rows; `hasMore` indicates whether a further page exists.
   * **Auth:** None required.
 
 * `POST /api/amendments/:id/approve`

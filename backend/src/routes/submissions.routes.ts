@@ -846,24 +846,55 @@ export default router;
 export const amendmentsRouter = Router();
 
 // ── GET /api/amendments/pending ────────────────────────────────────────────
-// Returns all submissions where amendmentStatus === 'PENDING_APPROVAL',
-// including the most recent AmendmentLog for each (for the diff viewer).
-amendmentsRouter.get('/pending', async (_req: Request, res: Response) => {
+// Returns submissions where amendmentStatus === 'PENDING_APPROVAL', including
+// the most recent AmendmentLog for each (for the diff viewer). Paginated —
+// same shape as GET /api/submissions (AUDIT_REPORT.md: this endpoint was
+// previously unbounded, same bug class already fixed there).
+amendmentsRouter.get('/pending', async (req: Request, res: Response) => {
   try {
-    const pending = await prisma.submission.findMany({
-      where: { amendmentStatus: 'PENDING_APPROVAL' },
-      include: {
-        ...SUBMISSION_IDENTITY_INCLUDE,
-        amendmentLogs: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          include: AMENDMENT_LOG_IDENTITY_INCLUDE,
-        },
-      },
-      orderBy: { updatedAt: 'desc' },
-    });
+    const parsedPage = Number(req.query['page']);
+    const page = Number.isInteger(parsedPage) && parsedPage >= 1 ? parsedPage : 1;
 
-    res.json({ amendments: pending.map(withSubmissionNames) });
+    const parsedLimit = Number(req.query['limit']);
+    const limit = Number.isInteger(parsedLimit) && parsedLimit >= 1
+      ? Math.min(parsedLimit, MAX_PAGE_SIZE)
+      : DEFAULT_PAGE_SIZE;
+
+    const skip = (page - 1) * limit;
+    const where: Prisma.SubmissionWhereInput = { amendmentStatus: 'PENDING_APPROVAL' };
+
+    const [pending, totalCount] = await Promise.all([
+      prisma.submission.findMany({
+        where,
+        // `id` added as a secondary sort key alongside `updatedAt` — same
+        // rationale as the submissions list above: SQLite's DateTime has
+        // finite resolution, so two rows updated in the same instant would
+        // otherwise tie nondeterministically across page boundaries.
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: limit,
+        include: {
+          ...SUBMISSION_IDENTITY_INCLUDE,
+          amendmentLogs: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            include: AMENDMENT_LOG_IDENTITY_INCLUDE,
+          },
+        },
+      }),
+      prisma.submission.count({ where }),
+    ]);
+
+    const hasMore = skip + pending.length < totalCount;
+
+    res.json({
+      amendments: pending.map(withSubmissionNames),
+      count: pending.length,
+      page,
+      limit,
+      totalCount,
+      hasMore,
+    });
   } catch (err) {
     console.error('[GET /api/amendments/pending]', err);
     res.status(500).json({ error: 'Internal server error', details: String(err) });
