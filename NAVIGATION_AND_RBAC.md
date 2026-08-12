@@ -37,9 +37,9 @@ Six roles exist, unchanged from the original design. On top of them sits a coars
 
 ## 3. AUTHENTICATION: LOGIN METHODS
 
-### 3.1 Microsoft 365 / Azure AD — credentials received, MSAL.js wiring pending
+### 3.1 Microsoft 365 / Azure AD — credentials wired, MSAL.js popup flow pending
 
-**Credentials received:** Tenant ID and Client ID obtained from IT on 2026-08-10. **Real MSAL.js implementation is not yet started** — that work is queued as a separate task, pending its own `/grill-me` session before code begins.
+**Credentials wired (2026-08-12):** Tenant ID and Client ID are now in place in `frontend/.env.local` (`VITE_MSAL_TENANT_ID`, `VITE_MSAL_CLIENT_ID`). The app's MSAL config is recognized by Azure and attempts authentication, but the real full-login MSAL.js implementation (popup/redirect flow) is still pending — the current code still uses the dev-only mock login path (`import.meta.env.DEV` guard). **Note:** MSAL popup-based OAuth cannot be tested in Claude Code's Browser pane (sandboxed environment limitation); real M365 login can only be verified in a full external browser. See [[project_browser_pane_msal_limitation]] for details.
 
 **App Registration details (confirmed):**
 * App type: Single-Page Application (SPA) — no Client Secret required or issued (correct for MSAL.js in a browser context).
