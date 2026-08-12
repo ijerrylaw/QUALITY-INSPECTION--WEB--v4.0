@@ -204,3 +204,24 @@ with its full original context, reasoning, and verification trail.
     (surface as an error/warning in `QualityRules.tsx`? require the field at
     save time? keep the default but only for the documented zero-state case?)
     before a fix is drafted.
+
+---
+
+## Workflow Notes
+
+**Backend dev server (`tsx` vs `tsx watch`):** The current `.claude/launch.json`
+starts the backend dev server with plain `tsx` (from the npm script in
+`package.json`, which calls `tsx src/index.ts`). Unlike typical node-dev
+watchers or `tsx watch`, plain `tsx` does not reload when source files
+change — changes to `backend/src/**/*.ts` require a manual server restart
+(`preview_stop` then `preview_start` in the Browser pane). This has caused
+real bugs twice (live testing silently ran against stale code, producing
+"fix didn't work" signals that were actually "server hasn't restarted"
+problems). Recommend either: (a) switching the npm script to use `tsx watch`
+if that's compatible with the project's structure and build story; or (b)
+documenting this manual-restart requirement prominently in the project onboarding
+or dev-server setup notes to prevent wasted debugging time. **Decision needed:** is
+`tsx watch` the correct fix, or was plain `tsx` chosen deliberately for some
+reason (e.g. compatibility with the Prisma generation step, or avoiding
+double-restarts)? Flagged as a question, not a confirmed bug, until that's
+answered.
