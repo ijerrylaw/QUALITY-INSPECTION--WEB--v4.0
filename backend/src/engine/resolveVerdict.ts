@@ -18,7 +18,7 @@
 
 import { evaluateAQLVerdict } from './aqlEvaluator';
 import type { CategoryResult } from './aqlEvaluator';
-import { evaluateDimensions } from './dimensionEvaluator';
+import { evaluateDimensions, hasUsableProductMatrix } from './dimensionEvaluator';
 import type { DimensionResult, ProductConfig, ProductDimensionDef } from './dimensionEvaluator';
 import prisma from '../lib/prismaClient';
 
@@ -138,6 +138,22 @@ export class VerdictNoUsableProfileError extends Error {
   constructor() {
     super('No AppConfig profile has usable AQL rules configured.');
     this.name = 'VerdictNoUsableProfileError';
+  }
+}
+
+/**
+ * Thrown when dimension evaluation was requested (size + measurements
+ * supplied) but productMatrixConfig has no usable per-size spec for the
+ * two fixed dimensions (GLOVE LENGTH, PALM WIDTH) — see AUDIT_REPORT.md
+ * finding #5. Should be unreachable in normal operation once the wizard
+ * blocks entry (StepDimensions.tsx / BatchEntry.tsx), but must fail
+ * loudly, not silently grade with threshold=0/maxThreshold=Infinity, if
+ * ever hit anyway.
+ */
+export class VerdictNoUsableDimensionConfigError extends Error {
+  constructor(public readonly productCode: string, public readonly size: string) {
+    super(`No usable dimension spec for product '${productCode}' size '${size}'.`);
+    this.name = 'VerdictNoUsableDimensionConfigError';
   }
 }
 
@@ -320,6 +336,13 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
       appConfig?.productMatrixConfig, {},
     );
     const globalDimensionDefs = safeParseJSON<ProductDimensionDef[]>(appConfig?.dimensions, []);
+
+    if (!hasUsableProductMatrix(productMatrixConfig[productCode ?? ''], params.size)) {
+      console.error(
+        `[resolveVerdict] No usable dimension spec for product '${productCode}' size '${params.size}'.`,
+      );
+      throw new VerdictNoUsableDimensionConfigError(productCode ?? '', params.size);
+    }
 
     const dimResult = evaluateDimensions({
       productMatrixConfig,

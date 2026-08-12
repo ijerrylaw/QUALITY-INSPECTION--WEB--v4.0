@@ -43,7 +43,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Prisma } from '../../generated/prisma/client';
-import { resolveVerdict, VerdictProfileNotFoundError, VerdictNoUsableProfileError } from '../engine/resolveVerdict';
+import { resolveVerdict, VerdictProfileNotFoundError, VerdictNoUsableProfileError, VerdictNoUsableDimensionConfigError } from '../engine/resolveVerdict';
 import prisma from '../lib/prismaClient';
 import {
   PIN_USER_DISPLAY_SELECT,
@@ -326,6 +326,10 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
       }
       if (err instanceof VerdictNoUsableProfileError) {
         res.status(500).json({ error: err.message, code: 'NO_USABLE_PROFILE' });
+        return;
+      }
+      if (err instanceof VerdictNoUsableDimensionConfigError) {
+        res.status(500).json({ error: err.message, code: 'NO_USABLE_DIMENSION_CONFIG' });
         return;
       }
       throw err;
@@ -777,6 +781,12 @@ router.post('/:id/amendments', requireRole(...ALL_ROLES), async (req: Request, r
           `'${submissionId}' — system-wide config problem: ${err.message}`,
         );
         // recomputedVerdict/recomputedCategoryResults stay null — draft still proceeds.
+      } else if (err instanceof VerdictNoUsableDimensionConfigError) {
+        console.error(
+          `[POST /api/submissions/:id/amendments] Recompute preview unavailable for submission ` +
+          `'${submissionId}' — dimension config problem: ${err.message}`,
+        );
+        // recomputedVerdict/recomputedCategoryResults stay null — draft still proceeds.
       } else {
         throw err;
       }
@@ -929,6 +939,14 @@ amendmentsRouter.post('/:id/approve', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN
         res.status(422).json({
           error: 'Cannot verify this amendment — no AppConfig profile has usable AQL rules configured. ' +
                  'Nothing was changed; fix the inspection profile configuration before approving.',
+          details: err.message,
+        });
+        return;
+      }
+      if (err instanceof VerdictNoUsableDimensionConfigError) {
+        res.status(422).json({
+          error: 'Cannot verify this amendment — no usable dimension spec is configured for this ' +
+                 'product/size. Nothing was changed; fix the Product Engine configuration before approving.',
           details: err.message,
         });
         return;

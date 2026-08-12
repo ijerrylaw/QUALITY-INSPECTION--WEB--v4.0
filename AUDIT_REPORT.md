@@ -47,11 +47,25 @@ with its full original context, reasoning, and verification trail.
    landmine, not inert.
    → `CHANGELOG.md` §7.5, §12.4.
 
-5. **`productMatrixConfig` has no throw/log option for a missing product
-   code.** Unlike the AQL side's `'throw'` mode, a product code with no
-   dimension-spec entry silently zeroes out the two fixed-dimension
-   thresholds (a total no-op — no measurement can ever fail them) with no
-   error and no log line anywhere.
+5. ~~**`productMatrixConfig` has no throw/log option for a missing product
+   code.**~~ **Fixed 2026-08-12.** Unlike the AQL side's `'throw'` mode, a
+   product code with no dimension-spec entry silently zeroed out the two
+   fixed-dimension thresholds (a total no-op — no measurement could ever
+   fail them) with no error and no log line anywhere. Fixed with the same
+   architecture as finding #10's AQL-side fix (commit `606b5e4`): new
+   `hasUsableProductMatrix()` helper (mirrored in
+   `backend/src/engine/dimensionEvaluator.ts` and
+   `frontend/src/context/ConfigContext.tsx`, kept in sync deliberately),
+   wizard-side entry blocking in both `StepDimensions.tsx` (GUIDED) and
+   `BatchEntry.tsx` (SPREADSHEET) — confirmed during the fix that
+   `BatchEntry.tsx` has its own independently-duplicated dimension-spec
+   logic and needed the same treatment, not just `StepDimensions.tsx` —
+   and a new `VerdictNoUsableDimensionConfigError` thrown server-side in
+   `resolveVerdict.ts` as defense-in-depth, mapped at the 3 of 4
+   `resolveVerdict()` call sites that actually exercise dimension
+   evaluation (`POST /api/verdict/preview` never sends `size`/`dimensions`
+   in its request body from either frontend caller, confirmed by reading
+   both, so it can't reach this error).
    → `CHANGELOG.md` §7.3, §7.5.
 
 6. ~~**Tenant-scoped admin role question is unanswered.**~~ **Closed, no

@@ -99,6 +99,30 @@ export interface ProductConfig {
   palmWidthDecimals?: number;
 }
 
+/**
+ * A product's dimension matrix is usable for the two always-graded fixed
+ * dimensions (GLOVE LENGTH, PALM WIDTH) only if the selected size has a real,
+ * non-zero target for BOTH — unlike AQL categories (many, independent,
+ * partial-config is normal), there are always exactly two fixed dimensions
+ * and both are graded unconditionally every time, so a target missing on
+ * either one leaves that one silently zeroed out (threshold=0,
+ * maxThreshold=Infinity — see AUDIT_REPORT.md finding #5). Mirrors
+ * `hasUsableProductMatrix()` in `backend/src/engine/dimensionEvaluator.ts`
+ * exactly — kept in sync deliberately, same pairing as
+ * `hasUsableRules()`/`hasUsableCategories()`.
+ */
+export function hasUsableProductMatrix(
+  matrixEntry: ProductConfig | null | undefined,
+  size: string | null | undefined,
+): boolean {
+  if (!size) return false;
+  const sizeEntry = matrixEntry?.sizes?.[size];
+  if (!sizeEntry) return false;
+  const lengthTarget = parseFloat(sizeEntry.lengthTarget ?? '0') || 0;
+  const palmWidthTarget = parseFloat(sizeEntry.palmWidthTarget ?? '0') || 0;
+  return lengthTarget > 0 && palmWidthTarget > 0;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // INSPECTION PROFILE TYPES  (DATA_SCHEMAS_AND_TYPES.md §2)
 // ─────────────────────────────────────────────────────────────────────────────

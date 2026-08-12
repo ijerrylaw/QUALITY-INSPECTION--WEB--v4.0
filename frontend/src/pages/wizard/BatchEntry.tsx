@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
-import { useConfig, API_BASE_URL, hasUsableCategories } from '../../context/ConfigContext';
+import { useConfig, API_BASE_URL, hasUsableCategories, hasUsableProductMatrix } from '../../context/ConfigContext';
 import { useAuth, authHeader, authIdentity } from '../../context/AuthContext';
 import { useToast } from '../../components/ui/ToastProvider';
 import {
@@ -358,6 +358,14 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
   const [productCode, setProductCode] = useState<string>('');
   const [size, setSize] = useState<string>('');
   const [lineId, setLineId] = useState<string>('');
+
+  // ── Zero-usable-dimension-matrix entry gate (AUDIT_REPORT.md finding #5) ──
+  const matrixEntry = useMemo(
+    () => config?.productMatrixConfig?.[productCode] ?? null,
+    [config?.productMatrixConfig, productCode],
+  );
+  const isMatrixUnusable = Boolean(productCode) && Boolean(size)
+    && !hasUsableProductMatrix(matrixEntry, size);
   const [timestamp, setTimestamp] = useState<Date>(new Date());
 
   // --- Grid State ---
@@ -471,6 +479,11 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
 
     if (isProfileUnusable) {
       addToast('error', 'This product profile has no usable inspection categories configured — contact an admin before inspecting this lot.');
+      return;
+    }
+
+    if (isMatrixUnusable) {
+      addToast('error', 'Dimension spec not configured for this product/size — contact an admin before inspecting this lot.');
       return;
     }
 
@@ -673,6 +686,20 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
                 This product profile has no usable inspection categories configured — contact an admin
                 before inspecting this lot. Go to <strong>Configuration Control → Quality Rules</strong> to
                 fix its AQL categories.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Zero-Usable-Dimension-Matrix Blocking Banner ────────────────── */}
+        {isMatrixUnusable && (
+          <div className="mt-3 p-3 rounded-lg border border-l-4 border-amber-500/20 border-l-amber-500 bg-amber-500/5 flex gap-3 text-sm">
+            <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" strokeWidth={2} />
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-amber-400">PRODUCT DIMENSIONS NOT CONFIGURED</p>
+              <p className="text-xs text-muted mt-1">
+                Glove Length and Palm Width have no spec configured for <span className="font-mono">{productCode}</span> · <span className="font-mono">{size}</span> — measurements cannot be graded.
+                Contact an admin to configure this product under <strong>Configuration Control → Product Engine</strong> before inspecting this lot.
               </p>
             </div>
           </div>
