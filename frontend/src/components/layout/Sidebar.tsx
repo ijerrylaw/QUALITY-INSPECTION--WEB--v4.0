@@ -15,6 +15,7 @@ import { useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth, rolesInGroups } from '../../context/AuthContext';
 import { useWizardGuard } from '../../context/WizardGuardContext';
+import { useHistoryIndicator } from '../../context/HistoryIndicatorContext';
 import { PinChangeModal } from '../auth/PinChangeModal';
 import {
   ClipboardCheck,
@@ -75,6 +76,7 @@ export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { isWizardDirty } = useWizardGuard();
+  const { hasNewSubmission } = useHistoryIndicator();
   const [pendingTo, setPendingTo] = useState<string | null>(null);
 
   const handleNavClick = (e: React.MouseEvent, to: string) => {
@@ -162,7 +164,15 @@ export function Sidebar() {
               >
                 {({ isActive }) => (
                   <>
-                    <Icon className="w-5 h-5 shrink-0" strokeWidth={2} />
+                    <span className="relative shrink-0">
+                      <Icon className="w-5 h-5" strokeWidth={2} />
+                      {/* New-lot indicator: global (not per-user), cleared when
+                          any user views Inspection Records or a new day begins —
+                          see HistoryIndicatorContext.tsx / AppConfig.lastHistoryViewedAt. */}
+                      {item.to === '/history' && hasNewSubmission && (
+                        <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-brand-secondary animate-pulse" />
+                      )}
+                    </span>
                     {!collapsed && <span className="truncate">{item.label}</span>}
                     {isActive && (
                       <span className="absolute left-0 top-2 bottom-2 w-1 bg-brand-secondary rounded-r-full" />

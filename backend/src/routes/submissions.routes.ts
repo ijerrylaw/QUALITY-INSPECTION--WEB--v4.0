@@ -26,6 +26,17 @@
  *    most recent prior submission in the same Line+Side+YJJJ group — which
  *    the wizard DOES use to pre-fill (editable default, not advisory-only).
  *
+ *  GET  /api/submissions/new-indicator
+ *    Global (not per-user) advisory: whether any Submission was created
+ *    after the last time ANY user viewed Inspection Records (or since the
+ *    start of today, if that's more recent — see effectiveLastViewedAt).
+ *    Drives the sidebar "new lot" dot + row badges in HistoryFeed.tsx.
+ *
+ *  POST /api/submissions/mark-history-viewed
+ *    Records that a user just viewed Inspection Records — updates the same
+ *    global timestamp GET /new-indicator reads. Called once by HistoryFeed.tsx
+ *    on mount, after it has captured the pre-update threshold for row badges.
+ *
  *  GET  /api/submissions/:id
  *    Returns a single submission with its amendment logs. `profileId` is an
  *    opaque reference (see AUDIT_REPORT.md §9.3/§10 Part 3) — no relational
@@ -678,6 +689,62 @@ router.get('/sequence-hint', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[GET /api/submissions/sequence-hint]', err);
     res.status(200).json({ suggestedNext: null, suggestedTotalCarton: null });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/submissions/new-indicator + POST /api/submissions/mark-history-viewed
+// Registered BEFORE /:id for the same reason as /sequence-hint above.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `effectiveLastViewedAt` = max(AppConfig.lastHistoryViewedAt, start of
+ * today) — folding "a new calendar day clears the indicator" into this one
+ * comparison, with no cron/scheduled job: once midnight passes, today's
+ * start alone exceeds any lastViewedAt timestamp from yesterday.
+ */
+async function computeEffectiveLastViewedAt(): Promise<Date> {
+  const config = await prisma.appConfig.findUnique({ where: { id: '1' }, select: { lastHistoryViewedAt: true } });
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const lastViewed = config?.lastHistoryViewedAt ?? new Date(0);
+  return lastViewed > todayStart ? lastViewed : todayStart;
+}
+
+/**
+ * Global (not per-user) advisory: has any Submission been created since the
+ * effective last-viewed threshold? `createdAt` never changes on amendment/
+ * approval (only `updatedAt` does), so this naturally counts only genuinely
+ * new original submissions, never amendment activity on existing rows.
+ */
+router.get('/new-indicator', async (_req: Request, res: Response) => {
+  try {
+    const effectiveLastViewedAt = await computeEffectiveLastViewedAt();
+    const newCount = await prisma.submission.count({
+      where: { createdAt: { gt: effectiveLastViewedAt } },
+    });
+    res.status(200).json({ hasNew: newCount > 0, effectiveLastViewedAt: effectiveLastViewedAt.toISOString() });
+  } catch (err) {
+    console.error('[GET /api/submissions/new-indicator]', err);
+    res.status(200).json({ hasNew: false, effectiveLastViewedAt: new Date().toISOString() });
+  }
+});
+
+/** Any recognized role may mark History as viewed — matches the same ALL_ROLES gate already used on POST / and POST /:id/amendments, so PIN-authenticated Group C users work too. */
+router.post('/mark-history-viewed', requireRole(...ALL_ROLES), async (_req: Request, res: Response) => {
+  try {
+    // upsert, not update — the AppConfig singleton is normally created by
+    // GET /api/config on app load, but this stays correct even if this
+    // somehow fires first (e.g. a fresh DB with an unusual load order).
+    await prisma.appConfig.upsert({
+      where: { id: '1' },
+      update: { lastHistoryViewedAt: new Date() },
+      create: { id: '1', lastHistoryViewedAt: new Date() },
+    });
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('[POST /api/submissions/mark-history-viewed]', err);
+    res.status(500).json({ error: 'Failed to mark history as viewed' });
   }
 });
 

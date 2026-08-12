@@ -19,6 +19,7 @@ import {
 import { Button } from '../ui/Button';
 import { useToast } from '../ui/ToastProvider';
 import { API_BASE_URL, useConfig } from '../../context/ConfigContext';
+import { useHistoryIndicator } from '../../context/HistoryIndicatorContext';
 
 // ── Display-only helpers ──────────────────────────────────────────────────────
 // isZeroTolerance/isPassFailNil/snapBracket are label/text helpers only — they
@@ -169,6 +170,7 @@ type AmendmentStatus =
 
 interface Submission {
   id: string;
+  createdAt: string;
   productCode: string;
   productionDate: string;
   samplingTime: string;
@@ -763,6 +765,11 @@ export function HistoryFeed() {
   const navigate = useNavigate();
   const { addToast } = useToast();
   const { config } = useConfig();
+  const { markHistoryViewed } = useHistoryIndicator();
+  // Threshold captured BEFORE marking viewed (below), so rows created since
+  // the LAST view still show a "NEW" badge for this viewing — marking viewed
+  // clears the sidebar dot, not the badges already rendered this visit.
+  const [newSubmissionThreshold, setNewSubmissionThreshold] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [draftFilters, setDraftFilters] = useState<FilterState>(EMPTY_FILTERS);
@@ -855,6 +862,26 @@ export function HistoryFeed() {
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
   }, [loadPage, page]);
+
+  // Once per mount: capture the current "new since" threshold for row
+  // badges, THEN mark History as viewed (clears the sidebar dot for
+  // everyone on their next check). Fetched directly rather than through
+  // HistoryIndicatorContext so this ordering can't race Sidebar's own
+  // independent route-change refresh.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE_URL}/api/submissions/new-indicator`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { effectiveLastViewedAt: string } | null) => {
+        if (!cancelled && data) setNewSubmissionThreshold(data.effectiveLastViewedAt);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) markHistoryViewed();
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleLoadMore = () => loadPage(page + 1, { replace: false });
 
@@ -1139,7 +1166,14 @@ export function HistoryFeed() {
 
                     {/* 1. LOT NUMBER */}
                     <td className="sticky left-0 bg-surface z-10 py-3 px-3 border-b border-r border-gray-700/50 text-sm font-mono text-primary shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] group-hover:bg-gray-800 transition-colors">
-                      {sub.batchNumber || '—'}
+                      <span className="inline-flex items-center gap-2">
+                        {sub.batchNumber || '—'}
+                        {newSubmissionThreshold && new Date(sub.createdAt) > new Date(newSubmissionThreshold) && (
+                          <span className="px-2 py-0.5 rounded-full font-bold uppercase tracking-wider text-[10px] bg-brand-secondary/10 border border-brand-secondary/30 text-brand-secondary">
+                            NEW
+                          </span>
+                        )}
+                      </span>
                     </td>
 
                     {/* 2. PRODUCT CODE */}

@@ -6,6 +6,7 @@ import { AuthProvider, useAuth, rolesInGroups } from './context/AuthContext';
 import type { UserRole } from './context/AuthContext';
 import { ConfigProvider } from './context/ConfigContext';
 import { WizardGuardProvider } from './context/WizardGuardContext';
+import { HistoryIndicatorProvider } from './context/HistoryIndicatorContext';
 import { LoginPage } from './pages/LoginPage';
 import { PendingAccessPage } from './pages/PendingAccessPage';
 import { WizardPage } from './pages/WizardPage';
@@ -40,12 +41,14 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
 
   return (
     <WizardGuardProvider>
-      <div className="flex h-screen w-screen overflow-hidden bg-canvas text-primary">
-        <Sidebar />
-        <main className="flex-1 overflow-y-scroll bg-canvas">
-          {children}
-        </main>
-      </div>
+      <HistoryIndicatorProvider>
+        <div className="flex h-screen w-screen overflow-hidden bg-canvas text-primary">
+          <Sidebar />
+          <main className="flex-1 overflow-y-scroll bg-canvas">
+            {children}
+          </main>
+        </div>
+      </HistoryIndicatorProvider>
     </WizardGuardProvider>
   );
 }

@@ -352,4 +352,13 @@ model AppConfig {
 
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+
+  // --- Cross-user runtime state (not "configuration" in the editable-by-
+  // admin sense, but piggybacks on this table since it's the only global
+  // singleton — see GET/POST /api/submissions/new-indicator|mark-history-viewed) ---
+  /// Global (not per-user) — last time ANY user viewed Inspection Records.
+  /// Compared against Submission.createdAt to drive the sidebar "new lot"
+  /// dot + row badges; a new calendar day also implicitly clears it (see
+  /// GET /api/submissions/new-indicator's effectiveLastViewedAt calc).
+  lastHistoryViewedAt DateTime?
 }
