@@ -65,6 +65,28 @@ export interface Submission {
    * before relying on it.
    */
   profileId: string | null;
+  /**
+   * Full per-category AQL analysis frozen at submit time — self-contained
+   * (names, AQL level, threshold, eval mode, pass/fail, per-category defect
+   * breakdown), no live profile lookup needed to render it. Refrozen inside
+   * the same transaction as `verdict` whenever an amendment is approved, so
+   * the two can never drift apart. JSON — FrozenCategoryAnalysis[], defined
+   * in `backend/src/engine/resolveVerdict.ts`.
+   *
+   * NULLABLE — null on rows created before this field existed ("legacy").
+   * Deliberately NOT backfilled (AUDIT_REPORT.md finding #18: reconstructing
+   * a historical grade from current config isn't actually history). Legacy
+   * rows fall back to a live re-grade in `HistoryFeed.tsx`, shown with an
+   * explicit "not the original result" banner instead of silently drifting.
+   */
+  gradingSnapshot: string | null;
+  /**
+   * Resolved profile display name captured at the same time as
+   * `gradingSnapshot` — lets the UI render it without a live profile lookup
+   * even if the profile is later renamed or deleted. Always set together
+   * with `gradingSnapshot` (both null or both set).
+   */
+  gradingSnapshotProfileName: string | null;
   amendmentLogs: AmendmentLog[];
 }
 

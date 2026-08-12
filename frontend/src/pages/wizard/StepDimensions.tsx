@@ -8,7 +8,11 @@
  * - Min specs and tolerances sourced from
  *   config.productMatrixConfig[productCode].sizes[size].dimensions[dimId]
  * - Slot count driven by configured dimensionDefs (not hardcoded to 5).
- * - Falls back gracefully when no product matrix is configured yet.
+ * - Falls back gracefully to global dimension defs (config.dimensions) when no
+ *   product-specific dynamic dimensionDefs are configured — but the two FIXED
+ *   dimensions (GLOVE LENGTH, PALM WIDTH) have no such fallback: an unconfigured
+ *   product/size blocks entry entirely instead (see AUDIT_REPORT.md finding #5;
+ *   isMatrixUnusable below).
  *
  * FIXED-ROW DIMENSIONS (Glove Length & Palm Width):
  * - GLOVE LENGTH and PALM WIDTH are always shown as fixed leading cards.
@@ -32,7 +36,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Ruler, CheckCircle2, AlertTriangle, AlertCircle, Info } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastProvider';
-import { useConfig } from '../../context/ConfigContext';
+import { useConfig, hasUsableProductMatrix } from '../../context/ConfigContext';
 import { OriginalValueNote } from '../../utils/fieldDiff';
 import type { ProductDimensionDef } from '../../context/ConfigContext';
 
@@ -72,6 +76,10 @@ export function StepDimensions({
   const matrixEntry = useMemo(() => {
     return config?.productMatrixConfig?.[productCode] ?? null;
   }, [config, productCode]);
+
+  // ── Zero-usable-dimension entry gate (AUDIT_REPORT.md finding #5) ─────────
+  const isMatrixUnusable = Boolean(productCode) && Boolean(size)
+    && !hasUsableProductMatrix(matrixEntry, size);
 
   // ── Fixed-row virtual dimension defs (always prepended) ───────────────────
   // GLOVE WEIGHT is excluded — handled in BATCH SETUP.
@@ -259,6 +267,10 @@ export function StepDimensions({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isMatrixUnusable) {
+      addToast('error', 'Dimension spec not configured for this product/size — contact an admin before inspecting this lot.');
+      return;
+    }
     if (filledSlots < totalSlots) {
       addToast('error', `Please complete all ${totalSlots} measurement slots before proceeding.`);
       return;
@@ -327,6 +339,20 @@ export function StepDimensions({
           </div>
         </div>
       </div>
+
+      {/* ── Zero-Usable-Dimension-Matrix Blocking Banner ────────────────────── */}
+      {isMatrixUnusable && (
+        <div className="p-3 rounded-lg border border-l-4 border-amber-500/20 border-l-amber-500 bg-amber-500/5 flex gap-3 text-sm">
+          <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" strokeWidth={2} />
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-amber-400">PRODUCT DIMENSIONS NOT CONFIGURED</p>
+            <p className="text-xs text-muted mt-1">
+              Glove Length and Palm Width have no spec configured for <span className="font-mono">{productCode}</span> · <span className="font-mono">{size}</span> — measurements cannot be graded.
+              Contact an admin to configure this product under <strong>Configuration Control → Product Engine</strong> before inspecting this lot.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── Dimension Cards Grid ───────────────────────────────────────────── */}
       {activeDimensions.length > 0 && (

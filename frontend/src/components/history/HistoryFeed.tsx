@@ -185,6 +185,9 @@ interface Submission {
   totalCarton?: number;
   gloveWeight?: number;
   profileId?: string | null;
+  /** JSON — CategoryAnalysis[], frozen at submit/amendment-approval time. Null on legacy rows (AUDIT_REPORT.md #18). */
+  gradingSnapshot?: string | null;
+  gradingSnapshotProfileName?: string | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -198,6 +201,18 @@ function parseDefects(raw: Record<string, number> | string | undefined): Record<
 }
 
 /**
+ * Parses Submission.gradingSnapshot — a frozen CategoryAnalysis[] (field
+ * names line up 1:1 with the server's FrozenCategoryAnalysis, resolveVerdict.ts)
+ * — into the same shape buildCategoryAnalysis() produces client-side, so both
+ * paths funnel into one render tree. Returns null on missing/corrupt JSON so
+ * the caller can fall back to the live re-grade path (legacy rows).
+ */
+function parseGradingSnapshot(raw: string | null | undefined): CategoryAnalysis[] | null {
+  if (!raw) return null;
+  try { return JSON.parse(raw) as CategoryAnalysis[]; } catch { return null; }
+}
+
+/**
  * Sum defect counts, excluding corrupt numeric keys that arise from
  * double-serialized JSON (e.g. "0":"{", "1":"\"" character-position artifacts).
  * Real defect IDs always contain non-digit characters (e.g. "def_hole").
@@ -207,6 +222,19 @@ function sumDefects(raw: Record<string, number> | string | undefined): number {
   return Object.entries(obj)
     .filter(([id]) => !/^\d+$/.test(id))
     .reduce((acc, [, n]) => acc + (Number(n) || 0), 0);
+}
+
+/**
+ * Side isn't a stored column — only embedded inside `batchNumber`
+ * ([Line][Side][YJJJ][Sequence], ISO2859_MATH_ENGINE.md §4). Mirrors the
+ * same derivation `WizardPage.tsx`'s amendment-reopen logic and the backend's
+ * `GET /api/submissions` side filter both already use: `machineId` is a real
+ * column holding the exact Line prefix, so Side is the single character
+ * right after it.
+ */
+function deriveSide(sub: Submission): string {
+  const linePrefix = sub.machineId ?? '';
+  return (sub.batchNumber ?? '').slice(linePrefix.length, linePrefix.length + 1);
 }
 
 function getSortKey(sub: Submission): string {
@@ -303,7 +331,15 @@ function DefectBreakdownPanel({
 
   const noProfileLinked = !sub.profileId;
 
-  // Falls back to the default profile when profileId is null — used for reference analysis
+  // AUDIT_REPORT.md #18 — a submission with a frozen gradingSnapshot renders
+  // that snapshot only: no live profile lookup, no /api/verdict/preview call.
+  // Legacy rows (predating this field) fall back to the original live
+  // re-grade behavior below, with an explicit banner explaining the drift risk.
+  const hasSnapshot = !!sub.gradingSnapshot;
+
+  // Falls back to the default profile when profileId is null — used for reference analysis.
+  // Only actually consumed by the legacy (no-snapshot) render path below, but
+  // called unconditionally since hooks can't be called conditionally.
   const profile = useMemo(
     () => getResolvedProfile(sub.profileId ?? undefined),
     [sub.profileId, getResolvedProfile],
@@ -313,10 +349,13 @@ function DefectBreakdownPanel({
   // DefectBreakdownPanel only mounts when its row is expanded (see the
   // `if (!isExpanded) return [dataRow]` guard below), so this effect is lazy
   // by construction — it never fires for collapsed rows, no extra gating needed.
+  // Skipped entirely for snapshotted rows (hasSnapshot) — the frozen data
+  // already has everything this fetch would otherwise re-derive live.
   const [previewState, setPreviewState] = useState<VerdictPreviewState>({ status: 'loading' });
   const defectsSignature = useMemo(() => JSON.stringify(cleanDefects), [cleanDefects]);
 
   useEffect(() => {
+    if (hasSnapshot) return;
     let cancelled = false;
     setPreviewState({ status: 'loading' });
 
@@ -356,18 +395,28 @@ function DefectBreakdownPanel({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sub.profileId, sub.productCode, sub.sampleSize, defectsSignature]);
+  }, [hasSnapshot, sub.profileId, sub.productCode, sub.sampleSize, defectsSignature]);
 
-  const categoryAnalysis = useMemo(
+  // Snapshotted rows render the frozen data directly (parsed once, no join
+  // needed — field names already match CategoryAnalysis 1:1, see
+  // parseGradingSnapshot()). Legacy rows keep the original live client join.
+  const snapshotAnalysis = useMemo(() => parseGradingSnapshot(sub.gradingSnapshot), [sub.gradingSnapshot]);
+  const liveAnalysis = useMemo(
     () => buildCategoryAnalysis(profile, cleanDefects, previewState.status === 'success' ? previewState.categoryResults : null),
     [profile, cleanDefects, previewState],
   );
+  const categoryAnalysis = hasSnapshot ? (snapshotAnalysis ?? []) : liveAnalysis;
+  const displayProfileName = hasSnapshot ? sub.gradingSnapshotProfileName : profile?.name;
 
-  // Defects recorded in the submission but absent from the resolved profile
-  const classifiedIds = useMemo(
-    () => new Set((profile?.defectDefinitions ?? []).map((d: any) => String(d.id))),
-    [profile],
-  );
+  // Defects recorded in the submission but not attributed to any category —
+  // snapshotted rows diff against the frozen category breakdown itself (no
+  // live profile lookup needed); legacy rows diff against the resolved profile.
+  const classifiedIds = useMemo(() => {
+    if (hasSnapshot) {
+      return new Set(categoryAnalysis.flatMap((cat) => cat.defectItems.map((d) => d.id)));
+    }
+    return new Set((profile?.defectDefinitions ?? []).map((d: any) => String(d.id)));
+  }, [hasSnapshot, categoryAnalysis, profile]);
 
   const unclassified = useMemo(
     () => Object.entries(cleanDefects).filter(([id, count]) => count > 0 && !classifiedIds.has(id)),
@@ -381,6 +430,29 @@ function DefectBreakdownPanel({
   return (
     <td colSpan={10} className="p-0 border-b border-gray-700/50 bg-canvas shadow-inner">
       <div className="px-6 py-4 space-y-3">
+
+        {/* ── §5.3 Info/Cyan alert — legacy row, no frozen snapshot ──────────── */}
+        {/* AUDIT_REPORT.md #18: predates gradingSnapshot, deliberately not
+            backfilled — analysis below is a LIVE re-grade against current
+            config, not a reproduction of what was true at submit time.
+            Independent of the no-profile-linked condition below — both can
+            render at once. Info/Cyan (not Amber) per §4.9: this is a
+            data-provenance notice, not an action-required warning. */}
+        {!hasSnapshot && (
+          <div className="p-3 rounded-lg border border-brand-secondary/20 border-l-4 border-l-brand-secondary bg-brand-secondary/5 flex items-start gap-3">
+            <ShieldCheck className="w-4 h-4 text-brand-secondary shrink-0 mt-0.5" strokeWidth={2} />
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-brand-secondary">
+                Live Re-Grade — Not the Original Result
+              </p>
+              <p className="text-xs text-brand-secondary/70 mt-0.5 font-sans leading-relaxed">
+                This submission predates result snapshots. The analysis below is computed against{' '}
+                <strong>current</strong> AQL rules and defect definitions, not what was evaluated at submit
+                time — it may disagree with the stored verdict above if rules have changed since.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* ── §5.3 Amber alert — no profile linked ──────────────────────────── */}
         {noProfileLinked && (
@@ -419,10 +491,10 @@ function DefectBreakdownPanel({
                   CATEGORY FAILED
                 </span>
               )}
-              {previewState.status === 'loading' && (
+              {!hasSnapshot && previewState.status === 'loading' && (
                 <span className="text-[10px] text-muted font-mono animate-pulse">Loading AQL analysis…</span>
               )}
-              {previewState.status === 'error' && (
+              {!hasSnapshot && previewState.status === 'error' && (
                 <span className="text-[10px] text-amber-400 font-mono">
                   AQL analysis unavailable ({previewState.message}) — showing raw defect counts only.
                 </span>
@@ -438,9 +510,9 @@ function DefectBreakdownPanel({
                 {totalClean} defect{totalClean !== 1 ? 's' : ''} total
               </span>
               {/* Active profile name — §4.5 cyan for system identity */}
-              {profile && (
+              {displayProfileName && (
                 <span className="text-[10px] font-bold font-mono text-brand-secondary uppercase tracking-wider">
-                  {profile.name}
+                  {displayProfileName}
                 </span>
               )}
             </div>
@@ -645,9 +717,14 @@ interface FilterState {
   dateTo: string;
   verdict: '' | 'PASSED' | 'FAILED';
   amendmentStatus: '' | AmendmentStatus;
+  lineId: string;
+  side: string;
+  inspector: string;
 }
 
-const EMPTY_FILTERS: FilterState = { dateFrom: '', dateTo: '', verdict: '', amendmentStatus: '' };
+const EMPTY_FILTERS: FilterState = {
+  dateFrom: '', dateTo: '', verdict: '', amendmentStatus: '', lineId: '', side: '', inspector: '',
+};
 
 function countActiveFilters(filters: FilterState): number {
   return Object.values(filters).filter(Boolean).length;
@@ -661,7 +738,7 @@ function csvEscape(value: string | number | undefined | null): string {
 }
 
 const CSV_HEADERS = [
-  'Lot Number', 'Product Code', 'Production Date', 'Time', 'Shift', 'Size',
+  'Lot Number', 'Product Code', 'Production Date', 'Time', 'Line', 'Side', 'Shift', 'Size',
   'Sample Size', 'Total Carton', 'Glove Weight (g)', 'Verdict', 'Status',
   'Defect Count', 'Inspector',
 ];
@@ -670,7 +747,7 @@ function submissionToCsvRow(sub: Submission): string {
   const dateStr = (sub.productionDate || '').split('T')[0];
   const timeStr = (sub.samplingTime || '').split('T')[1]?.substring(0, 5) || '';
   return [
-    sub.batchNumber, sub.productCode, dateStr, timeStr, sub.shift ?? '', sub.size ?? '',
+    sub.batchNumber, sub.productCode, dateStr, timeStr, sub.machineId ?? '', deriveSide(sub), sub.shift ?? '', sub.size ?? '',
     sub.sampleSize, sub.totalCarton ?? '', sub.gloveWeight ?? '', sub.verdict, sub.amendmentStatus,
     sumDefects(sub.defects), sub.inspectorName ?? '',
   ].map(csvEscape).join(',');
@@ -685,6 +762,7 @@ const SEARCH_DEBOUNCE_MS = 300;
 export function HistoryFeed() {
   const navigate = useNavigate();
   const { addToast } = useToast();
+  const { config } = useConfig();
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [draftFilters, setDraftFilters] = useState<FilterState>(EMPTY_FILTERS);
@@ -727,6 +805,9 @@ export function HistoryFeed() {
     if (appliedFilters.dateTo) params.set('dateTo', appliedFilters.dateTo);
     if (appliedFilters.verdict) params.set('verdict', appliedFilters.verdict);
     if (appliedFilters.amendmentStatus) params.set('amendmentStatus', appliedFilters.amendmentStatus);
+    if (appliedFilters.lineId) params.set('lineId', appliedFilters.lineId);
+    if (appliedFilters.side) params.set('side', appliedFilters.side);
+    if (appliedFilters.inspector) params.set('inspector', appliedFilters.inspector);
     return params;
   }, [debouncedSearchTerm, appliedFilters]);
 
@@ -921,6 +1002,46 @@ export function HistoryFeed() {
                     <option value="APPROVED">Amended</option>
                     <option value="REJECTED">Rejected</option>
                   </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted">Line</label>
+                    <select
+                      value={draftFilters.lineId}
+                      onChange={(e) => setDraftFilters((f) => ({ ...f, lineId: e.target.value }))}
+                      className="w-full h-9 px-2 bg-canvas border border-gray-700 rounded-lg text-sm text-primary font-mono outline-none focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary cursor-pointer"
+                    >
+                      <option value="">All</option>
+                      {(config?.lines ?? []).map((line) => (
+                        <option key={line.id} value={line.id}>{line.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted">Side</label>
+                    <select
+                      value={draftFilters.side}
+                      onChange={(e) => setDraftFilters((f) => ({ ...f, side: e.target.value }))}
+                      className="w-full h-9 px-2 bg-canvas border border-gray-700 rounded-lg text-sm text-primary font-mono outline-none focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary cursor-pointer"
+                    >
+                      <option value="">All</option>
+                      {(config?.sides ?? []).map((side) => (
+                        <option key={side.id} value={side.id}>{side.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted">Inspector</label>
+                  <input
+                    type="text"
+                    value={draftFilters.inspector}
+                    onChange={(e) => setDraftFilters((f) => ({ ...f, inspector: e.target.value }))}
+                    placeholder="Name..."
+                    className="w-full h-9 px-3 bg-canvas border border-gray-700 rounded-lg text-sm text-primary font-mono outline-none focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary"
+                  />
                 </div>
 
                 <div className="flex items-center justify-between gap-2 pt-2 border-t border-gray-800">

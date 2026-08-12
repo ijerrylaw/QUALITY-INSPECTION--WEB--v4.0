@@ -45,6 +45,7 @@
     3. Hardcoded GLOBAL STANDARD (DEFAULT) profile
   * **Important:** `profileId` is stored as a plain opaque string, checked against `AppConfig.inspectionProfiles`/the `'prof_default'` sentinel (not a Prisma foreign key — `InspectionProfile` was removed as a relational model). A miss logs a warning and stores `null` rather than hard-failing.
   * **Response 201:** `{ submission, verdict: 'PASSED' | 'FAILED', categoryResults[] }`
+  * **Frozen snapshot (AUDIT_REPORT.md #18):** The persisted `submission` also carries `gradingSnapshot`/`gradingSnapshotProfileName` — a richer, self-contained `FrozenCategoryAnalysis[]` (names, AQL level, threshold, eval mode, pass/fail, full per-category defect breakdown) computed by `resolveVerdict()` and stored as JSON. This is **not the same shape** as the response's `categoryResults[]` (which stays the engine's audit-trail `CategoryResult[]` — no `aqlLevel`, failing-defects-only). `HistoryFeed.tsx` reads `gradingSnapshot` directly instead of re-querying `POST /api/verdict/preview`.
   * **Auth:** Requires `X-User-Role` header, any authenticated role — see `NAVIGATION_AND_RBAC.md` §5.1.
 
 * `GET /api/submissions/:id`
@@ -60,15 +61,31 @@
 
 ---
 
+### Verdict Preview (read-only, no persistence)
+
+* `POST /api/verdict/preview`
+  * **Role:** Read-only wrapper around `resolveVerdict()` — runs the same profile-resolution + AQL evaluation used by every persisting route, but writes nothing. Callers:
+    - `StepReviewSubmit.tsx` (wizard) — always, for its live pre-submit preview.
+    - `HistoryFeed.tsx` — **legacy fallback only**, for submissions with no `gradingSnapshot` (AUDIT_REPORT.md #18). Rows with a snapshot render it directly and never call this endpoint.
+  * **Payload:** `{ profileId?: string | null, productCode?: string, sampleSize: number, defects: Record<string, number> }`
+  * **Response 200:** The full `ResolveVerdictResult` shape — `{ verdict, categoryResults[], categoryAnalysis[], evaluationProfileName, failedDimensions, dimensionResults[], evaluationProfileId, requestedProfileId }`.
+  * **Note:** Resolves profiles in `'fallback'` mode (an unresolvable `profileId` degrades to the safety-net profile instead of throwing) — appropriate for a non-authoritative preview, unlike `POST /api/submissions` and `POST /api/amendments/:id/approve` which both throw on an unresolvable explicit `profileId`.
+  * **Auth:** Requires `X-User-Role` header, any authenticated role.
+
+---
+
 ### Amendments & Approvals (Group A/B Routes)
 
 * `GET /api/amendments/pending`
-  * **Role:** Returns all submissions where `amendmentStatus === 'PENDING_APPROVAL'`, with the most recent `AmendmentLog` included for the diff viewer.
+  * **Role:** Returns submissions where `amendmentStatus === 'PENDING_APPROVAL'`, with the most recent `AmendmentLog` included for the diff viewer. Ordered by `updatedAt` descending (`id` descending as a tiebreaker).
+  * **Query params:** `page` (1-based, default `1`), `limit` (default `50`, capped at `200`) — same pagination contract as `GET /api/submissions`.
+  * **Response 200:** `{ amendments[], count, page, limit, totalCount, hasMore }` — `amendments` is the page's rows; `hasMore` indicates whether a further page exists.
   * **Auth:** None required.
 
 * `POST /api/amendments/:id/approve`
   * **Role:** Applies `newValues` from the latest pending `AmendmentLog` to the `Submission` record. Sets `amendmentStatus` to `APPROVED` on both the submission and the log.
   * **Important:** The AQL verdict **and** physical dimension results are recomputed server-side via the shared `resolveVerdict()` engine at approval time — the client-supplied `newValues.verdict` is never trusted for persistence, only retained on the `AmendmentLog` (`recomputedVerdict`, `recomputedCategoryResults`, `recomputedFailedDimensions`, `recomputedDimensionResults`) for audit comparison against what was originally drafted.
+  * **Frozen snapshot refreeze (AUDIT_REPORT.md #18):** `Submission.gradingSnapshot`/`gradingSnapshotProfileName` are also rewritten in this same `$transaction`, alongside `verdict` — the two are always written together so a submission's frozen category analysis can never drift out of sync with its own stored verdict.
   * **Response 200:** Includes a `verdictRecompute: { clientSupplied, serverRecomputed, mismatch }` diagnostic block so callers can see whether the recomputed verdict differed from the client's draft.
   * **Auth:** Requires `X-User-Role` header, Group A/B (`EXECUTIVE`, `MANAGER`, `ADMIN`).
 

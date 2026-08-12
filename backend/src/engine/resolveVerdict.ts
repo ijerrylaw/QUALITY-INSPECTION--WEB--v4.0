@@ -18,7 +18,7 @@
 
 import { evaluateAQLVerdict } from './aqlEvaluator';
 import type { CategoryResult } from './aqlEvaluator';
-import { evaluateDimensions } from './dimensionEvaluator';
+import { evaluateDimensions, hasUsableProductMatrix } from './dimensionEvaluator';
 import type { DimensionResult, ProductConfig, ProductDimensionDef } from './dimensionEvaluator';
 import prisma from '../lib/prismaClient';
 
@@ -117,6 +117,96 @@ function hasUsableRules(profile: any): boolean {
   });
 }
 
+/** A single defect recorded within a frozen category — see FrozenCategoryAnalysis. */
+export interface FrozenDefectItem {
+  id: string;
+  name: string;
+  count: number;
+  failing: boolean;
+}
+
+/**
+ * Self-contained, per-category grading snapshot — everything HistoryFeed.tsx's
+ * DefectBreakdownPanel needs to render without any live profile lookup or
+ * /api/verdict/preview call. Frozen onto Submission.gradingSnapshot at submit
+ * time (or refrozen at amendment-approval time) — see AUDIT_REPORT.md #18.
+ *
+ * Distinct from aqlEvaluator.ts's CategoryResult (the engine's own audit-trail
+ * type, kept unchanged): CategoryResult omits `aqlLevel` (only carries the
+ * resolved numeric threshold) and its `failingDefects` lists only FAILING
+ * defects. FrozenCategoryAnalysis instead lists every recorded defect per
+ * category (failing or not) with its display name, and includes the aqlLevel
+ * text — matching exactly what buildCategoryAnalysis() in HistoryFeed.tsx
+ * renders today, just computed once, server-side, at freeze time.
+ */
+export interface FrozenCategoryAnalysis {
+  id: string;
+  name: string;
+  aqlLevel: string;
+  evaluationMode: string;
+  threshold: { ac: number; re: number } | null;
+  totalCount: number;
+  /** true=PASS, false=FAIL, null=informational/not evaluated (empty evaluationMode) */
+  passed: boolean | null;
+  defectItems: FrozenDefectItem[];
+}
+
+/**
+ * Builds the frozen, self-contained category analysis from the same
+ * `categories`/`defectDefinitions`/`defectCounts` already resolved for
+ * evaluateAQLVerdict() — mirrors HistoryFeed.tsx's buildCategoryAnalysis()
+ * client-side join, but computed once here instead of duplicated per-render
+ * on every row expansion.
+ */
+function buildFrozenCategoryAnalysis(
+  categories: { id: string; name: string; aqlLevel: string; evaluationMode: string }[],
+  defectDefinitions: { id: string; name: string; currentClass: string }[],
+  defectCounts: Record<string, number>,
+  categoryResults: CategoryResult[],
+): FrozenCategoryAnalysis[] {
+  const resultsById = new Map(categoryResults.map((r) => [r.categoryId, r]));
+
+  return categories.map((cat): FrozenCategoryAnalysis => {
+    const catDefs = defectDefinitions.filter(
+      (d) => d.currentClass === cat.name || d.currentClass === cat.id,
+    );
+
+    const defectItemsRaw = catDefs
+      .map((d) => ({ id: d.id, name: d.name, count: defectCounts[d.id] ?? 0 }))
+      .filter((d) => d.count > 0);
+
+    const totalCount = defectItemsRaw.reduce((sum, d) => sum + d.count, 0);
+
+    const result = resultsById.get(cat.id);
+    const passed: boolean | null = result ? result.passed : null;
+    const threshold = result?.threshold ?? null;
+
+    const failingIds = new Set<string>();
+    if (result && !result.passed) {
+      if (cat.evaluationMode === 'CUMULATIVE') {
+        // Mirrors HistoryFeed.tsx's existing convention: CUMULATIVE's
+        // failingDefects is one synthetic "category total" entry, not a
+        // per-defect list — mark every recorded defect in a failing
+        // CUMULATIVE category.
+        defectItemsRaw.forEach((d) => failingIds.add(d.id));
+      } else {
+        result.failingDefects.forEach((fd) => failingIds.add(fd.defectId));
+      }
+    }
+
+    return {
+      id: cat.id,
+      name: cat.name,
+      aqlLevel: cat.aqlLevel,
+      evaluationMode: cat.evaluationMode,
+      threshold,
+      totalCount,
+      passed,
+      defectItems: defectItemsRaw.map((d) => ({ ...d, failing: failingIds.has(d.id) })),
+    };
+  });
+}
+
 /** Thrown when an explicit profileId doesn't resolve to any known profile. */
 export class VerdictProfileNotFoundError extends Error {
   constructor(public readonly profileId: string) {
@@ -138,6 +228,22 @@ export class VerdictNoUsableProfileError extends Error {
   constructor() {
     super('No AppConfig profile has usable AQL rules configured.');
     this.name = 'VerdictNoUsableProfileError';
+  }
+}
+
+/**
+ * Thrown when dimension evaluation was requested (size + measurements
+ * supplied) but productMatrixConfig has no usable per-size spec for the
+ * two fixed dimensions (GLOVE LENGTH, PALM WIDTH) — see AUDIT_REPORT.md
+ * finding #5. Should be unreachable in normal operation once the wizard
+ * blocks entry (StepDimensions.tsx / BatchEntry.tsx), but must fail
+ * loudly, not silently grade with threshold=0/maxThreshold=Infinity, if
+ * ever hit anyway.
+ */
+export class VerdictNoUsableDimensionConfigError extends Error {
+  constructor(public readonly productCode: string, public readonly size: string) {
+    super(`No usable dimension spec for product '${productCode}' size '${size}'.`);
+    this.name = 'VerdictNoUsableDimensionConfigError';
   }
 }
 
@@ -191,6 +297,10 @@ export interface ResolveVerdictResult {
    */
   verdict: 'PASSED' | 'FAILED';
   categoryResults: CategoryResult[];
+  /** Self-contained per-category analysis for freezing onto Submission.gradingSnapshot — see FrozenCategoryAnalysis. */
+  categoryAnalysis: FrozenCategoryAnalysis[];
+  /** Display name of the profile actually used for evaluation — for gradingSnapshotProfileName. Null only if evaluationProfileId is also null. */
+  evaluationProfileName: string | null;
   /** Count of dimensions with >=1 out-of-spec slot. 0 when size/dimensionMeasurements weren't supplied. */
   failedDimensions: number;
   /** Per-dimension audit breakdown backing failedDimensions. Empty when size/dimensionMeasurements weren't supplied. */
@@ -245,6 +355,7 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
   let categories: any[]        = [];
   let defectDefinitions: any[] = [];
   let evaluationProfileId: string | null = null;
+  let evaluationProfileName: string | null = null;
 
   if (profileId) {
     let profile = profilesList.find((p: any) => p.id === profileId);
@@ -272,6 +383,7 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
       categories        = normalized.categories;
       defectDefinitions = normalized.defectDefinitions;
       evaluationProfileId = String(profile.id);
+      evaluationProfileName = String(profile.name ?? '');
     }
   }
 
@@ -284,6 +396,7 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
       categories        = normalized.categories;
       defectDefinitions = normalized.defectDefinitions;
       evaluationProfileId = String(usableAppConfigProfile.id);
+      evaluationProfileName = String(usableAppConfigProfile.name ?? '');
     } else if (profilesList.length === 0) {
       // True first-run bootstrap: AppConfig has no profiles configured yet.
       // Legitimate, intentional fallback — see AUDIT_REPORT.md finding #13.
@@ -291,6 +404,7 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
       categories        = normalized.categories;
       defectDefinitions = normalized.defectDefinitions;
       evaluationProfileId = 'prof_default';
+      evaluationProfileName = HARDCODED_DEFAULT_PROFILE.name;
     } else {
       // AppConfig has real, admin-authored profiles, but none of them is
       // usable. Not the bootstrap case — fail loudly instead of silently
@@ -321,6 +435,13 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
     );
     const globalDimensionDefs = safeParseJSON<ProductDimensionDef[]>(appConfig?.dimensions, []);
 
+    if (!hasUsableProductMatrix(productMatrixConfig[productCode ?? ''], params.size)) {
+      console.error(
+        `[resolveVerdict] No usable dimension spec for product '${productCode}' size '${params.size}'.`,
+      );
+      throw new VerdictNoUsableDimensionConfigError(productCode ?? '', params.size);
+    }
+
     const dimResult = evaluateDimensions({
       productMatrixConfig,
       globalDimensionDefs,
@@ -335,5 +456,16 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
   const verdict: 'PASSED' | 'FAILED' =
     aqlVerdict === 'FAILED' || failedDimensions > 0 ? 'FAILED' : 'PASSED';
 
-  return { verdict, categoryResults, failedDimensions, dimensionResults, evaluationProfileId, requestedProfileId };
+  const categoryAnalysis = buildFrozenCategoryAnalysis(categories, defectDefinitions, defectCounts, categoryResults);
+
+  return {
+    verdict,
+    categoryResults,
+    categoryAnalysis,
+    evaluationProfileName,
+    failedDimensions,
+    dimensionResults,
+    evaluationProfileId,
+    requestedProfileId,
+  };
 }

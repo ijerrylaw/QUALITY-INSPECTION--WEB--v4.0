@@ -47,11 +47,25 @@ with its full original context, reasoning, and verification trail.
    landmine, not inert.
    → `CHANGELOG.md` §7.5, §12.4.
 
-5. **`productMatrixConfig` has no throw/log option for a missing product
-   code.** Unlike the AQL side's `'throw'` mode, a product code with no
-   dimension-spec entry silently zeroes out the two fixed-dimension
-   thresholds (a total no-op — no measurement can ever fail them) with no
-   error and no log line anywhere.
+5. ~~**`productMatrixConfig` has no throw/log option for a missing product
+   code.**~~ **Fixed 2026-08-12.** Unlike the AQL side's `'throw'` mode, a
+   product code with no dimension-spec entry silently zeroed out the two
+   fixed-dimension thresholds (a total no-op — no measurement could ever
+   fail them) with no error and no log line anywhere. Fixed with the same
+   architecture as finding #10's AQL-side fix (commit `606b5e4`): new
+   `hasUsableProductMatrix()` helper (mirrored in
+   `backend/src/engine/dimensionEvaluator.ts` and
+   `frontend/src/context/ConfigContext.tsx`, kept in sync deliberately),
+   wizard-side entry blocking in both `StepDimensions.tsx` (GUIDED) and
+   `BatchEntry.tsx` (SPREADSHEET) — confirmed during the fix that
+   `BatchEntry.tsx` has its own independently-duplicated dimension-spec
+   logic and needed the same treatment, not just `StepDimensions.tsx` —
+   and a new `VerdictNoUsableDimensionConfigError` thrown server-side in
+   `resolveVerdict.ts` as defense-in-depth, mapped at the 3 of 4
+   `resolveVerdict()` call sites that actually exercise dimension
+   evaluation (`POST /api/verdict/preview` never sends `size`/`dimensions`
+   in its request body from either frontend caller, confirmed by reading
+   both, so it can't reach this error).
    → `CHANGELOG.md` §7.3, §7.5.
 
 6. ~~**Tenant-scoped admin role question is unanswered.**~~ **Closed, no
@@ -176,3 +190,90 @@ with its full original context, reasoning, and verification trail.
     step in project workflow notes: always run `prisma generate` after any
     `db push`, or use `prisma migrate deploy` (which auto-regenerates) in
     production workflows.
+
+17. **`ConfigContext.tsx`'s `getResolvedProfile()` defaults every category's
+    `evalMode` to `'CUMULATIVE'` whenever neither `evalMode` nor
+    `evaluationMode` is set — on ANY profile, not just the zero-usable-profile
+    case the recent fix (commit `606b5e4`) addressed.**
+    `frontend/src/context/ConfigContext.tsx:392-393`:
+    ```
+    evalMode: cat.evalMode ?? cat.evaluationMode ?? 'CUMULATIVE',
+    evaluationMode: (cat.evaluationMode ?? cat.evalMode ?? 'CUMULATIVE') as EvaluationMode,
+    ```
+    This runs for every category on every profile this function resolves,
+    including real, admin-authored profiles that simply have a category left
+    without an evalMode set (e.g. mid-edit in `QualityRules.tsx`, or a
+    category added via some path that doesn't set the field). Such a
+    category silently displays and behaves as `CUMULATIVE` — a real,
+    quantitative evaluation mode — rather than surfacing as unset/misconfigured.
+    Distinct from finding #10 (which was about the backend's and frontend's
+    two independent *hardcoded fallback profiles* disagreeing with each
+    other): this is about `getResolvedProfile()`'s category-normalization
+    step silently masking a missing field on otherwise-real profile data.
+    First flagged during the zero-usable-profile fix (see `hasUsableCategories()`'s
+    doc comment at `ConfigContext.tsx:155-158`, which already calls out that
+    callers must pass the raw profile, never this function's output, to avoid
+    exactly this masking) but not yet logged as its own finding until now.
+    Not yet scoped — needs a decision on what an unset evalMode *should* do
+    (surface as an error/warning in `QualityRules.tsx`? require the field at
+    save time? keep the default but only for the documented zero-state case?)
+    before a fix is drafted.
+
+18. **Defect breakdown display silently re-grades against current config, can
+    contradict the submission's own frozen verdict.** `Submission.defects`
+    stores only an `id→count` map plus one final frozen `verdict` string
+    (documented, intentional design — DATA_SCHEMAS_AND_TYPES.md line 48).
+    No defect name, category, or per-category pass/fail is persisted at
+    submission time.
+
+    `HistoryFeed.tsx`'s `DefectBreakdownPanel` does two live lookups against
+    **current** config when a submission's row is expanded: (1) resolves
+    defect/category names via `getResolvedProfile(sub.profileId)` — always
+    current, never frozen; (2) re-POSTs to `/api/verdict/preview` and
+    re-evaluates pass/fail from scratch against the current profile, rather
+    than reproducing what was true at submission time.
+
+    **Consequence:** renaming a defect or moving it to a different category
+    (or retuning a category's AQL level) in `QualityRules.tsx` can make a
+    historical, already-approved submission's expanded panel show `CATEGORY
+    FAILED` while its own collapsed row badge (`VerdictBadge`, bound to the
+    frozen `sub.verdict`) still shows the original `PASS` — two elements of
+    the same row visibly disagreeing, with no indication to the user that the
+    expanded view is a live re-grade rather than a historical reproduction.
+
+    **Not affected:** CSV export (only exports frozen `verdict` + raw aggregate
+    count, id-agnostic). Amendment draft preview also live-recomputes, but
+    arguably correctly so for that specific context (shows "what would this
+    grade as under today's rules," not history).
+
+    **Two fix directions identified, not yet decided:** (a) persist a
+    name/category snapshot on `Submission` at submit time (schema change, has
+    migration implications for existing rows), or (b) keep the live lookup but
+    clearly label the expanded panel as a live re-grade, not history (smaller
+    UI-only fix, no schema change). Needs its own dedicated planning session
+    before implementation — deliberately not decided here. Same severity class
+    as finding #5 (`productMatrixConfig`): silent retroactive rewrite of what
+    a historical inspection record appears to have graded, visible directly in
+    the UI with zero indication the displayed breakdown may no longer match
+    what was true at submission time.
+
+---
+
+## Workflow Notes
+
+**Backend dev server (`tsx` vs `tsx watch`):** The current `.claude/launch.json`
+starts the backend dev server with plain `tsx` (from the npm script in
+`package.json`, which calls `tsx src/index.ts`). Unlike typical node-dev
+watchers or `tsx watch`, plain `tsx` does not reload when source files
+change — changes to `backend/src/**/*.ts` require a manual server restart
+(`preview_stop` then `preview_start` in the Browser pane). This has caused
+real bugs twice (live testing silently ran against stale code, producing
+"fix didn't work" signals that were actually "server hasn't restarted"
+problems). Recommend either: (a) switching the npm script to use `tsx watch`
+if that's compatible with the project's structure and build story; or (b)
+documenting this manual-restart requirement prominently in the project onboarding
+or dev-server setup notes to prevent wasted debugging time. **Decision needed:** is
+`tsx watch` the correct fix, or was plain `tsx` chosen deliberately for some
+reason (e.g. compatibility with the Prisma generation step, or avoiding
+double-restarts)? Flagged as a question, not a confirmed bug, until that's
+answered.

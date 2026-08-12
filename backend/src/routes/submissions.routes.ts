@@ -43,7 +43,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Prisma } from '../../generated/prisma/client';
-import { resolveVerdict, VerdictProfileNotFoundError, VerdictNoUsableProfileError } from '../engine/resolveVerdict';
+import { resolveVerdict, VerdictProfileNotFoundError, VerdictNoUsableProfileError, VerdictNoUsableDimensionConfigError } from '../engine/resolveVerdict';
 import prisma from '../lib/prismaClient';
 import {
   PIN_USER_DISPLAY_SELECT,
@@ -303,6 +303,8 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
     // ── 2. Resolve profile + evaluate verdict via the single source of truth ───
     let verdict: 'PASSED' | 'FAILED';
     let categoryResults;
+    let categoryAnalysis;
+    let evaluationProfileName: string | null;
     let evaluationProfileId: string | null;
     let requestedProfileIdEcho: string | null;
 
@@ -317,6 +319,8 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
       });
       verdict = result.verdict;
       categoryResults = result.categoryResults;
+      categoryAnalysis = result.categoryAnalysis;
+      evaluationProfileName = result.evaluationProfileName;
       evaluationProfileId = result.evaluationProfileId;
       requestedProfileIdEcho = result.requestedProfileId;
     } catch (err) {
@@ -326,6 +330,10 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
       }
       if (err instanceof VerdictNoUsableProfileError) {
         res.status(500).json({ error: err.message, code: 'NO_USABLE_PROFILE' });
+        return;
+      }
+      if (err instanceof VerdictNoUsableDimensionConfigError) {
+        res.status(500).json({ error: err.message, code: 'NO_USABLE_DIMENSION_CONFIG' });
         return;
       }
       throw err;
@@ -392,6 +400,8 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
           totalCarton:  body['totalCarton'] != null ? Number(body['totalCarton']) : null,
           gloveWeight:  body['gloveWeight']  != null ? Number(body['gloveWeight'])  : null,
           profileId:    validDbProfileId,
+          gradingSnapshot:            JSON.stringify(categoryAnalysis),
+          gradingSnapshotProfileName: evaluationProfileName,
         },
         include: SUBMISSION_IDENTITY_INCLUDE,
       });
@@ -441,6 +451,24 @@ const MAX_PAGE_SIZE = 200;
  *            day at each end.
  *   verdict — 'PASSED' | 'FAILED'. Any other value is ignored.
  *   amendmentStatus — one of AMENDMENT_STATUSES. Any other value is ignored.
+ *   lineId — exact match against `machineId` (the real column
+ *            `WizardPage.tsx` writes the operator's chosen Production Line
+ *            into — same column `sequence-hint` already filters on).
+ *   inspector — case-insensitive substring match against the submitter's
+ *            display name — `pinUser.name`, `displayName`, or
+ *            `userPrincipalName`, the same three fields in the same
+ *            fallback order `lib/identity.ts`'s `displayNameOf()` uses for
+ *            the `inspectorName` this endpoint already returns.
+ *   side — single-character match. NOT a stored column — `side` only exists
+ *            embedded inside `batchNumber` ([Line][Side][YJJJ][Sequence],
+ *            ISO2859_MATH_ENGINE.md §4). Derived the same way
+ *            `WizardPage.tsx`'s amendment-reopen logic already does:
+ *            `batchNumber.slice(machineId.length, machineId.length + 1)`,
+ *            since `machineId` is a real column holding the exact Line
+ *            prefix. Because Prisma can't express a per-row-length
+ *            substring in a `where`, this filter is applied AFTER fetching
+ *            every row matching the other filters (still server-side, just
+ *            not a native SQL predicate) — see the branch below.
  *
  * `id` is folded in as a secondary sort key alongside `createdAt` because
  * SQLite's DateTime has finite resolution — two rows created in the same
@@ -463,13 +491,19 @@ router.get('/', async (req: Request, res: Response) => {
     const skip = (page - 1) * limit;
 
     const where: Prisma.SubmissionWhereInput = {};
+    // Independent OR-blocks (search, inspector) can't both live on `where.OR`
+    // directly — the second would silently clobber the first. Collected here
+    // and merged into `where.AND` below instead.
+    const andConditions: Prisma.SubmissionWhereInput[] = [];
 
     const search = typeof req.query['search'] === 'string' ? req.query['search'].trim() : '';
     if (search) {
-      where.OR = [
-        { batchNumber: { contains: search } },
-        { productCode: { contains: search } },
-      ];
+      andConditions.push({
+        OR: [
+          { batchNumber: { contains: search } },
+          { productCode: { contains: search } },
+        ],
+      });
     }
 
     const dateFrom = typeof req.query['dateFrom'] === 'string' ? req.query['dateFrom'] : '';
@@ -491,19 +525,73 @@ router.get('/', async (req: Request, res: Response) => {
       where.amendmentStatus = amendmentStatusParam;
     }
 
-    const [submissions, totalCount] = await Promise.all([
-      prisma.submission.findMany({
+    const lineId = typeof req.query['lineId'] === 'string' ? req.query['lineId'].trim() : '';
+    if (lineId) {
+      where.machineId = lineId;
+    }
+
+    const inspector = typeof req.query['inspector'] === 'string' ? req.query['inspector'].trim() : '';
+    if (inspector) {
+      // Mirrors lib/identity.ts's displayNameOf() fallback chain exactly
+      // (pinUser.name → displayName → userPrincipalName) — otherwise a row
+      // whose only identity string is userPrincipalName (displayName null,
+      // no pinUser — e.g. legacy/sample SSO rows) would be invisible to this
+      // filter despite the table showing that same value as its Inspector.
+      andConditions.push({
+        OR: [
+          { pinUser: { name: { contains: inspector } } },
+          { displayName: { contains: inspector } },
+          { userPrincipalName: { contains: inspector } },
+        ],
+      });
+    }
+
+    if (andConditions.length > 0) {
+      where.AND = andConditions;
+    }
+
+    // `side` isn't a stored column (see the doc comment above) — Prisma can't
+    // express a per-row-length substring in a `where`, so when it's active
+    // this fetches every row matching the OTHER filters (unbounded), derives
+    // Side in JS, filters, then paginates the filtered set manually. When
+    // `side` is absent, the normal DB-level skip/take path below is
+    // untouched — no behavior change, no performance cost for the common case.
+    const sideParam = typeof req.query['side'] === 'string' ? req.query['side'].trim() : '';
+
+    let submissions;
+    let totalCount;
+
+    if (sideParam) {
+      const candidates = await prisma.submission.findMany({
         where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        skip,
-        take: limit,
         include: {
           ...SUBMISSION_IDENTITY_INCLUDE,
           amendmentLogs: { include: AMENDMENT_LOG_IDENTITY_INCLUDE },
         },
-      }),
-      prisma.submission.count({ where }),
-    ]);
+      });
+      const filtered = candidates.filter((sub) => {
+        const linePrefix = sub.machineId ?? '';
+        const derivedSide = sub.batchNumber.slice(linePrefix.length, linePrefix.length + 1);
+        return derivedSide === sideParam;
+      });
+      totalCount = filtered.length;
+      submissions = filtered.slice(skip, skip + limit);
+    } else {
+      [submissions, totalCount] = await Promise.all([
+        prisma.submission.findMany({
+          where,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip,
+          take: limit,
+          include: {
+            ...SUBMISSION_IDENTITY_INCLUDE,
+            amendmentLogs: { include: AMENDMENT_LOG_IDENTITY_INCLUDE },
+          },
+        }),
+        prisma.submission.count({ where }),
+      ]);
+    }
 
     const hasMore = skip + submissions.length < totalCount;
 
@@ -699,6 +787,12 @@ router.post('/:id/amendments', requireRole(...ALL_ROLES), async (req: Request, r
           `'${submissionId}' — system-wide config problem: ${err.message}`,
         );
         // recomputedVerdict/recomputedCategoryResults stay null — draft still proceeds.
+      } else if (err instanceof VerdictNoUsableDimensionConfigError) {
+        console.error(
+          `[POST /api/submissions/:id/amendments] Recompute preview unavailable for submission ` +
+          `'${submissionId}' — dimension config problem: ${err.message}`,
+        );
+        // recomputedVerdict/recomputedCategoryResults stay null — draft still proceeds.
       } else {
         throw err;
       }
@@ -752,24 +846,55 @@ export default router;
 export const amendmentsRouter = Router();
 
 // ── GET /api/amendments/pending ────────────────────────────────────────────
-// Returns all submissions where amendmentStatus === 'PENDING_APPROVAL',
-// including the most recent AmendmentLog for each (for the diff viewer).
-amendmentsRouter.get('/pending', async (_req: Request, res: Response) => {
+// Returns submissions where amendmentStatus === 'PENDING_APPROVAL', including
+// the most recent AmendmentLog for each (for the diff viewer). Paginated —
+// same shape as GET /api/submissions (AUDIT_REPORT.md: this endpoint was
+// previously unbounded, same bug class already fixed there).
+amendmentsRouter.get('/pending', async (req: Request, res: Response) => {
   try {
-    const pending = await prisma.submission.findMany({
-      where: { amendmentStatus: 'PENDING_APPROVAL' },
-      include: {
-        ...SUBMISSION_IDENTITY_INCLUDE,
-        amendmentLogs: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          include: AMENDMENT_LOG_IDENTITY_INCLUDE,
-        },
-      },
-      orderBy: { updatedAt: 'desc' },
-    });
+    const parsedPage = Number(req.query['page']);
+    const page = Number.isInteger(parsedPage) && parsedPage >= 1 ? parsedPage : 1;
 
-    res.json({ amendments: pending.map(withSubmissionNames) });
+    const parsedLimit = Number(req.query['limit']);
+    const limit = Number.isInteger(parsedLimit) && parsedLimit >= 1
+      ? Math.min(parsedLimit, MAX_PAGE_SIZE)
+      : DEFAULT_PAGE_SIZE;
+
+    const skip = (page - 1) * limit;
+    const where: Prisma.SubmissionWhereInput = { amendmentStatus: 'PENDING_APPROVAL' };
+
+    const [pending, totalCount] = await Promise.all([
+      prisma.submission.findMany({
+        where,
+        // `id` added as a secondary sort key alongside `updatedAt` — same
+        // rationale as the submissions list above: SQLite's DateTime has
+        // finite resolution, so two rows updated in the same instant would
+        // otherwise tie nondeterministically across page boundaries.
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: limit,
+        include: {
+          ...SUBMISSION_IDENTITY_INCLUDE,
+          amendmentLogs: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            include: AMENDMENT_LOG_IDENTITY_INCLUDE,
+          },
+        },
+      }),
+      prisma.submission.count({ where }),
+    ]);
+
+    const hasMore = skip + pending.length < totalCount;
+
+    res.json({
+      amendments: pending.map(withSubmissionNames),
+      count: pending.length,
+      page,
+      limit,
+      totalCount,
+      hasMore,
+    });
   } catch (err) {
     console.error('[GET /api/amendments/pending]', err);
     res.status(500).json({ error: 'Internal server error', details: String(err) });
@@ -855,6 +980,14 @@ amendmentsRouter.post('/:id/approve', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN
         });
         return;
       }
+      if (err instanceof VerdictNoUsableDimensionConfigError) {
+        res.status(422).json({
+          error: 'Cannot verify this amendment — no usable dimension spec is configured for this ' +
+                 'product/size. Nothing was changed; fix the Product Engine configuration before approving.',
+          details: err.message,
+        });
+        return;
+      }
       throw err;
     }
 
@@ -916,6 +1049,10 @@ amendmentsRouter.post('/:id/approve', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN
           ...(newValues['totalCarton']          != null && { totalCarton:         Number(newValues['totalCarton']) }),
           ...(newValues['gloveWeight']          != null && { gloveWeight:         parseFloat(String(newValues['gloveWeight'])) }),
           ...(newValues['profileId']            != null && { profileId:           validDbProfileId }),
+          // Refreeze the grading snapshot alongside verdict — must always be
+          // written together so they can never drift apart (AUDIT_REPORT.md #18).
+          gradingSnapshot:            JSON.stringify(recomputed.categoryAnalysis),
+          gradingSnapshotProfileName: recomputed.evaluationProfileName,
         },
         include: SUBMISSION_IDENTITY_INCLUDE,
       }),
