@@ -219,6 +219,44 @@ with its full original context, reasoning, and verification trail.
     save time? keep the default but only for the documented zero-state case?)
     before a fix is drafted.
 
+18. **Defect breakdown display silently re-grades against current config, can
+    contradict the submission's own frozen verdict.** `Submission.defects`
+    stores only an `id→count` map plus one final frozen `verdict` string
+    (documented, intentional design — DATA_SCHEMAS_AND_TYPES.md line 48).
+    No defect name, category, or per-category pass/fail is persisted at
+    submission time.
+
+    `HistoryFeed.tsx`'s `DefectBreakdownPanel` does two live lookups against
+    **current** config when a submission's row is expanded: (1) resolves
+    defect/category names via `getResolvedProfile(sub.profileId)` — always
+    current, never frozen; (2) re-POSTs to `/api/verdict/preview` and
+    re-evaluates pass/fail from scratch against the current profile, rather
+    than reproducing what was true at submission time.
+
+    **Consequence:** renaming a defect or moving it to a different category
+    (or retuning a category's AQL level) in `QualityRules.tsx` can make a
+    historical, already-approved submission's expanded panel show `CATEGORY
+    FAILED` while its own collapsed row badge (`VerdictBadge`, bound to the
+    frozen `sub.verdict`) still shows the original `PASS` — two elements of
+    the same row visibly disagreeing, with no indication to the user that the
+    expanded view is a live re-grade rather than a historical reproduction.
+
+    **Not affected:** CSV export (only exports frozen `verdict` + raw aggregate
+    count, id-agnostic). Amendment draft preview also live-recomputes, but
+    arguably correctly so for that specific context (shows "what would this
+    grade as under today's rules," not history).
+
+    **Two fix directions identified, not yet decided:** (a) persist a
+    name/category snapshot on `Submission` at submit time (schema change, has
+    migration implications for existing rows), or (b) keep the live lookup but
+    clearly label the expanded panel as a live re-grade, not history (smaller
+    UI-only fix, no schema change). Needs its own dedicated planning session
+    before implementation — deliberately not decided here. Same severity class
+    as finding #5 (`productMatrixConfig`): silent retroactive rewrite of what
+    a historical inspection record appears to have graded, visible directly in
+    the UI with zero indication the displayed breakdown may no longer match
+    what was true at submission time.
+
 ---
 
 ## Workflow Notes
