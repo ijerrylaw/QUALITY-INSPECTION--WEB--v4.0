@@ -102,13 +102,19 @@ export function WizardPage() {
   const { config, getResolvedProfile } = useConfig();
   const { user } = useAuth();
   const { addToast } = useToast();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // ── Amendment Mode ───────────────────────────────────────────────────────
   // Activated when navigating from HistoryFeed.tsx with ?amend=[submissionId]
   const amendId = searchParams.get('amend');
   const isAmendmentMode = Boolean(amendId);
   const [amendmentReason, setAmendmentReason] = useState('');
+  // Guards the actual in-flight submit request — disables the Submit button
+  // so a rapid double-click can't fire two POSTs (defense-in-depth; the
+  // duplicate-toast bug this was checked against turned out to be two
+  // redundant toast call sites, not a real double submission — see
+  // StepReviewSubmit.tsx's now-removed premature toast).
+  const [isSubmitting, setIsSubmitting] = useState(false);
   // Lazy-init to true whenever an amendId is present on first render, so Step 1
   // never mounts (and auto-saves its freshly-generated defaults) before the
   // amendment fetch below has had a chance to even start — see §5.5.
@@ -318,6 +324,9 @@ export function WizardPage() {
    * Does NOT retain context — resets to clean state after submit.
    */
   const handleSubmit = useCallback(async (retainContext: boolean) => {
+    if (isSubmitting) return; // guard against a rapid double-click firing two POSTs
+    setIsSubmitting(true);
+    try {
     // ── Amendment Mode path ─────────────────────────────────────────────────
     if (isAmendmentMode) {
       const sourceId = inspectionData._amendSourceId ?? amendId;
@@ -365,9 +374,9 @@ export function WizardPage() {
           let errStr = response.statusText;
           try {
             const errJson = await response.json();
-            errStr = JSON.stringify(errJson);
+            errStr = errJson?.error ?? JSON.stringify(errJson);
           } catch (_) {}
-          throw new Error(`Server responded ${response.status}: ${errStr}`);
+          throw new Error(errStr);
         }
 
         addToast('success', `Amendment for lot ${inspectionData.fullSystemLotNo ?? ''} submitted — AWAITING APPROVAL.`);
@@ -378,10 +387,23 @@ export function WizardPage() {
         return; // Do not reset on failure
       }
 
-      // Reset wizard fully after successful amendment (no retain context in amendment mode)
+      // Reset wizard fully after successful amendment (no retain context in amendment mode).
+      // Also clears originalData (still held the OLD amended record — every
+      // step component's OriginalValueNote diffs off it) and, critically,
+      // the `?amend=` URL param itself: isAmendmentMode/amendId are derived
+      // straight from the URL, so leaving it in place meant the wizard
+      // silently stayed in amend mode — a subsequent genuine new entry would
+      // fall through to `sourceId = inspectionData._amendSourceId ?? amendId`
+      // and get POSTed as ANOTHER amendment against this stale record.
       setInspectionData({});
+      setOriginalData(null);
       setAmendmentReason('');
       setCurrentStep(1);
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('amend');
+        return next;
+      }, { replace: true });
       return;
     }
 
@@ -449,7 +471,10 @@ export function WizardPage() {
       setInspectionData({});
     }
     setCurrentStep(1);
-  }, [inspectionData, addToast, isAmendmentMode, amendId, amendmentReason]);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [inspectionData, addToast, isAmendmentMode, amendId, amendmentReason, isSubmitting, setSearchParams, user]);
 
   // ── Derived tab state ─────────────────────────────────────────────────────
   const step1Done = isStep1Valid(inspectionData);
@@ -644,10 +669,10 @@ export function WizardPage() {
                   <button
                     type="submit"
                     form="wizard-step-form"
-                    disabled={isAmendmentMode && !amendmentReason.trim()}
-                    className={`h-10 px-8 rounded-lg font-bold text-xs tracking-wider uppercase shadow-lg shadow-brand-primary/20 flex items-center justify-center gap-2 transition-all outline-none
+                    disabled={isSubmitting || (isAmendmentMode && !amendmentReason.trim())}
+                    className={`h-10 px-8 rounded-lg font-bold text-xs tracking-wider uppercase shadow-lg shadow-brand-primary/20 flex items-center justify-center gap-2 transition-all outline-none disabled:opacity-40 disabled:cursor-not-allowed
                       ${isAmendmentMode
-                        ? 'bg-amber-500/20 border border-amber-500/50 text-amber-400 hover:bg-amber-500/30 hover:border-amber-500 disabled:opacity-40 disabled:cursor-not-allowed'
+                        ? 'bg-amber-500/20 border border-amber-500/50 text-amber-400 hover:bg-amber-500/30 hover:border-amber-500'
                         : 'bg-accent-gradient text-white hover:brightness-110'
                       }`}
                   >
@@ -656,7 +681,11 @@ export function WizardPage() {
                     ) : (
                       <ClipboardCheck className="w-4 h-4" strokeWidth={2} />
                     )}
-                    <span>{isAmendmentMode ? 'SUBMIT AMENDMENT' : 'SUBMIT LOT'}</span>
+                    <span>
+                      {isSubmitting
+                        ? 'SUBMITTING...'
+                        : isAmendmentMode ? 'SUBMIT AMENDMENT' : 'SUBMIT LOT'}
+                    </span>
                   </button>
                 )}
               </>

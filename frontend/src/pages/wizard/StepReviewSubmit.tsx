@@ -234,7 +234,6 @@ export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpd
       );
       return;
     }
-    addToast('success', `Inspection ${inspectionData?.fullSystemLotNo ?? ''} submitted successfully.`);
     onSubmit(retainContext);
   };
 
