@@ -185,6 +185,9 @@ interface Submission {
   totalCarton?: number;
   gloveWeight?: number;
   profileId?: string | null;
+  /** JSON — CategoryAnalysis[], frozen at submit/amendment-approval time. Null on legacy rows (AUDIT_REPORT.md #18). */
+  gradingSnapshot?: string | null;
+  gradingSnapshotProfileName?: string | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -195,6 +198,18 @@ function parseDefects(raw: Record<string, number> | string | undefined): Record<
     try { return JSON.parse(raw) as Record<string, number>; } catch { return {}; }
   }
   return raw;
+}
+
+/**
+ * Parses Submission.gradingSnapshot — a frozen CategoryAnalysis[] (field
+ * names line up 1:1 with the server's FrozenCategoryAnalysis, resolveVerdict.ts)
+ * — into the same shape buildCategoryAnalysis() produces client-side, so both
+ * paths funnel into one render tree. Returns null on missing/corrupt JSON so
+ * the caller can fall back to the live re-grade path (legacy rows).
+ */
+function parseGradingSnapshot(raw: string | null | undefined): CategoryAnalysis[] | null {
+  if (!raw) return null;
+  try { return JSON.parse(raw) as CategoryAnalysis[]; } catch { return null; }
 }
 
 /**
@@ -316,7 +331,15 @@ function DefectBreakdownPanel({
 
   const noProfileLinked = !sub.profileId;
 
-  // Falls back to the default profile when profileId is null — used for reference analysis
+  // AUDIT_REPORT.md #18 — a submission with a frozen gradingSnapshot renders
+  // that snapshot only: no live profile lookup, no /api/verdict/preview call.
+  // Legacy rows (predating this field) fall back to the original live
+  // re-grade behavior below, with an explicit banner explaining the drift risk.
+  const hasSnapshot = !!sub.gradingSnapshot;
+
+  // Falls back to the default profile when profileId is null — used for reference analysis.
+  // Only actually consumed by the legacy (no-snapshot) render path below, but
+  // called unconditionally since hooks can't be called conditionally.
   const profile = useMemo(
     () => getResolvedProfile(sub.profileId ?? undefined),
     [sub.profileId, getResolvedProfile],
@@ -326,10 +349,13 @@ function DefectBreakdownPanel({
   // DefectBreakdownPanel only mounts when its row is expanded (see the
   // `if (!isExpanded) return [dataRow]` guard below), so this effect is lazy
   // by construction — it never fires for collapsed rows, no extra gating needed.
+  // Skipped entirely for snapshotted rows (hasSnapshot) — the frozen data
+  // already has everything this fetch would otherwise re-derive live.
   const [previewState, setPreviewState] = useState<VerdictPreviewState>({ status: 'loading' });
   const defectsSignature = useMemo(() => JSON.stringify(cleanDefects), [cleanDefects]);
 
   useEffect(() => {
+    if (hasSnapshot) return;
     let cancelled = false;
     setPreviewState({ status: 'loading' });
 
@@ -369,18 +395,28 @@ function DefectBreakdownPanel({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sub.profileId, sub.productCode, sub.sampleSize, defectsSignature]);
+  }, [hasSnapshot, sub.profileId, sub.productCode, sub.sampleSize, defectsSignature]);
 
-  const categoryAnalysis = useMemo(
+  // Snapshotted rows render the frozen data directly (parsed once, no join
+  // needed — field names already match CategoryAnalysis 1:1, see
+  // parseGradingSnapshot()). Legacy rows keep the original live client join.
+  const snapshotAnalysis = useMemo(() => parseGradingSnapshot(sub.gradingSnapshot), [sub.gradingSnapshot]);
+  const liveAnalysis = useMemo(
     () => buildCategoryAnalysis(profile, cleanDefects, previewState.status === 'success' ? previewState.categoryResults : null),
     [profile, cleanDefects, previewState],
   );
+  const categoryAnalysis = hasSnapshot ? (snapshotAnalysis ?? []) : liveAnalysis;
+  const displayProfileName = hasSnapshot ? sub.gradingSnapshotProfileName : profile?.name;
 
-  // Defects recorded in the submission but absent from the resolved profile
-  const classifiedIds = useMemo(
-    () => new Set((profile?.defectDefinitions ?? []).map((d: any) => String(d.id))),
-    [profile],
-  );
+  // Defects recorded in the submission but not attributed to any category —
+  // snapshotted rows diff against the frozen category breakdown itself (no
+  // live profile lookup needed); legacy rows diff against the resolved profile.
+  const classifiedIds = useMemo(() => {
+    if (hasSnapshot) {
+      return new Set(categoryAnalysis.flatMap((cat) => cat.defectItems.map((d) => d.id)));
+    }
+    return new Set((profile?.defectDefinitions ?? []).map((d: any) => String(d.id)));
+  }, [hasSnapshot, categoryAnalysis, profile]);
 
   const unclassified = useMemo(
     () => Object.entries(cleanDefects).filter(([id, count]) => count > 0 && !classifiedIds.has(id)),
@@ -394,6 +430,29 @@ function DefectBreakdownPanel({
   return (
     <td colSpan={10} className="p-0 border-b border-gray-700/50 bg-canvas shadow-inner">
       <div className="px-6 py-4 space-y-3">
+
+        {/* ── §5.3 Info/Cyan alert — legacy row, no frozen snapshot ──────────── */}
+        {/* AUDIT_REPORT.md #18: predates gradingSnapshot, deliberately not
+            backfilled — analysis below is a LIVE re-grade against current
+            config, not a reproduction of what was true at submit time.
+            Independent of the no-profile-linked condition below — both can
+            render at once. Info/Cyan (not Amber) per §4.9: this is a
+            data-provenance notice, not an action-required warning. */}
+        {!hasSnapshot && (
+          <div className="p-3 rounded-lg border border-brand-secondary/20 border-l-4 border-l-brand-secondary bg-brand-secondary/5 flex items-start gap-3">
+            <ShieldCheck className="w-4 h-4 text-brand-secondary shrink-0 mt-0.5" strokeWidth={2} />
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-brand-secondary">
+                Live Re-Grade — Not the Original Result
+              </p>
+              <p className="text-xs text-brand-secondary/70 mt-0.5 font-sans leading-relaxed">
+                This submission predates result snapshots. The analysis below is computed against{' '}
+                <strong>current</strong> AQL rules and defect definitions, not what was evaluated at submit
+                time — it may disagree with the stored verdict above if rules have changed since.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* ── §5.3 Amber alert — no profile linked ──────────────────────────── */}
         {noProfileLinked && (
@@ -432,10 +491,10 @@ function DefectBreakdownPanel({
                   CATEGORY FAILED
                 </span>
               )}
-              {previewState.status === 'loading' && (
+              {!hasSnapshot && previewState.status === 'loading' && (
                 <span className="text-[10px] text-muted font-mono animate-pulse">Loading AQL analysis…</span>
               )}
-              {previewState.status === 'error' && (
+              {!hasSnapshot && previewState.status === 'error' && (
                 <span className="text-[10px] text-amber-400 font-mono">
                   AQL analysis unavailable ({previewState.message}) — showing raw defect counts only.
                 </span>
@@ -451,9 +510,9 @@ function DefectBreakdownPanel({
                 {totalClean} defect{totalClean !== 1 ? 's' : ''} total
               </span>
               {/* Active profile name — §4.5 cyan for system identity */}
-              {profile && (
+              {displayProfileName && (
                 <span className="text-[10px] font-bold font-mono text-brand-secondary uppercase tracking-wider">
-                  {profile.name}
+                  {displayProfileName}
                 </span>
               )}
             </div>

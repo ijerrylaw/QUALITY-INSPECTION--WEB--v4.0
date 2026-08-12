@@ -109,6 +109,19 @@ model Submission {
   /// §10 Part 3.
   profileId           String?
 
+  /// Full per-category AQL analysis frozen at submit time (or refrozen at
+  /// amendment-approval time, in the same transaction as `verdict`) — a
+  /// self-contained snapshot, no live profile lookup needed to render it.
+  /// JSON — FrozenCategoryAnalysis[] (backend/src/engine/resolveVerdict.ts).
+  /// Null on rows predating this field ("legacy") — deliberately NOT
+  /// backfilled (see AUDIT_REPORT.md finding #18); HistoryFeed.tsx falls
+  /// back to a live re-grade with an explicit warning label for those.
+  gradingSnapshot            String?
+  /// Resolved profile display name captured at freeze time, so the panel
+  /// can render it without a live profile lookup. Always set together
+  /// with gradingSnapshot (both null or both set).
+  gradingSnapshotProfileName String?
+
   // --- Relations ---
   amendmentLogs       AmendmentLog[]
 

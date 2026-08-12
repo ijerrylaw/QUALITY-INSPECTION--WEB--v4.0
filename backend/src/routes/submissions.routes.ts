@@ -303,6 +303,8 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
     // ── 2. Resolve profile + evaluate verdict via the single source of truth ───
     let verdict: 'PASSED' | 'FAILED';
     let categoryResults;
+    let categoryAnalysis;
+    let evaluationProfileName: string | null;
     let evaluationProfileId: string | null;
     let requestedProfileIdEcho: string | null;
 
@@ -317,6 +319,8 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
       });
       verdict = result.verdict;
       categoryResults = result.categoryResults;
+      categoryAnalysis = result.categoryAnalysis;
+      evaluationProfileName = result.evaluationProfileName;
       evaluationProfileId = result.evaluationProfileId;
       requestedProfileIdEcho = result.requestedProfileId;
     } catch (err) {
@@ -396,6 +400,8 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
           totalCarton:  body['totalCarton'] != null ? Number(body['totalCarton']) : null,
           gloveWeight:  body['gloveWeight']  != null ? Number(body['gloveWeight'])  : null,
           profileId:    validDbProfileId,
+          gradingSnapshot:            JSON.stringify(categoryAnalysis),
+          gradingSnapshotProfileName: evaluationProfileName,
         },
         include: SUBMISSION_IDENTITY_INCLUDE,
       });
@@ -1012,6 +1018,10 @@ amendmentsRouter.post('/:id/approve', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN
           ...(newValues['totalCarton']          != null && { totalCarton:         Number(newValues['totalCarton']) }),
           ...(newValues['gloveWeight']          != null && { gloveWeight:         parseFloat(String(newValues['gloveWeight'])) }),
           ...(newValues['profileId']            != null && { profileId:           validDbProfileId }),
+          // Refreeze the grading snapshot alongside verdict — must always be
+          // written together so they can never drift apart (AUDIT_REPORT.md #18).
+          gradingSnapshot:            JSON.stringify(recomputed.categoryAnalysis),
+          gradingSnapshotProfileName: recomputed.evaluationProfileName,
         },
         include: SUBMISSION_IDENTITY_INCLUDE,
       }),
