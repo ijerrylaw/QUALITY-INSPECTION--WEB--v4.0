@@ -104,6 +104,28 @@ export function composeFullLotNumber(
   return `${safeLine}${safeSide}${yjjj}${safeSeq}`;
 }
 
+interface SequenceHintResponse {
+  suggestedNext: number | null;
+  suggestedTotalCarton: number | null;
+}
+
+async function fetchSequenceHint(
+  lineId: string,
+  side: string,
+  yjjj: string,
+): Promise<SequenceHintResponse> {
+  if (!lineId || !side || !yjjj) return { suggestedNext: null, suggestedTotalCarton: null };
+  try {
+    const params = new URLSearchParams({ lineId, side, yjjj });
+    const response = await fetch(`${API_BASE_URL}/api/submissions/sequence-hint?${params.toString()}`);
+    if (!response.ok) return { suggestedNext: null, suggestedTotalCarton: null };
+    const data = (await response.json()) as SequenceHintResponse;
+    return { suggestedNext: data.suggestedNext ?? null, suggestedTotalCarton: data.suggestedTotalCarton ?? null };
+  } catch {
+    return { suggestedNext: null, suggestedTotalCarton: null };
+  }
+}
+
 /**
  * Non-binding advisory: the suggested next sequence number (max existing + 1)
  * already recorded for this Line+Side+YJJJ group. Returns null if the group
@@ -115,14 +137,24 @@ export async function fetchSuggestedNextSequence(
   side: string,
   yjjj: string,
 ): Promise<number | null> {
-  if (!lineId || !side || !yjjj) return null;
-  try {
-    const params = new URLSearchParams({ lineId, side, yjjj });
-    const response = await fetch(`${API_BASE_URL}/api/submissions/sequence-hint?${params.toString()}`);
-    if (!response.ok) return null;
-    const data = (await response.json()) as { suggestedNext: number | null };
-    return data.suggestedNext ?? null;
-  } catch {
-    return null;
-  }
+  const { suggestedNext } = await fetchSequenceHint(lineId, side, yjjj);
+  return suggestedNext;
+}
+
+/**
+ * Pre-fill default (not advisory-only, unlike fetchSuggestedNextSequence):
+ * the Total Carton value from the most recent prior submission sharing this
+ * Line+Side+YJJJ prefix — same group-matching query as the sequence hint,
+ * reused here so both suggestions can never drift apart. Returns null if the
+ * group has no prior records (first lot for this line/date/side), or if the
+ * request fails — callers should leave the field blank in that case, same as
+ * the sequence-number suggestion's "no hint available" behavior.
+ */
+export async function fetchSuggestedTotalCarton(
+  lineId: string,
+  side: string,
+  yjjj: string,
+): Promise<number | null> {
+  const { suggestedTotalCarton } = await fetchSequenceHint(lineId, side, yjjj);
+  return suggestedTotalCarton;
 }

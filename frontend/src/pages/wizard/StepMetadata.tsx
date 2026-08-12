@@ -37,6 +37,7 @@ import {
   composeYJJJ,
   composeFullLotNumber,
   fetchSuggestedNextSequence,
+  fetchSuggestedTotalCarton,
 } from '../../utils/lotNumber';
 import { OriginalValueNote } from '../../utils/fieldDiff';
 import {
@@ -123,7 +124,9 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
       const preferred = config.sampleSizes?.includes(125) ? '125' : (config.sampleSizes?.[0]?.toString() ?? '125');
       setSampleSize(preferred);
     }
-    if (!totalCarton) setTotalCarton('18');
+    // Total Carton is no longer defaulted here — it's pre-filled from the
+    // most recent matching prior submission by the effect below (or left
+    // blank if none exists), see fetchSuggestedTotalCarton.
   }, [config]); // intentionally fire once
 
   // ── ISO2859_MATH_ENGINE.md §3: Pre-select isDefault profile on config load ─────────
@@ -246,6 +249,24 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
     }
     fetchSuggestedNextSequence(lineId, side, lot4Digit).then((result) => {
       if (!cancelled) setSuggestedNextSeq(result);
+    });
+    return () => { cancelled = true; };
+  }, [lineId, side, lot4Digit]);
+
+  // ── Total Carton Pre-fill: editable default from the most recent prior ────
+  // submission sharing this Line+Side+YJJJ prefix — since one line only ever
+  // runs one product at a time, that prefix alone identifies "the lot this
+  // line is currently running". Only fills an EMPTY field (never overwrites
+  // a value already entered/amended); leaves it blank if no prior match
+  // exists, same as the sequence-number hint's "no suggestion" behavior.
+  useEffect(() => {
+    let cancelled = false;
+    if (!lineId || !side || !lot4Digit) return;
+    if (totalCarton) return;
+    fetchSuggestedTotalCarton(lineId, side, lot4Digit).then((result) => {
+      if (!cancelled && result !== null) {
+        setTotalCarton((current) => (current ? current : result.toString().padStart(2, '0')));
+      }
     });
     return () => { cancelled = true; };
   }, [lineId, side, lot4Digit]);
@@ -484,7 +505,7 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
                 className="w-full h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all"
               />
               {suggestedNextSeq !== null && (
-                <div className="text-[10px] text-muted font-mono mt-1">
+                <div className="text-[10px] text-brand-secondary font-mono mt-1">
                   Suggested next for {lineId}/{side}/{lot4Digit}: {String(suggestedNextSeq).padStart(3, '0')}
                 </div>
               )}

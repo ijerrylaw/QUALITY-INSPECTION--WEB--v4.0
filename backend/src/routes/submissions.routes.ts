@@ -22,6 +22,9 @@
  *  GET  /api/submissions/sequence-hint
  *    Non-binding advisory: suggested next Sequence No for a Line+Side+YJJJ
  *    group. Never restricts or pre-fills — see ISO2859_MATH_ENGINE.md §4.
+ *    Also returns suggestedTotalCarton — the Total Carton value from the
+ *    most recent prior submission in the same Line+Side+YJJJ group — which
+ *    the wizard DOES use to pre-fill (editable default, not advisory-only).
  *
  *  GET  /api/submissions/:id
  *    Returns a single submission with its amendment logs. `profileId` is an
@@ -616,15 +619,26 @@ router.get('/', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Returns the suggested next Sequence No (max existing + 1) already recorded
- * for a given Line+Side+YJJJ group — advisory only, per ISO2859_MATH_ENGINE.md
- * §4: Sequence has no auto-default and is never auto-incremented by this app,
- * since it must reflect true production order, not submission order. The
- * caller composes `${lineId}${side}${yjjj}` as the batchNumber prefix; the
- * trailing 3 characters of each matching batchNumber are parsed as the
+ * Returns two non-binding-to-compute advisories for a given Line+Side+YJJJ
+ * group, both derived from the same batchNumber-prefix match (kept in one
+ * endpoint/query so the two suggestions can never drift apart):
+ *
+ *  - suggestedNext: max existing Sequence No + 1, per ISO2859_MATH_ENGINE.md
+ *    §4. Sequence has no auto-default and is never auto-incremented by this
+ *    app, since it must reflect true production order, not submission
+ *    order — the caller only ever displays this as a hint, never pre-fills.
+ *  - suggestedTotalCarton: Total Carton from the most recent prior
+ *    submission (by createdAt) in the same group — since one production
+ *    line only ever runs one product at a time, Line+YJJJ+Side alone
+ *    identifies "the lot this line is currently running", and Total
+ *    Carton is typically constant across a lot's submissions (varying only
+ *    at the tail end). The caller DOES pre-fill the field with this value
+ *    (still fully editable), unlike suggestedNext.
+ *
+ * The caller composes `${lineId}${side}${yjjj}` as the batchNumber prefix;
+ * the trailing 3 characters of each matching batchNumber are parsed as the
  * sequence. Query params: lineId, side, yjjj (all required — missing any
- * returns `{ suggestedNext: null }` rather than an error, since this is purely
- * advisory).
+ * returns nulls rather than an error, since both fields are advisory).
  */
 router.get('/sequence-hint', async (req: Request, res: Response) => {
   try {
@@ -633,14 +647,15 @@ router.get('/sequence-hint', async (req: Request, res: Response) => {
     const yjjj = String(req.query['yjjj'] ?? '');
 
     if (!lineId || !side || !yjjj) {
-      res.status(200).json({ suggestedNext: null });
+      res.status(200).json({ suggestedNext: null, suggestedTotalCarton: null });
       return;
     }
 
     const prefix = `${lineId}${side}${yjjj}`;
     const matches = await prisma.submission.findMany({
       where: { machineId: lineId, batchNumber: { startsWith: prefix } },
-      select: { batchNumber: true },
+      select: { batchNumber: true, totalCarton: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
     });
 
     let maxSeq: number | null = null;
@@ -652,10 +667,17 @@ router.get('/sequence-hint', async (req: Request, res: Response) => {
       }
     }
 
-    res.status(200).json({ suggestedNext: maxSeq === null ? null : maxSeq + 1 });
+    // `matches` is ordered createdAt desc, so the first entry is the most
+    // recent prior submission in this Line+Side+YJJJ group.
+    const suggestedTotalCarton = matches[0]?.totalCarton ?? null;
+
+    res.status(200).json({
+      suggestedNext: maxSeq === null ? null : maxSeq + 1,
+      suggestedTotalCarton,
+    });
   } catch (err) {
     console.error('[GET /api/submissions/sequence-hint]', err);
-    res.status(200).json({ suggestedNext: null });
+    res.status(200).json({ suggestedNext: null, suggestedTotalCarton: null });
   }
 });
 
