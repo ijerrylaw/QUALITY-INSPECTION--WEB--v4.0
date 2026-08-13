@@ -91,7 +91,17 @@ export function composeYJJJ(effectiveDate: Date): string {
   return `${yearDigit}${julian}`;
 }
 
-/** Full System Lot Number: [Line][Side][YJJJ][Sequence]. */
+/**
+ * Full System Lot Number: [Line][Side][YJJJ][Sequence].
+ *
+ * A blank `sequenceNo` renders as a `---` placeholder segment, never a
+ * fabricated number (AUDIT_REPORT.md #19) — `''.padStart(3, '0')` used to
+ * evaluate to the truthy string `"000"`, so the previous `|| '001'` fallback
+ * could never actually fire; blank sequence silently composed into a fake
+ * `"000"`. This is purely a string/preview concern — callers remain
+ * responsible for blocking submission on an actually-blank sequence (both
+ * StepMetadata.tsx and BatchEntry.tsx already do).
+ */
 export function composeFullLotNumber(
   lineId: string,
   side: string,
@@ -100,7 +110,7 @@ export function composeFullLotNumber(
 ): string {
   const safeLine = lineId || 'XXX';
   const safeSide = side || 'A';
-  const safeSeq = (sequenceNo || '').padStart(3, '0') || '001';
+  const safeSeq = sequenceNo ? sequenceNo.padStart(3, '0') : '---';
   return `${safeLine}${safeSide}${yjjj}${safeSeq}`;
 }
 
