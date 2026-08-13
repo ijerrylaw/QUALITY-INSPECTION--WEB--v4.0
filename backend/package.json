@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "server.ts",
   "scripts": {
-    "dev": "tsx server.ts"
+    "dev": "tsx watch server.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
