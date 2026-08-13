@@ -22,7 +22,29 @@ export function hasFieldChanged(
   currentValue: unknown,
 ): boolean {
   if (!hasOriginal) return false;
-  return String(originalValue) !== String(currentValue);
+
+  const origStr = String(originalValue ?? '');
+  const currStr = String(currentValue ?? '');
+
+  // Numeric fields (Glove Weight, Total Carton, Sample Size, Sequence No,
+  // dimension measurements, defect counts, ...) are frequently stored as a
+  // raw unformatted number on the original record but displayed with fixed
+  // decimal places or zero-padding in the live form (e.g. 2.9 vs "2.90", or
+  // 5 vs "05") — a plain string comparison flags that formatting difference
+  // as a real edit even when nothing changed. Compare numerically whenever
+  // BOTH sides parse as finite numbers; fall back to exact string comparison
+  // otherwise (text/enum fields, or either side genuinely empty — Number('')
+  // is 0, which would wrongly treat a cleared field as unchanged from a
+  // stored 0 if this guard didn't require both sides non-empty first).
+  if (origStr !== '' && currStr !== '') {
+    const origNum = Number(origStr);
+    const currNum = Number(currStr);
+    if (Number.isFinite(origNum) && Number.isFinite(currNum)) {
+      return origNum !== currNum;
+    }
+  }
+
+  return origStr !== currStr;
 }
 
 export interface OriginalValueNoteProps {

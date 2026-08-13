@@ -263,14 +263,15 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
   // [Sequence]. YJJJ has no independent field of its own — it's derived solely
   // from `timestamp` (via resolveShiftAndEffectiveDate + composeYJJJ), so a
   // changed date/time already covers any resulting shift/YJJJ change; comparing
-  // "Shift" separately would be redundant. Sequence Number is deliberately
-  // excluded — an amendment that only corrects the sequence is a normal,
-  // non-alarming edit (still gets the changed-field highlight below, just not
-  // this banner).
+  // "Shift" separately would be redundant. Sequence Number DOES trigger this
+  // banner (corrected 2026-08-14) — it's the literal last 3 digits of the
+  // composed lot number, same as Line/Side/Date; there's no "lot-neutral"
+  // field left out of this list.
   const originalTimestampMs = originalData?.timestamp ? new Date(originalData.timestamp).getTime() : null;
   const lotAffectingChanged = isAmendment && (
     hasFieldChanged(true, originalData?.lineId, lineId) ||
     hasFieldChanged(true, originalData?.side, side) ||
+    hasFieldChanged(true, originalData?.sequenceNo, sequenceNo) ||
     (originalTimestampMs !== null && hasFieldChanged(true, originalTimestampMs, timestamp.getTime()))
   );
 
@@ -410,16 +411,16 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
             INSPECTION METADATA & SETUP
           </h2>
 
-          {/* ── Lot-Number-Change Warning (amendment mode, Line/Side/Date only) ── */}
+          {/* ── Lot-Number-Change Warning (amendment mode, Line/Side/Date/Sequence) ── */}
           {lotAffectingChanged && (
             <div className="p-3 rounded-lg border border-l-4 border-amber-500/20 border-l-amber-500 bg-amber-500/5 flex gap-3 text-sm">
               <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" strokeWidth={2} />
               <div>
                 <p className="text-xs font-bold uppercase tracking-wider text-amber-400">THIS AMENDMENT CHANGES THE LOT NUMBER</p>
                 <p className="text-xs text-muted mt-1">
-                  You've changed the Line, Side, or Date/Time — these make up part of the Full System Lot
-                  Number, so submitting will amend the record under a different lot number than the original.
-                  This doesn't block submission; just confirm it's intentional.
+                  You've changed the Line, Side, Date/Time, or Sequence Number — these make up the Full System
+                  Lot Number, so submitting will amend the record under a different lot number than the
+                  original. This doesn't block submission; just confirm it's intentional.
                 </p>
               </div>
             </div>
