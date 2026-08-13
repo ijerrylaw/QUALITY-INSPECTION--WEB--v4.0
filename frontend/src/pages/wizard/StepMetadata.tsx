@@ -94,6 +94,11 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
   // (auto-incrementing would capture submission order, not true production
   // order; the business explicitly does not want that — see lotNumber.ts).
   const [sequenceNo, setSequenceNo] = useState<string>(initialData?.sequenceNo || '');
+  // Tracks whether the user has ever edited Sequence No. in this field session —
+  // gates both the auto-prefill (never re-fills after a real edit, even if
+  // cleared back to blank) and the pre-fill color treatment (UI_DESIGN_SYSTEM.md
+  // §3.4 "Pre-Fill Untouched vs. Touched State").
+  const [sequenceTouched, setSequenceTouched] = useState<boolean>(Boolean(initialData?.sequenceNo));
   const [totalCarton, setTotalCarton] = useState<string>(initialData?.totalCarton?.toString() || '');
   const [sampleSize, setSampleSize] = useState<string>(
     initialData?.sampleSize?.toString() || localStorage.getItem('wizard_sampleSize') || ''
@@ -209,7 +214,11 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
   const computedLot = useMemo(() => {
     const { effectiveDate, activeShift } = resolveShiftAndEffectiveDate(timestamp, config?.shifts);
     const lot4Digit = composeYJJJ(effectiveDate);
-    const fullSystemLotNo = composeFullLotNumber(lineId, side, lot4Digit, sequenceNo);
+    // Blank Sequence No. must never render as a fabricated "000" — show a
+    // placeholder segment instead until the operator actually enters a value.
+    const fullSystemLotNo = sequenceNo
+      ? composeFullLotNumber(lineId, side, lot4Digit, sequenceNo)
+      : `${lineId || 'XXX'}${side || 'A'}${lot4Digit}---`;
 
     return { effectiveDate, activeShift, lot4Digit, fullSystemLotNo };
   }, [timestamp, lineId, side, sequenceNo, config?.shifts]);
@@ -252,6 +261,15 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
     });
     return () => { cancelled = true; };
   }, [lineId, side, lot4Digit]);
+
+  // Pre-fill Sequence No. with the suggestion as an actual editable value
+  // (colored per §3.4, not a placeholder attribute) — but only while the field
+  // has never been touched. Once touched, this never re-fills again, even if
+  // the user clears the field back to empty.
+  useEffect(() => {
+    if (sequenceTouched || suggestedNextSeq === null) return;
+    setSequenceNo((current) => (current ? current : String(suggestedNextSeq).padStart(3, '0')));
+  }, [suggestedNextSeq, sequenceTouched]);
 
   // ── Total Carton Pre-fill: editable default from the most recent prior ────
   // submission sharing this Line+Side+YJJJ prefix — since one line only ever
@@ -487,9 +505,16 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
 
             {/* Sequence No */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wider text-muted flex items-center gap-1.5">
-                <Hash className="w-3 h-3 text-brand-secondary" strokeWidth={2} />
-                SEQUENCE NO
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted flex items-center justify-between gap-1.5">
+                <span className="flex items-center gap-1.5">
+                  <Hash className="w-3 h-3 text-brand-secondary" strokeWidth={2} />
+                  SEQUENCE NO
+                </span>
+                {suggestedNextSeq !== null && (
+                  <span className="text-[10px] text-brand-secondary font-mono normal-case tracking-normal">
+                    Suggested next for {lineId}/{side}/{lot4Digit}: {String(suggestedNextSeq).padStart(3, '0')}
+                  </span>
+                )}
               </label>
               <input
                 type="text"
@@ -497,18 +522,18 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
                 pattern="[0-9]*"
                 maxLength={3}
                 value={sequenceNo}
-                onChange={(e) => setSequenceNo(e.target.value.replace(/\D/g, ''))}
+                onChange={(e) => {
+                  setSequenceTouched(true);
+                  setSequenceNo(e.target.value.replace(/\D/g, ''));
+                }}
                 onBlur={() => {
                   if (sequenceNo) setSequenceNo(sequenceNo.padStart(3, '0'));
                 }}
                 placeholder="001"
-                className="w-full h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all"
+                className={`w-full h-9 px-4 rounded-lg bg-canvas border border-gray-700 font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all ${
+                  !sequenceTouched && sequenceNo ? 'text-muted opacity-80' : 'text-primary'
+                }`}
               />
-              {suggestedNextSeq !== null && (
-                <div className="text-[10px] text-brand-secondary font-mono mt-1">
-                  Suggested next for {lineId}/{side}/{lot4Digit}: {String(suggestedNextSeq).padStart(3, '0')}
-                </div>
-              )}
             </div>
 
             {/* Total Carton */}

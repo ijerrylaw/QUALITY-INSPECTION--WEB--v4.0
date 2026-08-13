@@ -216,3 +216,54 @@ with its full original context, reasoning, and verification trail.
     silent retroactive rewrite of what a historical inspection record appears
     to have graded, visible directly in the UI with zero indication the
     displayed breakdown may no longer match what was true at submission time.
+
+19. **Blank-sequence fallback in `composeFullLotNumber` still fabricates
+    "000" in batch mode.** `frontend/src/utils/lotNumber.ts`:
+    ```
+    const safeSeq = (sequenceNo || '').padStart(3, '0') || '001';
+    ```
+    `''.padStart(3, '0')` evaluates to `"000"`, which is truthy, so the
+    intended `'001'` fallback never fires. A blank Sequence No. silently
+    composes into a fabricated `"000"` segment rather than surfacing as
+    unset.
+
+    Found while fixing this same symptom in entry mode (`StepMetadata.tsx`,
+    2026-08-13/14): entry mode now bypasses `composeFullLotNumber` entirely
+    for its own lot-number preview (renders a `---` placeholder instead when
+    `sequenceNo` is blank), so entry mode no longer hits this bug. The
+    function itself is unchanged and still shared with `BatchEntry.tsx` —
+    deliberately not touched in that fix, since editing it would have been a
+    second file (violates one-file-per-turn) and would have pulled batch
+    mode into a prompt scoped to entry mode only.
+
+    **Also unverified:** amendment mode is documented as always prefilling
+    the original sequence number, so this path is believed unreachable
+    there — but that hasn't been explicitly checked against
+    `composeFullLotNumber`'s call sites. Worth a quick check before
+    considering amendment mode fully clear.
+
+    **Next step:** decide whether to apply the same dash-placeholder
+    treatment to `composeFullLotNumber` itself (or to `BatchEntry.tsx`'s
+    call sites), as its own scoped prompt — likely batch-mode-file-only.
+
+20. **`UI_DESIGN_SYSTEM.md` §3.4's "Pre-Fill Untouched vs. Touched State"
+    pattern is titled/scoped to "Mass Data Entry Inputs (Measurement
+    Grids)" but was reused for a single non-grid form field.**
+    `StepMetadata.tsx`'s Sequence No. field (2026-08-13/14 fix) needed a
+    color token for "auto-populated advisory value, reverts to normal on
+    edit" — §3.4 is the only existing token with that exact semantic
+    (`text-muted opacity-80` untouched → `text-primary` touched), so it was
+    reused rather than inventing a new color, per this session's standing
+    rule against silently inventing tokens. The section's own scope,
+    though, is written specifically for `Measurement Grids` (dense numeric
+    entry grids), not general single-field pre-fills — so the *token* is
+    right, but the *doc section it's carved from* doesn't literally cover
+    this use case.
+
+    Not a live bug — purely a documentation-scope gap. Flagged per AI_RULES.md's
+    "don't silently revise MDs mid-task" rule rather than editing the doc.
+    **Next step:** decide whether to broaden §3.4's title/scope to cover
+    single-field pre-fills generally, or split the "Untouched vs. Touched"
+    color pair out into its own general-purpose token entry (e.g. under
+    Chapter 1 or 3.1) that §3.4 and any future single-field use can both
+    reference.
