@@ -47,41 +47,6 @@ with its full original context, reasoning, and verification trail.
    landmine, not inert.
    → `CHANGELOG.md` §7.5, §12.4.
 
-5. ~~**`productMatrixConfig` has no throw/log option for a missing product
-   code.**~~ **Fixed 2026-08-12.** Unlike the AQL side's `'throw'` mode, a
-   product code with no dimension-spec entry silently zeroed out the two
-   fixed-dimension thresholds (a total no-op — no measurement could ever
-   fail them) with no error and no log line anywhere. Fixed with the same
-   architecture as finding #10's AQL-side fix (commit `606b5e4`): new
-   `hasUsableProductMatrix()` helper (mirrored in
-   `backend/src/engine/dimensionEvaluator.ts` and
-   `frontend/src/context/ConfigContext.tsx`, kept in sync deliberately),
-   wizard-side entry blocking in both `StepDimensions.tsx` (GUIDED) and
-   `BatchEntry.tsx` (SPREADSHEET) — confirmed during the fix that
-   `BatchEntry.tsx` has its own independently-duplicated dimension-spec
-   logic and needed the same treatment, not just `StepDimensions.tsx` —
-   and a new `VerdictNoUsableDimensionConfigError` thrown server-side in
-   `resolveVerdict.ts` as defense-in-depth, mapped at the 3 of 4
-   `resolveVerdict()` call sites that actually exercise dimension
-   evaluation (`POST /api/verdict/preview` never sends `size`/`dimensions`
-   in its request body from either frontend caller, confirmed by reading
-   both, so it can't reach this error).
-   → `CHANGELOG.md` §7.3, §7.5.
-
-6. ~~**Tenant-scoped admin role question is unanswered.**~~ **Closed, no
-   action.** Whether a future role tier above or alongside `ADMIN` is ever
-   wanted — even within one single-tenant-per-deployment install — is
-   raised nowhere in the docs or code. Group A (IT Admin/C-Suite/Directors)
-   covers the current single-tenant-per-deployment architecture. Revisit
-   if/when commercialization introduces multi-deployment oversight needs.
-   → `CHANGELOG.md` §8.2, §8.6 (Q2), ranked item #5.
-
-7. **`GET /api/amendments/pending` has no pagination or row limit.**
-   Fetches every `PENDING_APPROVAL` submission unbounded — same class of
-   gap as `GET /api/submissions` had before its own fix, on a different
-   route (backs the Approvals Queue screen), not yet touched.
-   → `CHANGELOG.md` §14.
-
 8. **`test_post.js`'s hardcoded `batchNumber` is stale** — no longer
    matches the real `[Line][Side][YJJJ][Sequence]` lot-number format.
    Inert manual script (not wired into any npm script or CI), candidate
@@ -153,15 +118,25 @@ with its full original context, reasoning, and verification trail.
     own unresolved-explicit-id behavior).
     → `CHANGELOG.md` §3.B6.
 
-12. **Dead `Badge.tsx` component + minor color-token drift.** The shared
-    badge component is unused anywhere (every screen hand-rolls its own
-    badge styling) and itself violates the documented badge geometry.
-    `BatchEntry.tsx` uses `red-500`/`hover:bg-red-500/10` instead of the
-    mandated `rose-500` token. Dead files (`components/wizard/*`,
-    `ConfigDashboard.tsx`) use non-canonical `green-`/`red-`/`yellow-`
-    classes instead of `emerald`/`rose`/`amber` — not live bugs, but a
-    landmine if any dead file is ever reconnected.
-    → `CHANGELOG.md` §3.B8.
+12. **`Badge.tsx` is live and violates documented badge geometry on two
+    real admin screens — not dead code, as the original finding assumed.**
+    Confirmed imported and rendered in `PinAdminPanel.tsx` (`/pin-admin`)
+    and `M365UserRolesPanel.tsx` (`/system`), both real, routed screens —
+    introduced in commits `9218e20` and `e51b166` respectively, after the
+    original "dead code" finding was written. `Badge.tsx` itself is
+    unchanged since that finding: still `rounded-lg`/`font-semibold`/
+    `text-xs` against §4.8B's mandated `rounded-full`/`font-bold`/
+    `text-[10px]`, and still defines an undocumented `info`/cyan variant
+    outside the emerald/rose/gray/amber matrix. Net effect: this is now a
+    live, active geometry violation on two admin screens — more severe
+    than the original finding, not resolved by it.
+    Separately, `BatchEntry.tsx` still uses `red-500`/`hover:bg-red-500/10`
+    instead of the mandated `rose-500` token, and the fully dead
+    `components/wizard/*`/`ConfigDashboard.tsx` files still use
+    non-canonical `green-`/`red-`/`yellow-` classes — both unchanged from
+    the original finding.
+    → `CHANGELOG.md` §3.B8 (original finding, written when `Badge.tsx`
+    genuinely was dead code).
 
 13. **A brand-new install's zero-state default profile is code-level, not
     admin-editable.** `HARDCODED_DEFAULT_PROFILE` (`resolveVerdict.ts`) is
@@ -252,28 +227,7 @@ with its full original context, reasoning, and verification trail.
     clearly label the expanded panel as a live re-grade, not history (smaller
     UI-only fix, no schema change). Needs its own dedicated planning session
     before implementation — deliberately not decided here. Same severity class
-    as finding #5 (`productMatrixConfig`): silent retroactive rewrite of what
-    a historical inspection record appears to have graded, visible directly in
-    the UI with zero indication the displayed breakdown may no longer match
-    what was true at submission time.
-
----
-
-## Workflow Notes
-
-**Backend dev server (`tsx` vs `tsx watch`):** The current `.claude/launch.json`
-starts the backend dev server with plain `tsx` (from the npm script in
-`package.json`, which calls `tsx src/index.ts`). Unlike typical node-dev
-watchers or `tsx watch`, plain `tsx` does not reload when source files
-change — changes to `backend/src/**/*.ts` require a manual server restart
-(`preview_stop` then `preview_start` in the Browser pane). This has caused
-real bugs twice (live testing silently ran against stale code, producing
-"fix didn't work" signals that were actually "server hasn't restarted"
-problems). Recommend either: (a) switching the npm script to use `tsx watch`
-if that's compatible with the project's structure and build story; or (b)
-documenting this manual-restart requirement prominently in the project onboarding
-or dev-server setup notes to prevent wasted debugging time. **Decision needed:** is
-`tsx watch` the correct fix, or was plain `tsx` chosen deliberately for some
-reason (e.g. compatibility with the Prisma generation step, or avoiding
-double-restarts)? Flagged as a question, not a confirmed bug, until that's
-answered.
+    as the now-closed `productMatrixConfig` finding (`CHANGELOG.md` §18.1):
+    silent retroactive rewrite of what a historical inspection record appears
+    to have graded, visible directly in the UI with zero indication the
+    displayed breakdown may no longer match what was true at submission time.

@@ -3866,3 +3866,92 @@ confirmed a wrong current PIN is rejected (`401`) with no state change;
 confirmed changing to a PIN already active on another user is rejected
 (`409`); confirmed `/pin-admin` hides deactivated staff by default and
 reveals them (dimmed) via the toggle.
+
+---
+
+## 18. AUDIT_REPORT.md Housekeeping — Four Resolved Items Relocated From the Open List
+
+**Context:** `AUDIT_REPORT.md`'s own stated purpose is "current, still-open
+findings only." Four items had accumulated inline "Fixed"/"Closed" notes
+without ever being relocated out of the `## Open Items` list, contradicting
+that scope. This section closes that gap — moving all four here, with their
+original resolution notes preserved (not rewritten, except where noted).
+Original item numbers are cited in each heading for cross-reference,
+including from code comments that name specific finding numbers (e.g.
+`resolveVerdict.ts`'s references to "finding #10"/"#13"); nothing was
+renumbered to keep those cross-references intact — `AUDIT_REPORT.md`'s
+`## Open Items` list now has a numbering gap at 5/6/7 by design.
+
+### 18.1 (was open item #5) `productMatrixConfig` no throw/log option for missing product code — Fixed 2026-08-12
+
+Unlike the AQL side's `'throw'` mode, a product code with no dimension-spec
+entry silently zeroed out the two fixed-dimension thresholds (a total
+no-op — no measurement could ever fail them) with no error and no log line
+anywhere. Fixed with the same architecture as finding #10's AQL-side fix
+(commit `606b5e4`): new `hasUsableProductMatrix()` helper (mirrored in
+`backend/src/engine/dimensionEvaluator.ts` and
+`frontend/src/context/ConfigContext.tsx`, kept in sync deliberately),
+wizard-side entry blocking in both `StepDimensions.tsx` (GUIDED) and
+`BatchEntry.tsx` (SPREADSHEET) — confirmed during the fix that
+`BatchEntry.tsx` has its own independently-duplicated dimension-spec logic
+and needed the same treatment, not just `StepDimensions.tsx` — and a new
+`VerdictNoUsableDimensionConfigError` thrown server-side in
+`resolveVerdict.ts` as defense-in-depth, mapped at the 3 of 4
+`resolveVerdict()` call sites that actually exercise dimension evaluation
+(`POST /api/verdict/preview` never sends `size`/`dimensions` in its request
+body from either frontend caller, confirmed by reading both, so it can't
+reach this error).
+→ Original finding: `CHANGELOG.md` §7.3, §7.5.
+
+### 18.2 (was open item #6) Tenant-scoped admin role question — Closed, no action
+
+Whether a future role tier above or alongside `ADMIN` is ever wanted — even
+within one single-tenant-per-deployment install — is raised nowhere in the
+docs or code. Group A (IT Admin/C-Suite/Directors) covers the current
+single-tenant-per-deployment architecture. Revisit if/when commercialization
+introduces multi-deployment oversight needs.
+→ Original finding: `CHANGELOG.md` §8.2, §8.6 (Q2), ranked item #5.
+
+### 18.3 (was open item #7) `GET /api/amendments/pending` had no pagination or row limit — Fixed 2026-08-12
+
+Fetched every `PENDING_APPROVAL` submission unbounded — same class of gap
+as `GET /api/submissions` had before its own fix (§14), on a different
+route (backs the Approvals Queue screen). Fixed by commit `e2d6994`
+(`fix: paginate GET /api/amendments/pending (AUDIT_REPORT.md open item)`,
+2026-08-12): `amendmentsRouter.get('/pending', ...)` now accepts `page`/
+`limit` query params (same contract as `GET /api/submissions`), returns
+`{ amendments[], count, page, limit, totalCount, hasMore }`. Page size
+default tuned to 30 by a same-day-audit follow-up, commit `c7c8a1b`
+(`chore: set amendments/pending page size to 30`, 2026-08-13).
+→ Original finding: `CHANGELOG.md` §14.
+→ Documented: `API_AND_INTEGRATION_SPEC.md`'s `GET /api/amendments/pending`
+entry already reflects this pagination contract (added during the Phase 8
+doc-catch-up pass, commit `3b0cb09`, confirmed accurate against the fix
+above).
+
+### 18.4 (was "Workflow Notes" section) Backend dev server had no hot-reload (`tsx` vs `tsx watch`) — Fixed 2026-08-13
+
+**Original note also corrected here:** the note as originally written
+claimed the dev script ran `tsx src/index.ts` — that was already wrong at
+the time it was written. No `backend/src/index.ts` file has ever existed;
+the real entrypoint has always been `backend/server.ts` (`package.json`'s
+`main` field). The substance of the finding — plain `tsx`, no watch mode,
+manual restart required after every backend edit — was accurate; only the
+file-path detail was wrong, and is not repeated here.
+
+**Investigation:** confirmed via `git log` that watch mode was never
+enabled anywhere in this codebase's history — all three commits that ever
+touched `backend/package.json`'s `scripts.dev` field (from Phase 1 setup
+through the most recent pre-fix state) used plain `tsx server.ts`. No
+prior removal, no documented reason to avoid it found anywhere — an
+oversight, not a deliberate choice.
+
+**Fix (commit `10d6920`, `chore: enable tsx watch mode for backend
+hot-reload`):** `backend/package.json`'s `dev` script changed to
+`tsx watch server.ts`. Live-verified: server started cleanly, a trivial
+edit to `server.ts` triggered `[tsx] change in ./server.ts Restarting...`
+and a clean auto-restart, and `GET /api/health` succeeded immediately
+after — confirming the app works normally post-watch-restart, not just
+that the process relaunches.
+→ Original note: this file's now-removed "Workflow Notes" section
+(relocated here in full, with the entrypoint-path correction above).
