@@ -39,14 +39,6 @@ with its full original context, reasoning, and verification trail.
    expected to be revisited once real QA input is available.
    → `CHANGELOG.md` §12.8.
 
-4. **`productProfileMap` has a typo'd entry for `N030SKB-OC-24FT`**
-   (map contains `N030MNV-OC-24FT`/`R030MNV-OC-24FT` instead — neither
-   matches). Harmless today only because the wizard's submission path
-   never consults this map (profile is always operator-picked); but
-   `HistoryFeed.tsx`'s row-expand path does consult it, so it's a live
-   landmine, not inert.
-   → `CHANGELOG.md` §7.5, §12.4.
-
 8. **`test_post.js`'s hardcoded `batchNumber` is stale** — no longer
    matches the real `[Line][Side][YJJJ][Sequence]` lot-number format.
    Inert manual script (not wired into any npm script or CI), candidate

@@ -3869,18 +3869,18 @@ reveals them (dimmed) via the toggle.
 
 ---
 
-## 18. AUDIT_REPORT.md Housekeeping — Four Resolved Items Relocated From the Open List
+## 18. AUDIT_REPORT.md Housekeeping — Resolved Items Relocated From the Open List
 
 **Context:** `AUDIT_REPORT.md`'s own stated purpose is "current, still-open
-findings only." Four items had accumulated inline "Fixed"/"Closed" notes
+findings only." Several items had accumulated inline "Fixed"/"Closed" notes
 without ever being relocated out of the `## Open Items` list, contradicting
-that scope. This section closes that gap — moving all four here, with their
+that scope. This section closes that gap — moving each one here, with its
 original resolution notes preserved (not rewritten, except where noted).
 Original item numbers are cited in each heading for cross-reference,
 including from code comments that name specific finding numbers (e.g.
 `resolveVerdict.ts`'s references to "finding #10"/"#13"); nothing was
 renumbered to keep those cross-references intact — `AUDIT_REPORT.md`'s
-`## Open Items` list now has a numbering gap at 5/6/7 by design.
+`## Open Items` list now has a numbering gap at 4/5/6/7 by design.
 
 ### 18.1 (was open item #5) `productMatrixConfig` no throw/log option for missing product code — Fixed 2026-08-12
 
@@ -3955,3 +3955,40 @@ after — confirming the app works normally post-watch-restart, not just
 that the process relaunches.
 → Original note: this file's now-removed "Workflow Notes" section
 (relocated here in full, with the entrypoint-path correction above).
+
+### 18.5 (was open item #4) `productProfileMap` typo'd entry for `N030SKB-OC-24FT` — Resolved 2026-08-13
+
+`productProfileMap` contained `N030MNV-OC-24FT`/`R030MNV-OC-24FT` instead
+of the intended `N030SKB-OC-24FT` — a near-miss corruption (the `035`→`030`
+segment was updated but `MNV` was never corrected to `SKB`, with one entry
+additionally swapping `N`→`R` on the leading character). Flagged as a live
+landmine, not inert, because `HistoryFeed.tsx`'s row-expand path (unlike
+the wizard's submission path) does consult this map, and an unresolved
+lookup falls through to a silent safety-net profile with no error or log
+line — see §7.5 for the full original mechanism trace.
+
+**Resolved by data change, not code:** Jerry manually trimmed
+`AppConfig.productCodes` down to a single entry (`N035MNV-OC-24FT`) via
+`/config` in his own browser — the specific product code the finding was
+about (`N030SKB-OC-24FT`) is no longer selectable in either wizard at all,
+making the original scenario structurally impossible, not just
+low-probability.
+
+**Live-verified before cleanup:** `GET /api/submissions` spot-checked
+against every implicated code (`N025SKB-OC-24FT`, `N030SKB-OC-24FT`,
+`N030MNV-OC-24FT`, `R030MNV-OC-24FT`, plus `N035SKB-OC-24FT` and a stray
+`ZZZTESTNOMATRIX` test artifact found in the same pass) — all returned
+`totalCount: 0`. All 22 existing submissions use `N035MNV-OC-24FT`
+exclusively; nothing in submission history was ever exposed to this gap.
+
+**Follow-up cleanup:** with the underlying risk gone, the 3 now-orphaned
+`productProfileMap` entries (`N025SKB-OC-24FT`, `N030MNV-OC-24FT`,
+`R030MNV-OC-24FT` — none matching any remaining product code) were removed
+via a real `PATCH /api/config` call (`X-User-Role: ADMIN`), same
+write-path convention as §12.5 — not a direct `dev.db` edit.
+`productProfileMap` now contains exactly one entry:
+`{ "N035MNV-OC-24FT": "prof_default" }`. Re-verified via `GET /api/config`
+and a repeat submissions spot-check (still 22 total, still all
+`N035MNV-OC-24FT`) that the cleanup changed nothing about existing
+records.
+→ Original finding: `CHANGELOG.md` §7.5, §12.4.
