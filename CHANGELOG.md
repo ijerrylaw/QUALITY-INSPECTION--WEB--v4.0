@@ -3992,3 +3992,36 @@ and a repeat submissions spot-check (still 22 total, still all
 `N035MNV-OC-24FT`) that the cleanup changed nothing about existing
 records.
 → Original finding: `CHANGELOG.md` §7.5, §12.4.
+
+### 18.6 (was open item #12, Badge.tsx portion only) `Badge.tsx` geometry violation — Fixed 2026-08-13
+
+`Badge.tsx` was originally flagged as dead code with a geometry violation
+(§3.B8); a later audit pass found it had since become live — imported in
+`PinAdminPanel.tsx` (`/pin-admin`) and `M365UserRolesPanel.tsx` (`/system`),
+both real, routed screens — while the component itself remained unchanged:
+`rounded-lg`/`font-semibold`/`text-xs` against §4.8B's mandated
+`rounded-full`/`font-bold`/`text-[10px]`, plus an undocumented `info`/cyan
+variant outside the emerald/rose/gray/amber matrix. That made it a live,
+active violation on two admin screens, not a dormant landmine — reopened
+as item #12 rather than left closed.
+
+**Fix (commit `d5f63c4`, `fix: correct Badge.tsx geometry to match
+UI_DESIGN_SYSTEM.md §4.8B, remove unused info variant`):**
+`frontend/src/components/ui/Badge.tsx` — `BadgeVariant` narrowed to
+`'success' | 'danger' | 'warning'` (grep-confirmed neither live call site
+ever passed `info`, nor relied on the old `variant = 'info'` default);
+`variant` made a required prop, closing off any future silent fallback to
+an undocumented style; `baseStyles` corrected to `rounded-full`/
+`text-[10px] font-bold`. Zero call-site changes needed — both
+`PinAdminPanel.tsx:264-266` and `M365UserRolesPanel.tsx:124` already
+passed a valid, surviving variant.
+
+**Verified:** `tsc --noEmit` clean (no errors from the narrowed union or
+now-required prop). Jerry live-confirmed both `/pin-admin` and `/system`
+render correctly with the new geometry in his own browser.
+
+**Not covered by this fix — see the retained, slimmed item #12:**
+`BatchEntry.tsx`'s stray `red-500` token and the dead `components/wizard/*`/
+`ConfigDashboard.tsx` files' non-canonical colors were never in this fix's
+scope; those two sub-findings remain open.
+→ Original finding: `CHANGELOG.md` §3.B8.

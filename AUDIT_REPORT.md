@@ -110,25 +110,18 @@ with its full original context, reasoning, and verification trail.
     own unresolved-explicit-id behavior).
     → `CHANGELOG.md` §3.B6.
 
-12. **`Badge.tsx` is live and violates documented badge geometry on two
-    real admin screens — not dead code, as the original finding assumed.**
-    Confirmed imported and rendered in `PinAdminPanel.tsx` (`/pin-admin`)
-    and `M365UserRolesPanel.tsx` (`/system`), both real, routed screens —
-    introduced in commits `9218e20` and `e51b166` respectively, after the
-    original "dead code" finding was written. `Badge.tsx` itself is
-    unchanged since that finding: still `rounded-lg`/`font-semibold`/
-    `text-xs` against §4.8B's mandated `rounded-full`/`font-bold`/
-    `text-[10px]`, and still defines an undocumented `info`/cyan variant
-    outside the emerald/rose/gray/amber matrix. Net effect: this is now a
-    live, active geometry violation on two admin screens — more severe
-    than the original finding, not resolved by it.
-    Separately, `BatchEntry.tsx` still uses `red-500`/`hover:bg-red-500/10`
-    instead of the mandated `rose-500` token, and the fully dead
-    `components/wizard/*`/`ConfigDashboard.tsx` files still use
-    non-canonical `green-`/`red-`/`yellow-` classes — both unchanged from
-    the original finding.
-    → `CHANGELOG.md` §3.B8 (original finding, written when `Badge.tsx`
-    genuinely was dead code).
+12. **Minor color-token drift: `BatchEntry.tsx` and dead files use
+    non-canonical Tailwind colors instead of the mandated tokens.**
+    `BatchEntry.tsx` uses `red-500`/`hover:bg-red-500/10` instead of the
+    mandated `rose-500` token. The fully dead `components/wizard/*`/
+    `ConfigDashboard.tsx` files use non-canonical `green-`/`red-`/
+    `yellow-` classes instead of `emerald`/`rose`/`amber` — not live bugs,
+    but a landmine if any dead file is ever reconnected.
+    (Split off from the former `Badge.tsx` finding — that component's own
+    geometry violation is now fixed and resolved, see `CHANGELOG.md`
+    §18.6. These two sub-findings were never in that fix's scope and
+    remain open.)
+    → `CHANGELOG.md` §3.B8 (original finding).
 
 13. **A brand-new install's zero-state default profile is code-level, not
     admin-editable.** `HARDCODED_DEFAULT_PROFILE` (`resolveVerdict.ts`) is
