@@ -265,3 +265,29 @@ with its full original context, reasoning, and verification trail.
     amendment mode (`hasOriginal` false) it still renders nothing at all —
     zero footprint, unchanged from prior behavior, so entry mode's layout
     is untouched.
+
+25. **`UI_DESIGN_SYSTEM.md` §5.3's documented Amber border opacity
+    (`border-amber-500/30`) doesn't match what every live usage actually
+    implements (`border-amber-500/20`).** Noticed 2026-08-14 while
+    formalizing the amendment-mode lot-number-change banner as a
+    documented §5.3 example (`CHANGELOG.md` §18's housekeeping pass) — the
+    banner's own class string is `border border-l-4 border-amber-500/20
+    border-l-amber-500 bg-amber-500/5`, not the `/30` §5.3 specifies.
+    Grep-confirmed this isn't unique to the new banner: all four live
+    `border-amber-500/20 border-l-amber-500 bg-amber-500/5` warning banners
+    in the codebase use `/20` — `StepMetadata.tsx` ("PROFILE NOT USABLE"),
+    `StepDimensions.tsx` ("PRODUCT DIMENSIONS NOT CONFIGURED"),
+    `StepDefects.tsx` ("NO INSPECTION PROFILE CONFIGURED"), and
+    `BatchEntry.tsx` (mirrors the same two banners as its GUIDED-mode
+    counterparts). §5.3's `/30` value appears to be stale doc drift
+    predating all four of these banners, not a deliberate distinct variant
+    — no second class string exists anywhere for a "true" `/30` version of
+    this pattern.
+
+    Not a live bug — purely a documentation-accuracy gap, same class as
+    findings #20/#21/#23 before their resolution. Deliberately not decided
+    here (out of scope for the pass that surfaced it). **Next step:**
+    decide whether to correct §5.3's documented value to `/20` (matching
+    all four real usages) or leave `/30` as the target and treat all four
+    live banners as needing a follow-up fix — a doc-vs-code judgment call,
+    not obviously either direction from what's known so far.
