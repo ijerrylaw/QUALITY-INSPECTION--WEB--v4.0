@@ -331,6 +331,12 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
       lineId,
       side,
       sequenceNo,
+      // Exposes the "did the operator actually type in this field" signal
+      // (as opposed to sequenceNo's own value, which the sequence-hint
+      // auto-prefill can set with zero user interaction) so wizardDirty.ts
+      // can tell a real edit apart from an auto-fill — see its comment for
+      // why a value-only comparison against '' false-positives here.
+      sequenceTouched,
       totalCarton: totalCarton ? parseInt(totalCarton, 10) : '',
       sampleSize: sampleSize ? parseInt(sampleSize, 10) : '',
       gloveWeight: gloveWeight ? parseFloat(gloveWeight) : '',
@@ -342,7 +348,7 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    profileId, productCode, size, lineId, side, sequenceNo,
+    profileId, productCode, size, lineId, side, sequenceNo, sequenceTouched,
     totalCarton, sampleSize, gloveWeight, timestamp,
     effectiveDate, activeShift, lot4Digit, fullSystemLotNo,
   ]);

@@ -107,8 +107,15 @@ export function isWizardDirty({
   }
 
   // ── New-submission mode: compare against untouched-state baselines ──────
-  // sequenceNo is the only Page 1 field with no auto-population path
-  // anywhere (explicitly "never auto-defaulted" per StepMetadata.tsx).
+  // sequenceNo now DOES have an auto-population path (StepMetadata.tsx's
+  // sequence-hint prefill, added after this comment was first written) —
+  // it fills the field with the suggested next number whenever prior
+  // submissions exist for the Line/Side/Date group, with zero user
+  // interaction. A plain "non-blank" check would therefore false-positive
+  // on nearly every fresh wizard load in normal (non-first-lot-of-the-day)
+  // usage. StepMetadata.tsx pushes up `sequenceTouched` precisely to
+  // distinguish "the operator typed something" from "the hint auto-filled
+  // it" — using that signal directly instead of diffing the value itself.
   // totalCarton and gloveWeight are deliberately NOT checked here even
   // though they start blank: StepMetadata.tsx auto-fills totalCarton to
   // '18' on first load (its own hydrate-defaults effect) and gloveWeight
@@ -117,7 +124,7 @@ export function isWizardDirty({
   // Context) — neither transition reflects the operator having entered
   // anything, so treating "non-blank" as "dirty" for either would false-
   // positive on a wizard nobody has touched yet.
-  if (hasFieldChanged(true, '', inspectionData?.sequenceNo ?? '')) return true;
+  if (inspectionData?.sequenceTouched) return true;
 
   const dirtySlots: Record<string, boolean[]> = inspectionData?.dimensionDirtySlots ?? {};
   if (Object.values(dirtySlots).some((slots) => slots?.some(Boolean))) return true;
