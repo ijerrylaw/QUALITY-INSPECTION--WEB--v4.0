@@ -304,3 +304,41 @@ with its full original context, reasoning, and verification trail.
     picking one file to "count." Noting here so the exception is visible
     in the same place other rule-tension findings live, not just in this
     session's chat history.
+
+23. **No `UI_DESIGN_SYSTEM.md` token exists for "annotation showing a
+    field's original/prior value" (the "Original: X" note beneath a changed
+    amendment field, `OriginalValueNote` in `fieldDiff.tsx`).** Checked
+    Chapter 1, §3.1–3.7, §4.5–4.13, §5.1–5.3 in full — nothing covers this
+    specific case distinct from finding #21's already-provisional Cyan/Info
+    reuse (which signals a different thing on the same screen: "this field
+    currently differs from original," not "here was the original value").
+
+    **Resolved for this implementation, pending formal doc addition:**
+    reused **Rose** (`text-rose-400`) — the same token §4.12 already uses
+    for the "Original" side of the read-only diff viewer
+    (`JsonViewer.tsx`'s `DiffJsonViewer`, Approvals Queue / Pre-Submit
+    Summary). Deliberately NOT Cyan/Info, even though finding #21 already
+    established that reuse in this same amendment UI — Cyan is claimed for
+    "this field differs from original" (the changed-highlight), and reusing
+    it here too would conflate two different signals on the same screen.
+    Applied via `fieldDiff.tsx`'s default `className` plus the two
+    per-call-site overrides in `StepDimensions.tsx` and `StepDefects.tsx`.
+    **Next step:** ratify Rose as the formal token for this annotation type
+    in `UI_DESIGN_SYSTEM.md` (e.g. extend §4.12's Rose/Emerald definition
+    to explicitly cover single-field "was" annotations, not just the
+    two-column diff viewer), or replace if it reads as ambiguous once seen
+    live (e.g. confusable with §5.2's Rose "failing value" semantic on
+    dimension slots, which sits directly above this same note in
+    `StepDimensions.tsx`).
+
+24. **`OriginalValueNote`'s conditional-mount pattern caused a layout
+    jiggle** — the note returned `null` (unmounting entirely) whenever the
+    field was unchanged, so every edit that moved a field's value toward or
+    away from its original caused sibling fields to reflow as the note's
+    box appeared/disappeared. **Fixed 2026-08-14:** the note now stays
+    mounted for the whole amendment session (toggling Tailwind's
+    `invisible` instead of unmounting) once `hasOriginal` is true, so its
+    height is always reserved and edits never shift sibling layout. Outside
+    amendment mode (`hasOriginal` false) it still renders nothing at all —
+    zero footprint, unchanged from prior behavior, so entry mode's layout
+    is untouched.

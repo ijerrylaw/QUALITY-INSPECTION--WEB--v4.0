@@ -463,7 +463,7 @@ export function StepDimensions({
                           originalValue={originalData?.dimensions?.[dim.id]?.[idx]}
                           currentValue={val}
                           label="Org"
-                          className="mt-0.5 text-[9px] text-muted font-mono text-center leading-none"
+                          className="mt-0.5 text-[9px] text-rose-400 font-mono text-center leading-none"
                         />
                       </div>
                     );

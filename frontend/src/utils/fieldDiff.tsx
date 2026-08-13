@@ -56,18 +56,30 @@ export interface OriginalValueNoteProps {
   className?: string;
 }
 
-/** Inline "Original: X" note — renders nothing when the field is unchanged or no original data is available. */
+/**
+ * Inline "Original: X" note. Renders nothing (zero footprint) outside
+ * amendment mode (`hasOriginal` false) — unchanged from prior behavior, so
+ * entry mode's layout is untouched.
+ *
+ * Inside amendment mode, stays mounted for the whole session regardless of
+ * whether the field is currently changed — toggling `invisible` (not
+ * `display:none`/unmount) so the note's height is always reserved. Previously
+ * this unmounted via `return null` on every unchanged state, which reflowed
+ * sibling fields each time the user edited a field back to its original
+ * value (or away from it) — the "layout jiggle" this fixes.
+ */
 export function OriginalValueNote({
   hasOriginal,
   originalValue,
   currentValue,
   label = 'Original',
   emptyDisplay = '—',
-  className = 'text-[10px] text-muted font-mono mt-1',
+  className = 'text-[10px] text-rose-400 font-mono mt-1',
 }: OriginalValueNoteProps) {
-  if (!hasFieldChanged(hasOriginal, originalValue, currentValue)) return null;
+  if (!hasOriginal) return null;
+  const changed = hasFieldChanged(true, originalValue, currentValue);
   return (
-    <div className={className}>
+    <div className={`${className}${changed ? '' : ' invisible'}`} aria-hidden={!changed}>
       {label}: {(originalValue as string | number | undefined | null) || emptyDisplay}
     </div>
   );

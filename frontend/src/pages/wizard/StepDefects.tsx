@@ -375,7 +375,7 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
                           originalValue={originalData?.qualitative?.[defect.id] ?? 'NIL'}
                           currentValue={state}
                           emptyDisplay="NIL"
-                          className="mt-2 text-[10px] text-muted font-mono text-center"
+                          className="mt-2 text-[10px] text-rose-400 font-mono text-center"
                         />
                       </div>
                     );
@@ -430,7 +430,7 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
                         originalValue={originalData?.defects?.[defect.id] ?? 0}
                         currentValue={count}
                         emptyDisplay="0"
-                        className="mt-2 text-[10px] text-muted font-mono text-center"
+                        className="mt-2 text-[10px] text-rose-400 font-mono text-center"
                       />
                     </div>
                   );
