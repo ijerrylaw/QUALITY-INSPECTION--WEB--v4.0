@@ -446,6 +446,8 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
 
+const AMENDMENTS_PENDING_PAGE_SIZE = 30;
+
 /**
  * Returns a page of submissions ordered by creation date descending.
  *
@@ -972,7 +974,7 @@ amendmentsRouter.get('/pending', async (req: Request, res: Response) => {
     const parsedLimit = Number(req.query['limit']);
     const limit = Number.isInteger(parsedLimit) && parsedLimit >= 1
       ? Math.min(parsedLimit, MAX_PAGE_SIZE)
-      : DEFAULT_PAGE_SIZE;
+      : AMENDMENTS_PENDING_PAGE_SIZE;
 
     const skip = (page - 1) * limit;
     const where: Prisma.SubmissionWhereInput = { amendmentStatus: 'PENDING_APPROVAL' };
