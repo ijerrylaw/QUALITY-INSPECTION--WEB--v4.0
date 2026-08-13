@@ -103,6 +103,7 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
   - Untouched pre-filled target values MUST be `text-muted opacity-80` to visually signal auto-populated baseline data.
   - Touched/edited values MUST switch to `text-primary` (bright white) to confirm user validation.
   - Out-of-spec failing values MUST switch to `text-rose-400 bg-rose-500/5 border-rose-500/50`.
+  - **Scope note:** this untouched/touched color pair is not exclusive to measurement grids — it applies to any single auto-prefilled editable field where the operator needs to see, at a glance, whether a value is still the system's suggestion or something they've confirmed/typed themselves. Reused as-is (same two states, same colors) for the Quality Entry Wizard's Sequence No. field, which auto-fills with the suggested next sequence number but is a single standalone input, not a grid slot (`StepMetadata.tsx`, commit `b3d133e`). Do not invent a parallel token for this pattern elsewhere in the app — reuse this one.
 * **Interaction:** Focus states must aggressively highlight to track rapid cursor movement (e.g., `focus:ring-1 focus:ring-brand-secondary focus:border-brand-secondary`).
 
 ### 3.5 Primary Add Actions (Header Buttons)
@@ -234,6 +235,7 @@ To maintain absolute consistency, all small contextual overlays MUST adhere to t
 * **Container:** `border border-gray-800 rounded-lg overflow-hidden`, with the expanded content in a `border-t border-gray-800` panel beneath the toggle.
 * **Diff coloring convention** (`JsonViewer.tsx`'s `DiffJsonViewer`): when showing two sides of a changed value, the **Original** side uses **Rose** (`text-rose-400` / `bg-rose-500/10 border-rose-500/30`) and the **Proposed** side uses **Emerald** (`text-emerald-400` / `bg-emerald-500/10 border-emerald-500/30`) — consistent with the global Rose=Fail/Emerald=Pass semantic (§4.8). A purely **added** field is Emerald-only (invisible on the Original side); a purely **removed** field is Rose-only (invisible on the Proposed side).
 * **Use cases:** Approvals Queue amendment diff modal (`ApprovalsQueue.tsx`); Quality Entry Wizard Step 4 Pre-Submit Summary in amend mode (`SubmissionSummary.tsx`).
+* **Single-field "original value" annotation (`text-rose-400`, Rose side only — no Emerald counterpart):** the same Rose token, standalone, for a live-editable field's inline "Original: X" note in amendment mode — shown beneath a field once its current value differs from the original, distinct from this section's two-column read-only diff viewer above (`OriginalValueNote` in `fieldDiff.tsx`, used by `StepMetadata.tsx`/`StepDimensions.tsx`/`StepDefects.tsx`, commit `16af0f2`). No Emerald "proposed" counterpart here — the field's own live value already IS the proposed value, shown directly in the input itself (with its own separate changed-state highlight, not part of this token). Related to, not identical to, the diff-viewer convention above: both mark "this is what it used to be" with Rose, but one is a read-only comparison row and the other is a one-sided annotation next to a still-editable input.
 
 ### 4.13 Lifetime-Limit Counters (e.g., Amendment Cap)
 * **Purpose:** Communicate a record's position against a hard lifetime limit — how many uses remain, and what happens once none do — inline with the action that consumes the limit, not in a separate status panel.
@@ -268,6 +270,6 @@ To maintain absolute consistency, all small contextual overlays MUST adhere to t
   - **Info (Cyan):** `bg-brand-secondary/5 border-brand-secondary/20 border-l-brand-secondary text-brand-secondary`  
     *(Primary real-world use: "Live Re-Grade — Not the Original Result" banner on legacy History records with no frozen grading snapshot — a data-provenance notice, not a warning, so Cyan not Amber per §4.9.)*
   - **Warning / Action Required (Amber):** `bg-amber-500/5 border-amber-500/30 border-l-amber-500 text-amber-400`  
-    *(Primary real-world use: no inspection profile linked, overlapping shift hours, setup incomplete.)*
+    *(Primary real-world use: no inspection profile linked, overlapping shift hours, setup incomplete. Also covers the Quality Entry Wizard's amendment-mode "THIS AMENDMENT CHANGES THE LOT NUMBER" banner — fires non-blocking when Line/Side/Date/Sequence differ from the original record, since those fields compose the Full System Lot Number (`StepMetadata.tsx`, commit `e4c05e6`) — an intentional, established use of this pattern, not a one-off.)*
   - **Success (Emerald):** `bg-emerald-500/5 border-emerald-500/30 border-l-emerald-500 text-emerald-400`
   - **Error (Rose):** `bg-rose-500/5 border-rose-500/30 border-l-rose-500 text-rose-400`

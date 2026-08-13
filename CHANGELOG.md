@@ -4025,3 +4025,138 @@ render correctly with the new geometry in his own browser.
 `ConfigDashboard.tsx` files' non-canonical colors were never in this fix's
 scope; those two sub-findings remain open.
 → Original finding: `CHANGELOG.md` §3.B8.
+
+### 18.7 (was open item #19) `composeFullLotNumber` blank-sequence "000" fabrication — Fixed 2026-08-13/14
+
+`frontend/src/utils/lotNumber.ts`'s `composeFullLotNumber()` built its
+sequence segment as `(sequenceNo || '').padStart(3, '0') || '001'` —
+`''.padStart(3, '0')` evaluates to the truthy string `"000"`, so the
+intended `'001'` fallback could never actually fire. A blank Sequence No.
+silently composed into a fabricated `"000"` segment in the Full System Lot
+Number, in both wizards, rather than surfacing as unset.
+
+**Fix, in two parts across two commits:**
+
+- **Entry mode (commit `b3d133e`, 2026-08-13):** `StepMetadata.tsx` bypasses
+  `composeFullLotNumber` entirely for its own lot-number preview, rendering
+  its own `${lineId}${side}${lot4Digit}---` placeholder whenever `sequenceNo`
+  is blank. Deliberately scoped to entry mode only at the time — editing the
+  shared function itself would have pulled batch mode into a prompt scoped
+  to entry mode, and StepMetadata.tsx's own bypass fully closed the bug for
+  both entry and amendment mode (same shared component, same ternary).
+- **Shared function itself (commit `8deac5a`, 2026-08-14):** `lotNumber.ts`'s
+  `composeFullLotNumber()` fixed at the source — blank `sequenceNo` now
+  composes a `'---'` placeholder directly, generalizing entry mode's
+  convention into the one function both wizards call. Confirmed single-file:
+  `BatchEntry.tsx` (the only other call site — grid row Lot No preview and
+  detail-modal header) needed no changes, since both call sites just render
+  the function's return value.
+
+**Amendment mode confirmed clear, not just assumed** (the prior open item's
+explicit unresolved question): traced that `StepMetadata.tsx`'s ternary
+structurally never calls `composeFullLotNumber` with a blank `sequenceNo` in
+either mode, including the edge case of a malformed/short legacy
+`batchNumber` producing an empty parsed sequence on amendment load — the
+guard holds regardless of *why* `sequenceNo` might be blank.
+
+**Submit-blocking validation unchanged by either commit** — both fixes are
+the preview-string representation only; `BatchEntry.tsx`'s
+`handleSubmitBatch` still blocks any row with real data and a blank
+sequence, same as before.
+
+**Live-verified (commit `8deac5a`):** Batch mode grid row and detail modal
+both show `A001A6225---` for a blank sequence (not `"000"`); submit blocked
+with zero `POST /api/submissions` requests fired; a real sequence composes
+and submits correctly (`A001A6225001`, confirmed via `GET /api/submissions`);
+amendment mode re-checked live, unaffected.
+→ Original finding: this file's now-removed `AUDIT_REPORT.md` open item #19.
+
+### 18.8 (was open item #20) `UI_DESIGN_SYSTEM.md` §3.4's scope was too narrow for its own reused token — Resolved 2026-08-14
+
+§3.4 ("Mass Data Entry Inputs — Measurement Grids") carried the only
+existing token for "auto-populated advisory value that reverts to normal
+styling on user edit" (`text-muted opacity-80` untouched → `text-primary`
+touched), correctly reused for the Quality Entry Wizard's Sequence No.
+field (`StepMetadata.tsx`, commit `b3d133e`) — a single standalone input,
+not a grid slot. The *token* was right; the *section's stated scope*
+(measurement grids specifically) didn't literally cover a single-field use.
+
+**Resolved by scope-note addition, not a restructure:** added a "Scope
+note" bullet directly under §3.4's "Pre-Fill Untouched vs. Touched State"
+list, stating explicitly that the pattern isn't grid-exclusive and citing
+the Sequence No. field as the precedent, with an instruction not to invent
+a parallel token for the same pattern elsewhere. Chose this over splitting
+the color pair into its own Chapter 1/3.1 entry (§3.4's other alternative)
+because the section's geometry/typography rules genuinely are
+grid-specific and still belong together — only the color-state sub-rule
+generalizes, and a scope note keeps one source of truth for it without
+fragmenting the section over a single confirmed reuse case.
+→ Original finding: this file's now-removed `AUDIT_REPORT.md` open item #20.
+
+### 18.9 (was open item #23) `UI_DESIGN_SYSTEM.md` had no token for a live-field "original value" annotation — Resolved 2026-08-14
+
+`OriginalValueNote` (`fieldDiff.tsx`) needed a color for its inline
+"Original: X" note in amendment mode — checked the full doc, nothing fit;
+the two closest candidates were both distinct semantics (§4.12's Rose/
+Emerald diff pair is a read-only two-column comparison, not a live-editable
+field's annotation; §3.4's untouched/touched pair, above, is prefill-trust
+state, not amendment-change state). Resolved provisionally with Rose
+(`text-rose-400`), reusing §4.12's existing "Original" convention rather
+than inventing a new color, deliberately not Cyan/Info (already claimed on
+the same screen for the changed-field highlight, finding #21 below).
+
+**Resolved by extending §4.12, not a new section:** added a new bullet to
+§4.12 documenting this as a related-but-distinct use of the same Rose
+token — a one-sided "was" annotation next to a still-editable input, versus
+the section's existing two-column read-only diff. Cross-references both the
+component (`OriginalValueNote`) and its three call sites
+(`StepMetadata.tsx`/`StepDimensions.tsx`/`StepDefects.tsx`), and explicitly
+notes there is no Emerald "proposed" counterpart for this use, since the
+field's own live value already serves that role.
+→ Original finding: this file's now-removed `AUDIT_REPORT.md` open item #23.
+
+## 19. False-Positive "Unsaved Changes" Warning on Untouched Wizard Entry — Fixed 2026-08-14
+
+Navigating away from the Quality Entry Wizard (Single Entry / GUIDED mode)
+via the sidebar fired the "UNSAVED CHANGES DETECTED" discard-confirmation
+modal even when the operator had made zero manual edits — only
+auto-populated defaults were present. Reported independently by Jerry in
+normal (non-testing) usage: open the wizard, touch nothing, click another
+sidebar item, get warned every time.
+
+**Root cause:** `frontend/src/utils/wizardDirty.ts`'s new-submission-mode
+dirty check compared `sequenceNo` against a hardcoded empty-string baseline
+(`hasFieldChanged(true, '', inspectionData?.sequenceNo ?? '')`), on the
+documented assumption — true when this file was written — that `sequenceNo`
+had no auto-population path anywhere. The entry-mode sequence-hint prefill
+(part of the same `b3d133e` work that fixed finding #19 above) later added
+exactly that path: `StepMetadata.tsx` fills `sequenceNo` with the suggested
+next number whenever prior submissions exist for the Line/Side/Date group,
+with zero user interaction. Since most real usage isn't the first lot of the
+day for a given line, this fired on nearly every fresh wizard load.
+
+**Fix (commit `8b116d8`):** `StepMetadata.tsx` already tracked
+`sequenceTouched` (true only on a real keystroke, from the same
+sequence-number work) — now pushed up via `onUpdate` into `inspectionData`
+so `wizardDirty.ts` can check that direct signal
+(`if (inspectionData?.sequenceTouched) return true;`) instead of diffing the
+auto-fillable value itself. Two-file change (`StepMetadata.tsx` +
+`wizardDirty.ts`) — inherent to the fix, since the touched-state signal has
+to be plumbed from the component that owns it to the shared dirty-check
+utility that consumes it.
+
+**Amendment mode confirmed unaffected**, both by code trace (its baseline is
+the real original record, not a synthetic empty one; the sequence-hint
+prefill is separately gated off in amendment mode entirely) and live
+verification.
+
+**Live-verified, all four scenarios:** fresh entry with `sequenceNo`
+auto-prefilled via hint and zero interaction → navigated cleanly, no
+warning; a real edit → warning correctly fired; amendment mode with zero
+edits → no warning; amendment mode with a real edit → warning correctly
+fired.
+
+Never logged as an `AUDIT_REPORT.md` open item — found and fixed within the
+same investigation, never shipped as a known-open bug — but recorded here so
+it's part of the permanent record rather than living only in the commit
+message.

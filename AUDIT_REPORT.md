@@ -217,57 +217,6 @@ with its full original context, reasoning, and verification trail.
     to have graded, visible directly in the UI with zero indication the
     displayed breakdown may no longer match what was true at submission time.
 
-19. **Blank-sequence fallback in `composeFullLotNumber` still fabricates
-    "000" in batch mode.** `frontend/src/utils/lotNumber.ts`:
-    ```
-    const safeSeq = (sequenceNo || '').padStart(3, '0') || '001';
-    ```
-    `''.padStart(3, '0')` evaluates to `"000"`, which is truthy, so the
-    intended `'001'` fallback never fires. A blank Sequence No. silently
-    composes into a fabricated `"000"` segment rather than surfacing as
-    unset.
-
-    Found while fixing this same symptom in entry mode (`StepMetadata.tsx`,
-    2026-08-13/14): entry mode now bypasses `composeFullLotNumber` entirely
-    for its own lot-number preview (renders a `---` placeholder instead when
-    `sequenceNo` is blank), so entry mode no longer hits this bug. The
-    function itself is unchanged and still shared with `BatchEntry.tsx` —
-    deliberately not touched in that fix, since editing it would have been a
-    second file (violates one-file-per-turn) and would have pulled batch
-    mode into a prompt scoped to entry mode only.
-
-    **Also unverified:** amendment mode is documented as always prefilling
-    the original sequence number, so this path is believed unreachable
-    there — but that hasn't been explicitly checked against
-    `composeFullLotNumber`'s call sites. Worth a quick check before
-    considering amendment mode fully clear.
-
-    **Next step:** decide whether to apply the same dash-placeholder
-    treatment to `composeFullLotNumber` itself (or to `BatchEntry.tsx`'s
-    call sites), as its own scoped prompt — likely batch-mode-file-only.
-
-20. **`UI_DESIGN_SYSTEM.md` §3.4's "Pre-Fill Untouched vs. Touched State"
-    pattern is titled/scoped to "Mass Data Entry Inputs (Measurement
-    Grids)" but was reused for a single non-grid form field.**
-    `StepMetadata.tsx`'s Sequence No. field (2026-08-13/14 fix) needed a
-    color token for "auto-populated advisory value, reverts to normal on
-    edit" — §3.4 is the only existing token with that exact semantic
-    (`text-muted opacity-80` untouched → `text-primary` touched), so it was
-    reused rather than inventing a new color, per this session's standing
-    rule against silently inventing tokens. The section's own scope,
-    though, is written specifically for `Measurement Grids` (dense numeric
-    entry grids), not general single-field pre-fills — so the *token* is
-    right, but the *doc section it's carved from* doesn't literally cover
-    this use case.
-
-    Not a live bug — purely a documentation-scope gap. Flagged per AI_RULES.md's
-    "don't silently revise MDs mid-task" rule rather than editing the doc.
-    **Next step:** decide whether to broaden §3.4's title/scope to cover
-    single-field pre-fills generally, or split the "Untouched vs. Touched"
-    color pair out into its own general-purpose token entry (e.g. under
-    Chapter 1 or 3.1) that §3.4 and any future single-field use can both
-    reference.
-
 21. **No `UI_DESIGN_SYSTEM.md` token exists for "live editable field's value
     differs from its amendment-original value."** Needed for amendment
     mode's field-level changed-highlight (`StepMetadata.tsx`,
@@ -277,9 +226,9 @@ with its full original context, reasoning, and verification trail.
     explicitly ruled out: §4.12's Rose=Original/Emerald=Proposed diff pair
     is scoped to the read-only two-column diff viewer (`JsonViewer.tsx`,
     Approvals Queue / Pre-Submit Summary), not a live-editable input; §3.4's
-    `text-muted opacity-80`→`text-primary` pair (reused for finding #20
-    above) is a different semantic — prefill-trust state, not
-    amendment-change state.
+    `text-muted opacity-80`→`text-primary` pair (reused for the now-closed
+    finding #20 — see `CHANGELOG.md` §18.8) is a different semantic —
+    prefill-trust state, not amendment-change state.
 
     **Resolved for this implementation, pending formal doc addition:**
     reused Cyan/Info (`bg-brand-secondary/5 border-brand-secondary/50`) —
@@ -304,32 +253,6 @@ with its full original context, reasoning, and verification trail.
     picking one file to "count." Noting here so the exception is visible
     in the same place other rule-tension findings live, not just in this
     session's chat history.
-
-23. **No `UI_DESIGN_SYSTEM.md` token exists for "annotation showing a
-    field's original/prior value" (the "Original: X" note beneath a changed
-    amendment field, `OriginalValueNote` in `fieldDiff.tsx`).** Checked
-    Chapter 1, §3.1–3.7, §4.5–4.13, §5.1–5.3 in full — nothing covers this
-    specific case distinct from finding #21's already-provisional Cyan/Info
-    reuse (which signals a different thing on the same screen: "this field
-    currently differs from original," not "here was the original value").
-
-    **Resolved for this implementation, pending formal doc addition:**
-    reused **Rose** (`text-rose-400`) — the same token §4.12 already uses
-    for the "Original" side of the read-only diff viewer
-    (`JsonViewer.tsx`'s `DiffJsonViewer`, Approvals Queue / Pre-Submit
-    Summary). Deliberately NOT Cyan/Info, even though finding #21 already
-    established that reuse in this same amendment UI — Cyan is claimed for
-    "this field differs from original" (the changed-highlight), and reusing
-    it here too would conflate two different signals on the same screen.
-    Applied via `fieldDiff.tsx`'s default `className` plus the two
-    per-call-site overrides in `StepDimensions.tsx` and `StepDefects.tsx`.
-    **Next step:** ratify Rose as the formal token for this annotation type
-    in `UI_DESIGN_SYSTEM.md` (e.g. extend §4.12's Rose/Emerald definition
-    to explicitly cover single-field "was" annotations, not just the
-    two-column diff viewer), or replace if it reads as ambiguous once seen
-    live (e.g. confusable with §5.2's Rose "failing value" semantic on
-    dimension slots, which sits directly above this same note in
-    `StepDimensions.tsx`).
 
 24. **`OriginalValueNote`'s conditional-mount pattern caused a layout
     jiggle** — the note returned `null` (unmounting entirely) whenever the
