@@ -37,7 +37,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useConfig } from '../../context/ConfigContext';
-import { OriginalValueNote } from '../../utils/fieldDiff';
+import { OriginalValueNote, hasFieldChanged } from '../../utils/fieldDiff';
 import type { AQLCategory, DefectDefinition } from '../../context/ConfigContext';
 
 export interface StepDefectsProps {
@@ -315,9 +315,17 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
                   if (isQual) {
                     // ── QUALITATIVE: PASS / FAIL / NIL Toggle ─────────────
                     const state: QualitativeState = qualitativeStates[defect.id] ?? 'NIL';
+                    // Amendment-only "changed from original" highlight — reuses
+                    // Cyan/Info (brand-secondary) per the 2026-08-14 planning
+                    // decision (no dedicated token exists for this state; see
+                    // AUDIT_REPORT.md).
+                    const isChanged = originalData != null &&
+                      hasFieldChanged(true, originalData?.qualitative?.[defect.id] ?? 'NIL', state);
 
                     return (
-                      <div key={defect.id} className="bg-surface border border-gray-700/50 rounded-lg p-3 flex flex-col justify-between shadow-sm">
+                      <div key={defect.id} className={`border rounded-lg p-3 flex flex-col justify-between shadow-sm ${
+                        isChanged ? 'bg-brand-secondary/5 border-brand-secondary/50' : 'bg-surface border-gray-700/50'
+                      }`}>
                         <div className="mb-3 flex items-start justify-between gap-2">
                           <span className="font-mono text-sm font-bold text-primary tracking-wide truncate">{defect.name}</span>
                           <span className="font-mono text-[10px] text-muted uppercase tracking-widest shrink-0">ID: {displayId}</span>
@@ -375,8 +383,14 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
 
                   // ── QUANTITATIVE: -/count/+ Counter Card ─────────────────
                   const count = defectCounts[defect.id] ?? 0;
+                  // Amendment-only "changed from original" highlight — see the
+                  // qualitative branch above for the token-gap note.
+                  const isChanged = originalData != null &&
+                    hasFieldChanged(true, originalData?.defects?.[defect.id] ?? 0, count);
                   return (
-                    <div key={defect.id} className="bg-surface border border-gray-700/50 rounded-lg p-3 flex flex-col justify-between shadow-sm hover:border-gray-700 transition-colors">
+                    <div key={defect.id} className={`border rounded-lg p-3 flex flex-col justify-between shadow-sm transition-colors ${
+                      isChanged ? 'bg-brand-secondary/5 border-brand-secondary/50' : 'bg-surface border-gray-700/50 hover:border-gray-700'
+                    }`}>
                       <div className="mb-3 flex items-start justify-between gap-2">
                         <span className="font-mono text-sm font-bold text-primary tracking-wide truncate">{defect.name}</span>
                         <span className="font-mono text-[10px] text-muted uppercase tracking-widest shrink-0">ID: {displayId}</span>

@@ -39,7 +39,7 @@ import {
   fetchSuggestedNextSequence,
   fetchSuggestedTotalCarton,
 } from '../../utils/lotNumber';
-import { OriginalValueNote } from '../../utils/fieldDiff';
+import { OriginalValueNote, hasFieldChanged } from '../../utils/fieldDiff';
 import {
   Activity,
   Clock,
@@ -66,6 +66,17 @@ export interface StepMetadataProps {
 export function StepMetadata({ onNext, onUpdate, initialData, originalData }: StepMetadataProps) {
   const { config, isLoading } = useConfig();
   const { addToast } = useToast();
+
+  // ── Amendment mode: originalData is only ever set by WizardPage.tsx when
+  // ?amend=[id] loaded a real prior submission — absent for a normal new entry.
+  const isAmendment = Boolean(originalData);
+  /** Amendment-only "changed from original" highlight — see UI_DESIGN_SYSTEM.md
+   * AUDIT_REPORT.md gap: no dedicated token exists for this state; reuses
+   * Cyan/Info (brand-secondary) per the 2026-08-14 planning decision. */
+  const changedFieldClasses = (key: string, currentValue: unknown): string =>
+    isAmendment && hasFieldChanged(true, (originalData as any)?.[key], currentValue)
+      ? 'bg-brand-secondary/5 border border-brand-secondary/50'
+      : 'bg-canvas border border-gray-700';
 
   // ── Form State ───────────────────────────────────────────────────────────
   const [profileId, setProfileId] = useState<string>(initialData?.profileId || '');
@@ -247,12 +258,31 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
   const { effectiveDate, activeShift, lot4Digit } = computedLot;
   const fullSystemLotNo = frozenLotNo ?? computedLot.fullSystemLotNo;
 
+  // ── Lot-number-change warning (amendment mode only) ────────────────────────
+  // Per ISO2859_MATH_ENGINE.md §4, the composed lot number is [Line][Side][YJJJ]
+  // [Sequence]. YJJJ has no independent field of its own — it's derived solely
+  // from `timestamp` (via resolveShiftAndEffectiveDate + composeYJJJ), so a
+  // changed date/time already covers any resulting shift/YJJJ change; comparing
+  // "Shift" separately would be redundant. Sequence Number is deliberately
+  // excluded — an amendment that only corrects the sequence is a normal,
+  // non-alarming edit (still gets the changed-field highlight below, just not
+  // this banner).
+  const originalTimestampMs = originalData?.timestamp ? new Date(originalData.timestamp).getTime() : null;
+  const lotAffectingChanged = isAmendment && (
+    hasFieldChanged(true, originalData?.lineId, lineId) ||
+    hasFieldChanged(true, originalData?.side, side) ||
+    (originalTimestampMs !== null && hasFieldChanged(true, originalTimestampMs, timestamp.getTime()))
+  );
+
   // ── Sequence Hint: non-binding advisory, never pre-fills or restricts ───────
   // "Suggested next" = (max existing sequence for this Line+Side+YJJJ group) + 1.
+  // Entry-mode only — in amendment mode the field is already prefilled with
+  // the ORIGINAL sequence for an existing lot, so "next available" is not a
+  // meaningful suggestion there.
   const [suggestedNextSeq, setSuggestedNextSeq] = useState<number | null>(null);
   useEffect(() => {
     let cancelled = false;
-    if (!lineId || !side || !lot4Digit) {
+    if (!lineId || !side || !lot4Digit || isAmendment) {
       setSuggestedNextSeq(null);
       return;
     }
@@ -260,7 +290,7 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
       if (!cancelled) setSuggestedNextSeq(result);
     });
     return () => { cancelled = true; };
-  }, [lineId, side, lot4Digit]);
+  }, [lineId, side, lot4Digit, isAmendment]);
 
   // Pre-fill Sequence No. with the suggestion as an actual editable value
   // (colored per §3.4, not a placeholder attribute) — but only while the field
@@ -380,6 +410,21 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
             INSPECTION METADATA & SETUP
           </h2>
 
+          {/* ── Lot-Number-Change Warning (amendment mode, Line/Side/Date only) ── */}
+          {lotAffectingChanged && (
+            <div className="p-3 rounded-lg border border-l-4 border-amber-500/20 border-l-amber-500 bg-amber-500/5 flex gap-3 text-sm">
+              <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" strokeWidth={2} />
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-amber-400">THIS AMENDMENT CHANGES THE LOT NUMBER</p>
+                <p className="text-xs text-muted mt-1">
+                  You've changed the Line, Side, or Date/Time — these make up part of the Full System Lot
+                  Number, so submitting will amend the record under a different lot number than the original.
+                  This doesn't block submission; just confirm it's intentional.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* ── INSPECTION PROFILE DROPDOWN (user-selectable, product-agnostic) */}
           <div className="space-y-1.5">
             <label className="text-xs font-semibold uppercase tracking-wider text-muted flex items-center gap-1.5">
@@ -390,7 +435,7 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
               <select
                 value={profileId}
                 onChange={(e) => setProfileId(e.target.value)}
-                className="w-full h-9 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
+                className={`w-full h-9 ${changedFieldClasses('profileId', profileId)} focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none`}
               >
                 <option value="" disabled>Select Inspection Profile...</option>
                 {(config.inspectionProfiles || []).map((p: any) => (
@@ -430,7 +475,7 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
                 <select
                   value={productCode}
                   onChange={(e) => setProductCode(e.target.value)}
-                  className="w-full h-9 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
+                  className={`w-full h-9 ${changedFieldClasses('productCode', productCode)} focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none`}
                 >
                   <option value="" disabled>Select Product Code...</option>
                   {(config.productCodes || []).map((code) => (
@@ -451,7 +496,7 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
                 <select
                   value={size}
                   onChange={(e) => setSize(e.target.value)}
-                  className="w-full h-9 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
+                  className={`w-full h-9 ${changedFieldClasses('size', size)} focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none`}
                 >
                   <option value="" disabled>Select Size...</option>
                   {(config.sizes || []).map((s) => (
@@ -472,7 +517,7 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
                 <select
                   value={lineId}
                   onChange={(e) => setLineId(e.target.value)}
-                  className="w-full h-9 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
+                  className={`w-full h-9 ${changedFieldClasses('lineId', lineId)} focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none`}
                 >
                   <option value="" disabled>Select Line...</option>
                   {availableLines.map((l: any) => (
@@ -493,7 +538,7 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
                 <select
                   value={side}
                   onChange={(e) => setSide(e.target.value)}
-                  className="w-full h-9 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
+                  className={`w-full h-9 ${changedFieldClasses('side', side)} focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none`}
                 >
                   {(config?.sides || []).map((s: any) => (
                     <option key={s.id} value={s.id} className="bg-surface text-primary">{s.id} ({s.name})</option>
@@ -530,7 +575,7 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
                   if (sequenceNo) setSequenceNo(sequenceNo.padStart(3, '0'));
                 }}
                 placeholder="001"
-                className={`w-full h-9 px-4 rounded-lg bg-canvas border border-gray-700 font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all ${
+                className={`w-full h-9 px-4 rounded-lg ${changedFieldClasses('sequenceNo', sequenceNo)} font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all ${
                   !sequenceTouched && sequenceNo ? 'text-muted opacity-80' : 'text-primary'
                 }`}
               />
@@ -553,7 +598,7 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
                   if (totalCarton) setTotalCarton(totalCarton.padStart(2, '0'));
                 }}
                 placeholder="01"
-                className="w-full h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all"
+                className={`w-full h-9 px-4 rounded-lg ${changedFieldClasses('totalCarton', totalCarton)} text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all`}
               />
               <OriginalValueNote
                 hasOriginal={originalData?.totalCarton !== undefined}
@@ -572,7 +617,7 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
                 <select
                   value={sampleSize}
                   onChange={(e) => setSampleSize(e.target.value)}
-                  className="w-full h-9 bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none"
+                  className={`w-full h-9 ${changedFieldClasses('sampleSize', sampleSize)} focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 rounded-lg px-4 pr-10 text-sm text-primary font-mono outline-none cursor-pointer transition-all appearance-none`}
                 >
                   <option value="" disabled>Select Sample Size...</option>
                   {(config.sampleSizes || []).map((ss) => (
@@ -610,7 +655,7 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
                   }
                 }}
                 placeholder="e.g. 5.2"
-                className="w-full h-9 px-4 rounded-lg bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all"
+                className={`w-full h-9 px-4 rounded-lg ${changedFieldClasses('gloveWeight', gloveWeight)} text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary/30 outline-none transition-all`}
               />
               <OriginalValueNote
                 hasOriginal={originalData?.gloveWeight !== undefined}
@@ -642,7 +687,11 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
                 type="datetime-local"
                 value={new Date(timestamp.getTime() - timestamp.getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
                 onChange={handleDateChange}
-                className="w-full h-9 bg-surface border border-gray-700 rounded-lg text-sm text-primary font-mono px-3 outline-none focus:border-brand-secondary [color-scheme:dark] transition-opacity"
+                className={`w-full h-9 ${
+                  isAmendment && originalTimestampMs !== null && hasFieldChanged(true, originalTimestampMs, timestamp.getTime())
+                    ? 'bg-brand-secondary/5 border border-brand-secondary/50'
+                    : 'bg-surface border border-gray-700'
+                } rounded-lg text-sm text-primary font-mono px-3 outline-none focus:border-brand-secondary [color-scheme:dark] transition-opacity`}
               />
             </div>
 

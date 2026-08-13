@@ -37,7 +37,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { Ruler, CheckCircle2, AlertTriangle, AlertCircle, Info } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastProvider';
 import { useConfig, hasUsableProductMatrix } from '../../context/ConfigContext';
-import { OriginalValueNote } from '../../utils/fieldDiff';
+import { OriginalValueNote, hasFieldChanged } from '../../utils/fieldDiff';
 import type { ProductDimensionDef } from '../../context/ConfigContext';
 
 export interface StepDimensionsProps {
@@ -411,6 +411,12 @@ export function StepDimensions({
                 <div className="grid grid-cols-5 gap-1">
                   {(measurements[dim.id] ?? Array(SLOTS_PER_DIM).fill('')).map((val, idx) => {
                     const isFail  = dimStats.fails[idx] ?? false;
+                    // Amendment-only "changed from original" highlight — reuses
+                    // Cyan/Info (brand-secondary) per the 2026-08-14 planning
+                    // decision (no dedicated token exists for this state; see
+                    // AUDIT_REPORT.md).
+                    const isChanged = Boolean(originalData) &&
+                      hasFieldChanged(true, originalData?.dimensions?.[dim.id]?.[idx], val);
                     const numVal  = parseFloat(val);
                     let delta: string | null = null;
                     if (!isNaN(numVal) && isFail) {
@@ -441,9 +447,11 @@ export function StepDimensions({
                           className={`w-full h-9 rounded-lg bg-canvas text-center font-mono text-lg shadow-inner transition-all outline-none border focus:ring-1
                             ${isFail
                               ? 'border-rose-500/50 text-rose-400 bg-rose-500/5 focus:ring-rose-500/30'
-                              : dirtySlots[dim.id]?.[idx]
-                                ? 'border-gray-700 text-primary focus:border-brand-secondary focus:ring-brand-secondary/30'
-                                : 'border-gray-700 text-muted opacity-80 focus:opacity-100 focus:border-brand-secondary focus:ring-brand-secondary/30'
+                              : isChanged
+                                ? 'border-brand-secondary/50 bg-brand-secondary/5 text-primary focus:border-brand-secondary focus:ring-brand-secondary/30'
+                                : dirtySlots[dim.id]?.[idx]
+                                  ? 'border-gray-700 text-primary focus:border-brand-secondary focus:ring-brand-secondary/30'
+                                  : 'border-gray-700 text-muted opacity-80 focus:opacity-100 focus:border-brand-secondary focus:ring-brand-secondary/30'
                             }`}
                         />
                         {/* Slot-level delta — UI_DESIGN_SYSTEM.md §5.2 */}
