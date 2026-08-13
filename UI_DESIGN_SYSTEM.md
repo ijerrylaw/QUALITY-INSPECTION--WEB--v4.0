@@ -200,6 +200,12 @@ To maintain absolute consistency, all small contextual overlays MUST adhere to t
 * **Layout:** Icon on the left, stacked text on the right.
 * **Typography:** Title is `text-[10px] uppercase font-bold text-current`, Main Value is `text-sm font-mono font-bold text-current`, optional Subtext is `text-[10px] uppercase font-bold text-current`.
 
+#### D. Presence/Notification Dots
+* **Purpose:** A minimal, wordless "there's something new here" signal on a nav item, distinct from Badges/Chips/Pills — no text, no count, just presence.
+* **Geometry:** `w-1.5 h-1.5 rounded-full`, absolutely positioned at the top-right corner of the icon it's attached to (`absolute -top-0.5 -right-0.5`).
+* **Styling:** `bg-brand-secondary animate-pulse` — Cyan, pulsing, matching the Info/provenance semantic (§5.3), not a warning.
+* **Use Case:** Sidebar's Inspection Records nav item, shown when any Submission was created since the last time any user viewed that screen (`Sidebar.tsx`).
+
 ### 4.9 Action Required / Warning State
 * **Purpose:** Guides the user's eye to tasks that are incomplete, misconfigured, or require immediate attention, without using the "Fatal Error" semantics of Red/Rose.
 * **Semantic Color:** MUST exclusively use **Amber** (`amber-500` / `amber-400`).
@@ -228,6 +234,14 @@ To maintain absolute consistency, all small contextual overlays MUST adhere to t
 * **Container:** `border border-gray-800 rounded-lg overflow-hidden`, with the expanded content in a `border-t border-gray-800` panel beneath the toggle.
 * **Diff coloring convention** (`JsonViewer.tsx`'s `DiffJsonViewer`): when showing two sides of a changed value, the **Original** side uses **Rose** (`text-rose-400` / `bg-rose-500/10 border-rose-500/30`) and the **Proposed** side uses **Emerald** (`text-emerald-400` / `bg-emerald-500/10 border-emerald-500/30`) — consistent with the global Rose=Fail/Emerald=Pass semantic (§4.8). A purely **added** field is Emerald-only (invisible on the Original side); a purely **removed** field is Rose-only (invisible on the Proposed side).
 * **Use cases:** Approvals Queue amendment diff modal (`ApprovalsQueue.tsx`); Quality Entry Wizard Step 4 Pre-Submit Summary in amend mode (`SubmissionSummary.tsx`).
+
+### 4.13 Lifetime-Limit Counters (e.g., Amendment Cap)
+* **Purpose:** Communicate a record's position against a hard lifetime limit — how many uses remain, and what happens once none do — inline with the action that consumes the limit, not in a separate status panel.
+* **Three states, right-aligned next to the gated action:**
+  - **Never used:** No counter shown at all — the action button renders alone, unlabeled, since a 0-of-N state carries no information worth surfacing.
+  - **Used, below the cap:** A muted `text-[10px] font-mono text-muted` counter (`"{N} of {MAX} amendments used"`) sits beside the still-active action button.
+  - **Cap reached:** The action button is replaced entirely by an Amber label (`text-[10px] font-bold uppercase tracking-wider text-amber-400/70`, `"Maximum amendments reached ({N}/{MAX})"`) — Amber per §4.9's Action Required semantic, not Rose, since this is an expected lifecycle end-state, not a failure.
+* **Use case:** `HistoryFeed.tsx`'s AMEND RECORD button/counter, gated by the 3-approved-amendment lifetime cap (`DATA_SCHEMAS_AND_TYPES.md` §1's Business Rule).
 
 ---
 

@@ -89,7 +89,7 @@
   * **Payload:** `{ profileId?: string | null, productCode?: string, sampleSize: number, defects: Record<string, number> }`
   * **Response 200:** The full `ResolveVerdictResult` shape — `{ verdict, categoryResults[], categoryAnalysis[], evaluationProfileName, failedDimensions, dimensionResults[], evaluationProfileId, requestedProfileId }`.
   * **Note:** Resolves profiles in `'fallback'` mode (an unresolvable `profileId` degrades to the safety-net profile instead of throwing) — appropriate for a non-authoritative preview, unlike `POST /api/submissions` and `POST /api/amendments/:id/approve` which both throw on an unresolvable explicit `profileId`.
-  * **Auth:** Requires `X-User-Role` header, any authenticated role.
+  * **Auth:** None required.
 
 ---
 

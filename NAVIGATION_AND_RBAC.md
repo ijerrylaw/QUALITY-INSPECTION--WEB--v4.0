@@ -105,6 +105,7 @@ Every mutating backend route is gated by `requireRole(...)`/`requireGroup(...)` 
 | `PATCH /api/config` | Group A/B (`EXECUTIVE`, `MANAGER`, `ADMIN`) |
 | `POST /api/submissions` | Any authenticated role |
 | `POST /api/submissions/:id/amendments` | Any authenticated role |
+| `POST /api/submissions/mark-history-viewed` | Any authenticated role |
 | `POST /api/amendments/:id/approve` | Group A/B |
 | `POST /api/amendments/:id/reject` | Group A/B |
 | `GET /api/pin-users`, `POST /api/pin-users`, `PATCH /api/pin-users/:id/deactivate` | Group A/B |
