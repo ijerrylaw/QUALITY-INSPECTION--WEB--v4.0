@@ -240,10 +240,7 @@ export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpd
   return (
     <form id="wizard-step-form" onSubmit={handleSubmit} className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
-      {/* ── Pre-Submit Summary — additive, sits above the existing review content ── */}
-      <SubmissionSummary inspectionData={inspectionData} originalData={originalData} />
-
-      {/* ── Hero Verdict Banner — UI_DESIGN_SYSTEM.md §5.1 ──────────────────── */}
+      {/* ── Hero Verdict Banner — UI_DESIGN_SYSTEM.md §5.1 — leads the page, the single most decision-relevant fact here ── */}
       <div className={`p-6 rounded-xl border flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm ${
         previewState.status === 'loading'
           ? 'bg-surface border-gray-700/50'
@@ -420,6 +417,9 @@ export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpd
           </div>
         </div>
       )}
+
+      {/* ── Pre-Submit Summary — audit trail of what was edited, sits below the verdict's supporting evidence ── */}
+      <SubmissionSummary inspectionData={inspectionData} originalData={originalData} />
 
       {/* ── Submission Blocked Notice ────────────────────────────────────── */}
       {previewState.status !== 'success' && (

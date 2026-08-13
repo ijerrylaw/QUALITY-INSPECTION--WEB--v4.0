@@ -1,13 +1,26 @@
 /**
  * @file SubmissionSummary.tsx
  * @description Pre-submit summary shown at the top of Step 4 (Review &
- * Submit) — lists every field across all three wizard pages (Batch Setup,
- * Dimensions, Defects). In amendment mode (`originalData` present), fields
- * that differ from the original record are highlighted with an old → new
- * readout; unchanged fields still appear, just unhighlighted. In new-entry
- * mode (`originalData` null/undefined) it's a plain listing — `hasFieldChanged`
- * always returns false when `hasOriginal` is false, so no extra branching
- * is needed here for that case.
+ * Submit). Batch Setup only lists fields NOT already shown by the KPI cards
+ * below it on the same screen (Profile, Side, Sequence No, Date/Time, Full
+ * System Lot No) — product/line/shift/sample size/total carton/glove weight
+ * were dropped here since Card 1 "Batch Metadata" already shows them; no
+ * need for the same six fields twice on one screen. Dimensions/Defects
+ * aren't duplicated anywhere else, so those stay as full per-slot/per-defect
+ * listings.
+ *
+ * In amendment mode (`originalData` present), fields that differ from the
+ * original record are highlighted with an old → new readout; fields that
+ * are entirely unchanged are hidden by default (not just unhighlighted),
+ * with a small "N unchanged, not shown ▸" control per section to expand and
+ * double-check nothing else was accidentally touched — this is the
+ * submitter's own pre-flight check, not an approver's audit (that's the
+ * Approvals Queue's diff modal, a separate screen/audience), so hiding stays
+ * reversible rather than permanent. In new-entry mode (`originalData`
+ * null/undefined) nothing is filtered — `hasFieldChanged` always returns
+ * false when `hasOriginal` is false, but filtering is explicitly gated on
+ * `hasOriginal` rather than relying on that, since otherwise every row would
+ * incorrectly count as "unchanged" and vanish.
  *
  * Reuses `hasFieldChanged` from `utils/fieldDiff.tsx` — the same comparator
  * behind the inline "Original: X" notes on each step — as the sole source of
@@ -17,8 +30,8 @@
  * their own field list; only the comparison logic is shared, per design.
  */
 
-import { useMemo } from 'react';
-import { Box, Ruler, ShieldAlert, ArrowRight, ClipboardList } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Box, Ruler, ShieldAlert, ArrowRight, ClipboardList, ChevronRight, ChevronDown } from 'lucide-react';
 import { useConfig } from '../../context/ConfigContext';
 import type { ProductDimensionDef } from '../../context/ConfigContext';
 import { hasFieldChanged } from '../../utils/fieldDiff';
@@ -102,16 +115,39 @@ function DimensionSlotCell({
   );
 }
 
+/** Per-section "N unchanged, not shown ▸" expand control — same visual convention as ApprovalsQueue.tsx's diff modal. Renders nothing when count is 0. */
+function UnchangedToggle({ count, expanded, onToggle }: { count: number; expanded: boolean; onToggle: () => void }) {
+  if (count === 0) return null;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="w-full flex items-center gap-1.5 px-3 py-1.5 mt-1 text-[10px] font-bold text-muted uppercase tracking-wider hover:bg-white/5 rounded-md transition-colors outline-none"
+    >
+      {expanded ? (
+        <ChevronDown className="w-3 h-3" strokeWidth={2.5} />
+      ) : (
+        <ChevronRight className="w-3 h-3" strokeWidth={2.5} />
+      )}
+      {count} unchanged {count === 1 ? 'field' : 'fields'} not shown
+    </button>
+  );
+}
+
 export function SubmissionSummary({ inspectionData, originalData }: SubmissionSummaryProps) {
   const { config, getResolvedProfile } = useConfig();
   const hasOriginal = originalData != null;
+
+  const [showUnchangedBatch, setShowUnchangedBatch] = useState(false);
+  const [showUnchangedDimensions, setShowUnchangedDimensions] = useState(false);
+  const [showUnchangedDefects, setShowUnchangedDefects] = useState(false);
 
   const activeProfile = useMemo(
     () => getResolvedProfile(inspectionData?.profileId),
     [getResolvedProfile, inspectionData?.profileId],
   );
 
-  // ── Page 1: Batch Setup ────────────────────────────────────────────────
+  // ── Page 1: Batch Setup — only fields not already shown by the KPI cards ──
   const batchSetupRows = useMemo(() => {
     const currentProfileName = activeProfile?.name ?? inspectionData?.profileId ?? '—';
     const originalProfileName =
@@ -119,19 +155,16 @@ export function SubmissionSummary({ inspectionData, originalData }: SubmissionSu
 
     return [
       { label: 'PROFILE', original: originalProfileName, current: currentProfileName },
-      { label: 'PRODUCT CODE', original: originalData?.productCode, current: inspectionData?.productCode },
-      { label: 'GLOVE SIZE', original: originalData?.size, current: inspectionData?.size },
-      { label: 'PRODUCTION LINE', original: originalData?.lineId, current: inspectionData?.lineId },
       { label: 'SIDE', original: originalData?.side, current: inspectionData?.side },
       { label: 'SEQUENCE NO', original: originalData?.sequenceNo, current: inspectionData?.sequenceNo },
-      { label: 'SHIFT', original: originalData?.shift, current: inspectionData?.shift },
-      { label: 'SAMPLE SIZE', original: originalData?.sampleSize, current: inspectionData?.sampleSize },
-      { label: 'TOTAL CARTON', original: originalData?.totalCarton, current: inspectionData?.totalCarton },
-      { label: 'GLOVE WEIGHT (g)', original: originalData?.gloveWeight, current: inspectionData?.gloveWeight },
       { label: 'DATE/TIME', original: originalData?.timestamp, current: inspectionData?.timestamp },
       { label: 'FULL SYSTEM LOT NO', original: originalData?.fullSystemLotNo, current: inspectionData?.fullSystemLotNo },
     ];
   }, [inspectionData, originalData, activeProfile, getResolvedProfile]);
+
+  const batchChangedRows = batchSetupRows.filter((row) => hasFieldChanged(hasOriginal, row.original, row.current));
+  const batchHiddenCount = hasOriginal ? batchSetupRows.length - batchChangedRows.length : 0;
+  const batchRowsToRender = hasOriginal && !showUnchangedBatch ? batchChangedRows : batchSetupRows;
 
   // ── Page 2: Dimensions ─────────────────────────────────────────────────
   const matrixEntry = config?.productMatrixConfig?.[inspectionData?.productCode ?? ''] ?? null;
@@ -151,6 +184,17 @@ export function SubmissionSummary({ inspectionData, originalData }: SubmissionSu
   const currentDimensions: Record<string, string[]> = inspectionData?.dimensions ?? {};
   const originalDimensions: Record<string, string[]> = originalData?.dimensions ?? {};
 
+  // A dimension row is "changed" if any of its slots differ — hidden only when EVERY
+  // slot is unchanged, since the 5 slots are one physical measurement set, not
+  // independently meaningful to scatter-hide.
+  const dimensionRowChanged = (dimId: string) =>
+    Array.from({ length: SLOTS_PER_DIM }).some((_, idx) =>
+      hasFieldChanged(hasOriginal, originalDimensions[dimId]?.[idx], currentDimensions[dimId]?.[idx]),
+    );
+  const changedDimensions = activeDimensions.filter((dim) => dimensionRowChanged(dim.id));
+  const dimensionsHiddenCount = hasOriginal ? activeDimensions.length - changedDimensions.length : 0;
+  const dimensionsToRender = hasOriginal && !showUnchangedDimensions ? changedDimensions : activeDimensions;
+
   // ── Page 3: Defects ────────────────────────────────────────────────────
   const aqlCategories = activeProfile?.aqlCategories ?? [];
   const defectDefinitions = activeProfile?.defectDefinitions ?? [];
@@ -163,6 +207,26 @@ export function SubmissionSummary({ inspectionData, originalData }: SubmissionSu
   const currentQualitative: Record<string, string> = inspectionData?.qualitative ?? {};
   const originalDefects: Record<string, number> = originalData?.defects ?? {};
   const originalQualitative: Record<string, string> = originalData?.qualitative ?? {};
+
+  const defectRows = defectDefinitions.map((defect) => {
+    const qualitative = isQualitativeCategory(defect.categoryId);
+    return qualitative
+      ? {
+          key: defect.id,
+          label: defect.name,
+          original: QUALITATIVE_LABELS[originalQualitative[defect.id] ?? 'NIL'] ?? 'NIL',
+          current: QUALITATIVE_LABELS[currentQualitative[defect.id] ?? 'NIL'] ?? 'NIL',
+        }
+      : {
+          key: defect.id,
+          label: defect.name,
+          original: originalDefects[defect.id] ?? 0,
+          current: currentDefects[defect.id] ?? 0,
+        };
+  });
+  const defectChangedRows = defectRows.filter((row) => hasFieldChanged(hasOriginal, row.original, row.current));
+  const defectsHiddenCount = hasOriginal ? defectRows.length - defectChangedRows.length : 0;
+  const defectRowsToRender = hasOriginal && !showUnchangedDefects ? defectChangedRows : defectRows;
 
   return (
     <div className="bg-surface border border-gray-700/50 rounded-lg p-4 shadow-sm space-y-6">
@@ -184,7 +248,7 @@ export function SubmissionSummary({ inspectionData, originalData }: SubmissionSu
           BATCH SETUP
         </h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-0.5">
-          {batchSetupRows.map((row) => (
+          {batchRowsToRender.map((row) => (
             <SummaryRow
               key={row.label}
               label={row.label}
@@ -194,6 +258,11 @@ export function SubmissionSummary({ inspectionData, originalData }: SubmissionSu
             />
           ))}
         </div>
+        <UnchangedToggle
+          count={batchHiddenCount}
+          expanded={showUnchangedBatch}
+          onToggle={() => setShowUnchangedBatch((v) => !v)}
+        />
       </div>
 
       {/* Dimensions */}
@@ -203,7 +272,7 @@ export function SubmissionSummary({ inspectionData, originalData }: SubmissionSu
           DIMENSIONS
         </h4>
         <div className="space-y-2">
-          {activeDimensions.map((dim) => (
+          {dimensionsToRender.map((dim) => (
             <div key={dim.id} className="flex items-center gap-3 flex-wrap">
               <span className="text-[10px] font-bold uppercase text-muted tracking-wider w-32 shrink-0">
                 {dim.name}
@@ -224,6 +293,11 @@ export function SubmissionSummary({ inspectionData, originalData }: SubmissionSu
             <p className="text-xs text-muted italic">No dimension definitions configured for this product.</p>
           )}
         </div>
+        <UnchangedToggle
+          count={dimensionsHiddenCount}
+          expanded={showUnchangedDimensions}
+          onToggle={() => setShowUnchangedDimensions((v) => !v)}
+        />
       </div>
 
       {/* Defects */}
@@ -233,33 +307,24 @@ export function SubmissionSummary({ inspectionData, originalData }: SubmissionSu
           DEFECTS
         </h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-0.5">
-          {defectDefinitions.map((defect) => {
-            const qualitative = isQualitativeCategory(defect.categoryId);
-            if (qualitative) {
-              return (
-                <SummaryRow
-                  key={defect.id}
-                  label={defect.name}
-                  hasOriginal={hasOriginal}
-                  originalValue={QUALITATIVE_LABELS[originalQualitative[defect.id] ?? 'NIL'] ?? 'NIL'}
-                  currentValue={QUALITATIVE_LABELS[currentQualitative[defect.id] ?? 'NIL'] ?? 'NIL'}
-                />
-              );
-            }
-            return (
-              <SummaryRow
-                key={defect.id}
-                label={defect.name}
-                hasOriginal={hasOriginal}
-                originalValue={originalDefects[defect.id] ?? 0}
-                currentValue={currentDefects[defect.id] ?? 0}
-              />
-            );
-          })}
+          {defectRowsToRender.map((row) => (
+            <SummaryRow
+              key={row.key}
+              label={row.label}
+              hasOriginal={hasOriginal}
+              originalValue={row.original}
+              currentValue={row.current}
+            />
+          ))}
           {defectDefinitions.length === 0 && (
             <p className="text-xs text-muted italic">No defect definitions configured for this profile.</p>
           )}
         </div>
+        <UnchangedToggle
+          count={defectsHiddenCount}
+          expanded={showUnchangedDefects}
+          onToggle={() => setShowUnchangedDefects((v) => !v)}
+        />
       </div>
     </div>
   );
