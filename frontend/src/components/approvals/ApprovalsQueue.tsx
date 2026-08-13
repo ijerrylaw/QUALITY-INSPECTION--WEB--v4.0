@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ShieldAlert, Check, X, ArrowRight, User, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/Button';
+import { JsonViewer } from '../ui/JsonViewer';
 import { API_BASE_URL } from '../../context/ConfigContext';
 import { useAuth, authHeader, authIdentity } from '../../context/AuthContext';
 
@@ -268,11 +269,13 @@ export function ApprovalsQueue() {
                           <div key={key} className="p-3 rounded-lg border bg-rose-500/10 border-rose-500/30">
                             {/* §4.4 Key label */}
                             <span className="block text-[10px] font-bold text-muted uppercase mb-1">{key}</span>
-                            <span className="text-sm font-mono text-rose-400">
-                              {typeof originalValues[key] === 'object'
-                                ? JSON.stringify(originalValues[key], null, 2)
-                                : String(originalValues[key] ?? '—')}
-                            </span>
+                            {typeof originalValues[key] === 'object' || (typeof originalValues[key] === 'string' && /^[[{]/.test((originalValues[key] as string).trim())) ? (
+                              <JsonViewer data={originalValues[key]} />
+                            ) : (
+                              <span className="text-sm font-mono text-rose-400">
+                                {String(originalValues[key] ?? '—')}
+                              </span>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -290,11 +293,13 @@ export function ApprovalsQueue() {
                         {diffKeys.map((key) => (
                           <div key={key} className="p-3 rounded-lg border bg-emerald-500/10 border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.1)]">
                             <span className="block text-[10px] font-bold text-muted uppercase mb-1">{key}</span>
-                            <span className="text-sm font-mono text-emerald-400">
-                              {typeof proposedValues[key] === 'object'
-                                ? JSON.stringify(proposedValues[key], null, 2)
-                                : String(proposedValues[key] ?? '—')}
-                            </span>
+                            {typeof proposedValues[key] === 'object' || (typeof proposedValues[key] === 'string' && /^[[{]/.test((proposedValues[key] as string).trim())) ? (
+                              <JsonViewer data={proposedValues[key]} />
+                            ) : (
+                              <span className="text-sm font-mono text-emerald-400">
+                                {String(proposedValues[key] ?? '—')}
+                              </span>
+                            )}
                           </div>
                         ))}
                       </div>
