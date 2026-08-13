@@ -222,6 +222,13 @@ To maintain absolute consistency, all small contextual overlays MUST adhere to t
 * **Inline Edit & Keyboard Shortcuts:** Pressing `Enter` commits changes. Pressing `Escape` cancels edits. Input fields render a subtle `Enter ↵` indicator.
 * **Text Truncation (Absolute Overlay Trick):** In narrow grid columns, text containers use `w-full truncate`. Action buttons are absolutely positioned (`absolute right-1 top-1/2 -translate-y-1/2`) with hover opacity toggles to prevent text clipping.
 
+### 4.12 Expandable Unchanged-Content Summary (Diff & Comparison Displays)
+* **Purpose:** In amendment-diff and pre-submit-comparison contexts, hide genuinely-unchanged fields by default (not just unhighlight them) so the reviewer's eye goes straight to what actually changed, while keeping the full picture one click away for an audit double-check.
+* **Toggle control:** A full-width button, `text-[10px]` or `text-xs` `font-bold text-muted uppercase tracking-wider`, with a leading `ChevronRight`/`ChevronDown` (`w-3 h-3` or `w-3.5 h-3.5`, `strokeWidth={2.5}`) that flips on expand. Label: `"{N} unchanged field{s} not shown"`. Renders nothing when the count is 0.
+* **Container:** `border border-gray-800 rounded-lg overflow-hidden`, with the expanded content in a `border-t border-gray-800` panel beneath the toggle.
+* **Diff coloring convention** (`JsonViewer.tsx`'s `DiffJsonViewer`): when showing two sides of a changed value, the **Original** side uses **Rose** (`text-rose-400` / `bg-rose-500/10 border-rose-500/30`) and the **Proposed** side uses **Emerald** (`text-emerald-400` / `bg-emerald-500/10 border-emerald-500/30`) — consistent with the global Rose=Fail/Emerald=Pass semantic (§4.8). A purely **added** field is Emerald-only (invisible on the Original side); a purely **removed** field is Rose-only (invisible on the Proposed side).
+* **Use cases:** Approvals Queue amendment diff modal (`ApprovalsQueue.tsx`); Quality Entry Wizard Step 4 Pre-Submit Summary in amend mode (`SubmissionSummary.tsx`).
+
 ---
 
 ## CHAPTER 5: FEEDBACK & ALERTS
@@ -244,7 +251,8 @@ To maintain absolute consistency, all small contextual overlays MUST adhere to t
 * **Purpose:** Contextual instructions or warnings placed directly inside form flows or record panels.
 * **Geometry:** `p-3 rounded-lg border border-l-4 flex gap-3`.
 * **State Styling by intent:**
-  - **Info (Cyan):** `bg-brand-secondary/5 border-brand-secondary/20 border-l-brand-secondary text-brand-secondary`
+  - **Info (Cyan):** `bg-brand-secondary/5 border-brand-secondary/20 border-l-brand-secondary text-brand-secondary`  
+    *(Primary real-world use: "Live Re-Grade — Not the Original Result" banner on legacy History records with no frozen grading snapshot — a data-provenance notice, not a warning, so Cyan not Amber per §4.9.)*
   - **Warning / Action Required (Amber):** `bg-amber-500/5 border-amber-500/30 border-l-amber-500 text-amber-400`  
     *(Primary real-world use: no inspection profile linked, overlapping shift hours, setup incomplete.)*
   - **Success (Emerald):** `bg-emerald-500/5 border-emerald-500/30 border-l-emerald-500 text-emerald-400`

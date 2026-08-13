@@ -48,15 +48,34 @@
   * **Frozen snapshot (AUDIT_REPORT.md #18):** The persisted `submission` also carries `gradingSnapshot`/`gradingSnapshotProfileName` — a richer, self-contained `FrozenCategoryAnalysis[]` (names, AQL level, threshold, eval mode, pass/fail, full per-category defect breakdown) computed by `resolveVerdict()` and stored as JSON. This is **not the same shape** as the response's `categoryResults[]` (which stays the engine's audit-trail `CategoryResult[]` — no `aqlLevel`, failing-defects-only). `HistoryFeed.tsx` reads `gradingSnapshot` directly instead of re-querying `POST /api/verdict/preview`.
   * **Auth:** Requires `X-User-Role` header, any authenticated role — see `NAVIGATION_AND_RBAC.md` §5.1.
 
+* `GET /api/submissions/sequence-hint`
+  * **Role:** Non-binding advisory for the wizard's Sequence No + Total Carton fields, for a given Line+Side+YJJJ group.
+  * **Query params:** `lineId`, `side`, `yjjj` (all required — missing any returns `{ suggestedNext: null, suggestedTotalCarton: null }` rather than an error, since both fields are advisory).
+  * **Response 200:** `{ suggestedNext: number | null, suggestedTotalCarton: number | null }`
+    - `suggestedNext` — max existing Sequence No in the group + 1. Display-only hint; the wizard never pre-fills or restricts input with it (Sequence must reflect true production order — `ISO2859_MATH_ENGINE.md` §4).
+    - `suggestedTotalCarton` — Total Carton from the most recent prior submission in the same group. Unlike `suggestedNext`, the wizard DOES pre-fill this value (still fully editable).
+  * **Auth:** None required.
+
 * `GET /api/submissions/:id`
   * **Role:** Returns a single submission by ID with its `amendmentLogs`.
   * **Response:** `{ submission }` with relations included.
   * **Auth:** None required.
 
+* `GET /api/submissions/new-indicator`
+  * **Role:** Global (not per-user) advisory — has any Submission been created since the effective last-viewed threshold? Drives the sidebar "new lot" dot + row badges in `HistoryFeed.tsx`.
+  * **Response 200:** `{ hasNew: boolean, effectiveLastViewedAt: string }` — `effectiveLastViewedAt = max(AppConfig.lastHistoryViewedAt, start of today)`, so a new calendar day clears the indicator with no cron job needed.
+  * **Auth:** None required.
+
+* `POST /api/submissions/mark-history-viewed`
+  * **Role:** Records that a user just viewed Inspection Records — updates the same global `AppConfig.lastHistoryViewedAt` timestamp `GET /new-indicator` reads. Called once by `HistoryFeed.tsx` on mount, after it has captured the pre-update threshold for row badges.
+  * **Response 200:** `{ ok: true }`
+  * **Auth:** Requires `X-User-Role` header, any authenticated role (matches the same `ALL_ROLES` gate as submission/amendment creation, so PIN-authenticated Group C users work too).
+
 * `POST /api/submissions/:id/amendments`
   * **Role:** Drafts an amendment request on an existing submission. Sets `amendmentStatus` to `PENDING_APPROVAL` and creates an `AmendmentLog` record.
   * **Payload:** `{ reason: string, newValues: Partial<Submission> }`
   * **Note:** Does NOT re-evaluate the AQL verdict. The verdict in `newValues` is whatever the caller supplies.
+  * **Amendment limit:** Rejects with `409` if the Submission already has `MAX_APPROVED_AMENDMENTS` (3) **APPROVED** AmendmentLogs — rejected or still-pending drafts don't count. Mirrors `HistoryFeed.tsx`'s client-side AMEND RECORD button disable at the same threshold; this is the defense-in-depth server check for stale page state or direct API calls. **Response 409:** `{ error, approvedAmendmentCount, maxApprovedAmendments }`
   * **Auth:** Requires `X-User-Role` header, any authenticated role.
 
 ---

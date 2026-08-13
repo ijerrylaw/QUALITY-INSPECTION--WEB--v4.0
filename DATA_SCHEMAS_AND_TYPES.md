@@ -118,6 +118,13 @@ export interface AmendmentLog {
 }
 ```
 
+> **Business rule:** A Submission may accumulate at most 3 **APPROVED**
+> AmendmentLogs in its lifetime (`MAX_APPROVED_AMENDMENTS` in
+> `submissions.routes.ts`) — rejected or still-pending drafts don't count
+> toward the limit. Enforced server-side with a 409 on the 4th approved-equivalent
+> attempt; see `API_AND_INTEGRATION_SPEC.md`'s `POST /api/submissions/:id/amendments`
+> for the response shape.
+
 ---
 
 ## 2. CONFIGURATION & RULES SCHEMAS
@@ -225,6 +232,16 @@ export interface AppConfig {
    * Stored as a JSON-serialized string in the Prisma AppConfig row.
    */
   productProfileMap?: Record<string, string>;
+  /**
+   * Global (not per-user) — timestamp of the last time ANY user viewed
+   * Inspection Records. Compared against Submission.createdAt to drive the
+   * sidebar "new lot" dot + row badges (GET /api/submissions/new-indicator).
+   * A new calendar day also implicitly clears the indicator — see that
+   * endpoint's effectiveLastViewedAt calculation in
+   * API_AND_INTEGRATION_SPEC.md. Cross-user runtime state piggybacking on
+   * the AppConfig singleton, not an admin-editable config value.
+   */
+  lastHistoryViewedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
