@@ -190,7 +190,12 @@ interface Submission {
   /** JSON — CategoryAnalysis[], frozen at submit/amendment-approval time. Null on legacy rows (AUDIT_REPORT.md #18). */
   gradingSnapshot?: string | null;
   gradingSnapshotProfileName?: string | null;
+  /** Full amendment history — GET /api/submissions already includes this relation. Only `status` is used here, to count lifetime APPROVED amendments against MAX_APPROVED_AMENDMENTS. */
+  amendmentLogs?: { status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' }[];
 }
+
+/** Mirrors backend/src/routes/submissions.routes.ts's MAX_APPROVED_AMENDMENTS. */
+const MAX_APPROVED_AMENDMENTS = 3;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -322,6 +327,11 @@ function DefectBreakdownPanel({
   onAmend: (id: string) => void;
 }) {
   const { getResolvedProfile } = useConfig();
+
+  const approvedAmendmentCount = useMemo(
+    () => (sub.amendmentLogs ?? []).filter((log) => log.status === 'APPROVED').length,
+    [sub.amendmentLogs],
+  );
 
   const parsedDefects = useMemo(() => parseDefects(sub.defects), [sub.defects]);
 
@@ -688,17 +698,35 @@ function DefectBreakdownPanel({
         </div>
 
         {/* ── Amendment actions ──────────────────────────────────────────────── */}
-        {sub.amendmentStatus !== 'PENDING_APPROVAL' && sub.amendmentStatus !== 'APPROVED' && (
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() => onAmend(sub.id)}
-              className="h-9 px-4 rounded-lg bg-canvas border border-brand-primary/50 text-brand-secondary hover:bg-brand-primary/10 hover:border-brand-primary font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none"
-            >
-              <Edit2 className="w-3.5 h-3.5" strokeWidth={2} />
-              AMEND RECORD
-            </button>
-          </div>
+        {/* Note: `amendmentStatus === 'APPROVED'` no longer blocks this block —
+            that used to hide AMEND RECORD permanently after the FIRST approval
+            ever (a latent side effect, not an intentional "max 1" rule). Now
+            the lifetime cap is governed solely by approvedAmendmentCount below,
+            so a submission can be re-amended after an approval, up to the cap. */}
+        {sub.amendmentStatus !== 'PENDING_APPROVAL' && (
+          approvedAmendmentCount >= MAX_APPROVED_AMENDMENTS ? (
+            <div className="flex justify-end">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400/70">
+                Maximum amendments reached ({approvedAmendmentCount}/{MAX_APPROVED_AMENDMENTS})
+              </span>
+            </div>
+          ) : (
+            <div className="flex justify-end items-center gap-3">
+              {approvedAmendmentCount > 0 && (
+                <span className="text-[10px] font-mono text-muted">
+                  {approvedAmendmentCount} of {MAX_APPROVED_AMENDMENTS} amendments used
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => onAmend(sub.id)}
+                className="h-9 px-4 rounded-lg bg-canvas border border-brand-primary/50 text-brand-secondary hover:bg-brand-primary/10 hover:border-brand-primary font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none"
+              >
+                <Edit2 className="w-3.5 h-3.5" strokeWidth={2} />
+                AMEND RECORD
+              </button>
+            </div>
+          )
         )}
         {sub.amendmentStatus === 'PENDING_APPROVAL' && (
           <div className="flex justify-end">

@@ -69,6 +69,10 @@ import { requireRole, ALL_ROLES } from '../middleware/auth';
 
 const router = Router();
 
+/** Maximum lifetime APPROVED amendments per Submission — rejected/pending
+ *  drafts don't count (see POST /:id/amendments' pre-flight check below). */
+const MAX_APPROVED_AMENDMENTS = 3;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -788,6 +792,11 @@ router.get('/:id', async (req: Request, res: Response) => {
 /**
  * Creates an AmendmentLog record and sets the Submission status to PENDING_APPROVAL.
  *
+ * Rejects with 409 if this Submission already has MAX_APPROVED_AMENDMENTS
+ * (3) APPROVED amendments in its lifetime — rejected/still-pending drafts
+ * don't count. Mirrors HistoryFeed.tsx's client-side AMEND RECORD button
+ * disable at the same threshold.
+ *
  * Also computes an informational, non-blocking preview of what the server
  * would recompute the verdict as (via resolveVerdict()), so a supervisor
  * reviewing the queue later isn't surprised at approval time. If the
@@ -840,6 +849,22 @@ router.post('/:id/amendments', requireRole(...ALL_ROLES), async (req: Request, r
 
     if (!originalSubmission) {
       res.status(404).json({ error: `Submission '${submissionId}' not found.` });
+      return;
+    }
+
+    // 1b. Hard-block: max 3 APPROVED amendments per Submission, lifetime.
+    // Defense-in-depth — HistoryFeed.tsx already disables the AMEND RECORD
+    // button client-side at this same threshold, but stale page state or a
+    // direct API call must still be rejected server-side.
+    const approvedAmendmentCount = await prisma.amendmentLog.count({
+      where: { submissionId, status: 'APPROVED' },
+    });
+    if (approvedAmendmentCount >= MAX_APPROVED_AMENDMENTS) {
+      res.status(409).json({
+        error: `Maximum amendments reached (${approvedAmendmentCount}/${MAX_APPROVED_AMENDMENTS}). This submission cannot be amended further.`,
+        approvedAmendmentCount,
+        maxApprovedAmendments: MAX_APPROVED_AMENDMENTS,
+      });
       return;
     }
 
