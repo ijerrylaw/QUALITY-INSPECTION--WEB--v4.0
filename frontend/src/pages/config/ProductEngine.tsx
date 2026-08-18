@@ -17,7 +17,8 @@ import {
   AlertTriangle,
   Check,
   X,
-  Clock
+  Clock,
+  Lock
 } from 'lucide-react';
 import { useConfig } from '../../context/ConfigContext';
 import type { SKUOption, ProductConfig } from '../../context/ConfigContext';
@@ -31,7 +32,9 @@ interface ProductEngineProps {
 
 export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
   const { config } = useConfig();
-  
+  const productCodeUsage = config?.productCodeUsage || {};
+  const isCodeLocked = (code: string) => (productCodeUsage[code] ?? 0) > 0;
+
   // ── Local State ─────────────────────────────────────────────────────────
   const [skuMaterials, setSkuMaterials] = useState<SKUOption[]>(config?.skuMaterials || [{value: 'N', label: 'Nitrile'}]);
   const [skuWeights, setSkuWeights] = useState<SKUOption[]>(config?.skuWeights || [{value: '025', label: '2.5g'}]);
@@ -46,6 +49,11 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
   // Accordion state
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null);
   const [expandedProductDraft, setExpandedProductDraft] = useState<ProductConfig | null>(null);
+
+  // Delete confirmation state — every removal requires confirmation; locked
+  // (submission-referenced) codes never reach this state, the control is
+  // disabled before the user can click it.
+  const [confirmDeleteCode, setConfirmDeleteCode] = useState<string | null>(null);
 
   // SKU Builder Selections
   const [selMat, setSelMat] = useState('');
@@ -130,6 +138,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
   };
 
   const handleRemoveProduct = (code: string) => {
+    if (isCodeLocked(code)) return; // defense-in-depth; UI already disables this path
     const updatedCodes = productCodes.filter(c => c !== code);
     const updatedMatrix = { ...productMatrixConfig };
     delete updatedMatrix[code];
@@ -370,6 +379,14 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                   <div className="flex items-center gap-3">
                     {isExpanded ? <ChevronDown className="w-4 h-4 text-brand-secondary" /> : <ChevronRight className="w-4 h-4 text-muted" />}
                     <span className="font-mono text-sm text-primary tracking-wide">{code}</span>
+                    {isCodeLocked(code) && (
+                      <span
+                        className="flex items-center gap-1 bg-sky-500/10 text-sky-400 border border-sky-500/30 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
+                        title={`Referenced by ${productCodeUsage[code]} submission${productCodeUsage[code] === 1 ? '' : 's'} — cannot be deleted`}
+                      >
+                        <Lock className="w-3 h-3" /> Locked ({productCodeUsage[code]})
+                      </span>
+                    )}
                     {needsSetup ? (
                       <span className="flex items-center gap-1 bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">
                         <AlertTriangle className="w-3 h-3" /> Setup Required
@@ -422,11 +439,17 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button 
-                          onClick={() => handleRemoveProduct(code)} 
-                          disabled={!!expandedProductDraft}
-                          className={`p-1.5 rounded-md transition-colors outline-none ${expandedProductDraft ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-rose-400 hover:bg-rose-500/10'}`} 
-                          title={expandedProductDraft ? 'Save active edits first' : 'Remove'}
+                        <button
+                          onClick={() => setConfirmDeleteCode(code)}
+                          disabled={!!expandedProductDraft || isCodeLocked(code)}
+                          className={`p-1.5 rounded-md transition-colors outline-none ${(expandedProductDraft || isCodeLocked(code)) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-rose-400 hover:bg-rose-500/10'}`}
+                          title={
+                            expandedProductDraft
+                              ? 'Save active edits first'
+                              : isCodeLocked(code)
+                                ? `Cannot delete — used by ${productCodeUsage[code]} submission${productCodeUsage[code] === 1 ? '' : 's'}`
+                                : 'Remove'
+                          }
                         >
                           <Trash className="w-4 h-4" />
                         </button>
@@ -451,6 +474,43 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
           )}
         </div>
       </div>
+
+      {/* ── Delete Confirmation Modal ───────────────────────────────────────── */}
+      {confirmDeleteCode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-canvas border border-gray-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
+            <div className="flex items-start gap-4 p-4 border-b border-gray-800">
+              <div className="w-12 h-12 rounded-full bg-rose-500/10 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-6 h-6 text-rose-400" strokeWidth={2} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold uppercase tracking-wide text-primary mb-1">
+                  REMOVE PRODUCT CODE?
+                </h3>
+                <p className="text-sm text-muted">
+                  Remove <span className="font-mono font-bold text-white">{confirmDeleteCode}</span> and its dimension/size configuration from the registry? This takes effect once you save configuration, and cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="p-4 bg-surface flex items-center justify-end gap-3">
+              <button
+                onClick={() => setConfirmDeleteCode(null)}
+                className="h-10 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-white font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none"
+              >
+                <X className="w-4 h-4" strokeWidth={2} />
+                <span>CANCEL</span>
+              </button>
+              <button
+                onClick={() => { handleRemoveProduct(confirmDeleteCode); setConfirmDeleteCode(null); }}
+                className="h-10 px-5 rounded-lg bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none border border-rose-500/50 shadow-sm"
+              >
+                <Trash className="w-4 h-4" strokeWidth={2} />
+                <span>CONFIRM REMOVE</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -212,6 +212,14 @@ export interface AppConfig {
   /** ISO 2859-1 global bracket sizes — stored at AppConfig root level */
   sampleSizes: number[];
   productMatrixConfig: Record<string, ProductConfig>;
+  /**
+   * Computed server-side (not stored) — maps a productCode string to the
+   * count of Submission rows referencing it. A code with a count > 0 is
+   * "locked": its registry entry and dimension/size matrix must not be
+   * editable or deletable, since real inspection records depend on it.
+   * See backend/src/routes/config.routes.ts getProductCodeUsage().
+   */
+  productCodeUsage?: Record<string, number>;
   skuMaterials: SKUOption[];
   skuWeights: SKUOption[];
   skuColors: SKUOption[];

@@ -59,7 +59,7 @@ import { QualityRules } from './config/QualityRules';
 type ConfigTab = 'factory' | 'product' | 'quality';
 
 export function ConfigPage() {
-  const { config, isLoading, error, refreshConfig, updateLocalConfig } = useConfig();
+  const { config, isLoading, error, refreshConfig } = useConfig();
   const { user } = useAuth();
   const { addToast } = useToast();
   
@@ -128,26 +128,43 @@ export function ConfigPage() {
 
   const handleSave = async () => {
     try {
-      // 1. Optimistic update
-      updateLocalConfig(draftConfig);
-      
-      // 2. Persist to backend
+      // Persist to backend. Deliberately no optimistic update here — a
+      // rejected save (e.g. deleting a product code still referenced by a
+      // submission, HTTP 409) must never make the UI look like it succeeded.
       const response = await fetch(`${API_BASE_URL}/api/config`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...authHeader(user) },
         body: JSON.stringify(draftConfig)
       });
-      
-      if (!response.ok) throw new Error('Failed to save configuration');
-      
-      // 3. Re-sync from server to ensure full consistency
+
+      if (!response.ok) {
+        let message = 'Failed to save configuration. Please try again.';
+        try {
+          const errBody = await response.json();
+          if (typeof errBody?.error === 'string') {
+            message = errBody.error;
+            if (Array.isArray(errBody.lockedProductCodes) && errBody.lockedProductCodes.length > 0) {
+              const detail = errBody.lockedProductCodes
+                .map((l: { productCode: string; submissionCount: number }) =>
+                  `${l.productCode} (${l.submissionCount} submission${l.submissionCount === 1 ? '' : 's'})`)
+                .join(', ');
+              message = `${message}: ${detail}`;
+            }
+          }
+        } catch {
+          // Response body wasn't JSON — fall back to the generic message.
+        }
+        throw new Error(message);
+      }
+
+      // Re-sync from server to ensure full consistency
       await refreshConfig();
-      
+
       addToast('success', 'Configuration changes saved successfully.');
       setDraftConfig({}); // Clear pending drafts
     } catch (err) {
       console.error(err);
-      addToast('error', 'Failed to save configuration. Please try again.');
+      addToast('error', err instanceof Error ? err.message : 'Failed to save configuration. Please try again.');
     }
   };
 

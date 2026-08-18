@@ -54,6 +54,25 @@ function safeParseJSON<T>(raw: string | null | undefined, fallback: T): T {
 }
 
 /**
+ * Product codes are plain JSON-blob strings on AppConfig, with no FK to
+ * Submission — this computes the real, current lock state on demand
+ * (a product code with >=1 referencing Submission is "locked") instead of
+ * storing a flag that could drift out of sync. See §5 of the Product Engine
+ * discovery report.
+ */
+async function getProductCodeUsage(): Promise<Record<string, number>> {
+  const usage = await prisma.submission.groupBy({
+    by: ['productCode'],
+    _count: { _all: true },
+  });
+  const result: Record<string, number> = {};
+  for (const row of usage) {
+    result[row.productCode] = row._count._all;
+  }
+  return result;
+}
+
+/**
  * Formats a raw Prisma AppConfig database record into a clean, parsed DTO.
  */
 export function formatAppConfig(config: AppConfig) {
@@ -124,7 +143,10 @@ router.get('/', async (_req: Request, res: Response) => {
       });
     }
 
-    res.json(formatAppConfig(config));
+    res.json({
+      ...formatAppConfig(config),
+      productCodeUsage: await getProductCodeUsage(),
+    });
   } catch (error) {
     console.error('[GET /api/config] Error:', error);
     res.status(500).json({ error: 'Failed to retrieve system configuration' });
@@ -142,6 +164,38 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
   try {
     const payload = req.body || {};
     const updateData: Record<string, any> = {};
+
+    // Reject removal of any product code still referenced by a real Submission.
+    // productCodes is a flat JSON string[] with no DB-level FK to Submission, so
+    // this is the only enforcement point — a client could otherwise send a
+    // PATCH that silently drops a code still in use (see Product Engine
+    // discovery report §5). Must run before the JSON_FIELDS write-through below.
+    if (Array.isArray(payload.productCodes)) {
+      const currentConfig = await prisma.appConfig.findUnique({ where: { id: '1' } });
+      const currentCodes = safeParseJSON<string[]>(currentConfig?.productCodes, []);
+      const newCodes: string[] = payload.productCodes;
+      const removedCodes = currentCodes.filter((c) => !newCodes.includes(c));
+
+      if (removedCodes.length > 0) {
+        const usage = await prisma.submission.groupBy({
+          by: ['productCode'],
+          where: { productCode: { in: removedCodes } },
+          _count: { _all: true },
+        });
+
+        if (usage.length > 0) {
+          const lockedProductCodes = usage.map((u) => ({
+            productCode: u.productCode,
+            submissionCount: u._count._all,
+          }));
+          res.status(409).json({
+            error: 'Cannot remove product code(s) referenced by existing submissions',
+            lockedProductCodes,
+          });
+          return;
+        }
+      }
+    }
 
     // String / scalar fields
     if (typeof payload.companyName === 'string') updateData['companyName'] = payload.companyName;
@@ -169,7 +223,10 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
       },
     });
 
-    res.json(formatAppConfig(updatedConfig));
+    res.json({
+      ...formatAppConfig(updatedConfig),
+      productCodeUsage: await getProductCodeUsage(),
+    });
   } catch (error) {
     console.error('[PATCH /api/config] Error:', error);
     res.status(500).json({
