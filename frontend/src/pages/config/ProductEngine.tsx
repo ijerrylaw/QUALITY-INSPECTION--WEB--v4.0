@@ -382,7 +382,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                     {isCodeLocked(code) && (
                       <span
                         className="flex items-center gap-1 bg-sky-500/10 text-sky-400 border border-sky-500/30 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
-                        title={`Referenced by ${productCodeUsage[code]} submission${productCodeUsage[code] === 1 ? '' : 's'} — cannot be deleted`}
+                        title={`Referenced by ${productCodeUsage[code]} submission${productCodeUsage[code] === 1 ? '' : 's'} — cannot be edited or deleted`}
                       >
                         <Lock className="w-3 h-3" /> Locked ({productCodeUsage[code]})
                       </span>
@@ -431,11 +431,17 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                         >
                           <ArrowDown className="w-4 h-4" />
                         </button>
-                        <button 
-                          onClick={() => handleStartEditProduct(code)} 
-                          disabled={!!expandedProductDraft}
-                          className={`p-1.5 rounded-md transition-colors outline-none ${expandedProductDraft ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`} 
-                          title={expandedProductDraft ? 'Save active edits first' : 'Edit Config'}
+                        <button
+                          onClick={() => { if (!isCodeLocked(code)) handleStartEditProduct(code); }}
+                          disabled={!!expandedProductDraft || isCodeLocked(code)}
+                          className={`p-1.5 rounded-md transition-colors outline-none ${(expandedProductDraft || isCodeLocked(code)) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
+                          title={
+                            expandedProductDraft
+                              ? 'Save active edits first'
+                              : isCodeLocked(code)
+                                ? `Cannot edit — used by ${productCodeUsage[code]} submission${productCodeUsage[code] === 1 ? '' : 's'}`
+                                : 'Edit Config'
+                          }
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>

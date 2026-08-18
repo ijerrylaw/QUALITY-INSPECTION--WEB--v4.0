@@ -73,6 +73,26 @@ async function getProductCodeUsage(): Promise<Record<string, number>> {
 }
 
 /**
+ * Collects dotted-path differences between two JSON-shaped values (used to
+ * diff one product's stored ProductConfig against an incoming one). Walks
+ * plain objects/arrays recursively; any other value type is compared with
+ * ===, so e.g. '240' vs 240 or '240' vs '241' both register as a diff.
+ */
+function diffValues(current: unknown, incoming: unknown, path: string, out: string[]): void {
+  if (current === incoming) return;
+  const currentIsObj = current !== null && typeof current === 'object';
+  const incomingIsObj = incoming !== null && typeof incoming === 'object';
+  if (currentIsObj && incomingIsObj) {
+    const keys = new Set([...Object.keys(current as object), ...Object.keys(incoming as object)]);
+    for (const key of keys) {
+      diffValues((current as any)[key], (incoming as any)[key], path ? `${path}.${key}` : key, out);
+    }
+    return;
+  }
+  out.push(path);
+}
+
+/**
  * A clean numeric string: digits and an optional single decimal point (e.g.
  * '105', '105.5', '.5'), or empty/unset (a size row may legitimately have no
  * target yet — see hasUsableProductMatrix()). Mirrors what the frontend's
@@ -227,13 +247,18 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
     const payload = req.body || {};
     const updateData: Record<string, any> = {};
 
+    // Shared across the two lock-related checks below — only fetched once.
+    const needsCurrentConfig = Array.isArray(payload.productCodes) || payload.productMatrixConfig !== undefined;
+    const currentConfig = needsCurrentConfig
+      ? await prisma.appConfig.findUnique({ where: { id: '1' } })
+      : null;
+
     // Reject removal of any product code still referenced by a real Submission.
     // productCodes is a flat JSON string[] with no DB-level FK to Submission, so
     // this is the only enforcement point — a client could otherwise send a
     // PATCH that silently drops a code still in use (see Product Engine
     // discovery report §5). Must run before the JSON_FIELDS write-through below.
     if (Array.isArray(payload.productCodes)) {
-      const currentConfig = await prisma.appConfig.findUnique({ where: { id: '1' } });
       const currentCodes = safeParseJSON<string[]>(currentConfig?.productCodes, []);
       const newCodes: string[] = payload.productCodes;
       const removedCodes = currentCodes.filter((c) => !newCodes.includes(c));
@@ -256,6 +281,41 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
           });
           return;
         }
+      }
+    }
+
+    // Reject any change to a locked product code's dimension/size matrix.
+    // The productCodes-removal check above only guarded against deleting a
+    // locked code's registry entry — it did not stop editing that code's
+    // productMatrixConfig[code] in place, which is the same integrity hole
+    // (a LIVE submission's frozen grading context must never be able to
+    // drift from the config that produced it). Diffs against the currently
+    // stored entry rather than just checking presence, since a save of an
+    // unrelated (unlocked) product legitimately re-sends every product's
+    // unchanged entry in the same payload (see ProductEngine.tsx's
+    // triggerChange, which always sends the whole productMatrixConfig).
+    if (payload.productMatrixConfig !== undefined && typeof payload.productMatrixConfig === 'object') {
+      const currentMatrix = safeParseJSON<Record<string, any>>(currentConfig?.productMatrixConfig, {});
+      const usage = await getProductCodeUsage();
+      const lockedChanges: { productCode: string; submissionCount: number; changedFields: string[] }[] = [];
+
+      for (const [productCode, incomingEntry] of Object.entries(payload.productMatrixConfig as Record<string, any>)) {
+        const submissionCount = usage[productCode] ?? 0;
+        if (submissionCount === 0) continue;
+
+        const changedFields: string[] = [];
+        diffValues(currentMatrix[productCode], incomingEntry, '', changedFields);
+        if (changedFields.length > 0) {
+          lockedChanges.push({ productCode, submissionCount, changedFields });
+        }
+      }
+
+      if (lockedChanges.length > 0) {
+        res.status(409).json({
+          error: 'Cannot modify dimension/size configuration for product code(s) referenced by existing submissions',
+          lockedProductCodes: lockedChanges,
+        });
+        return;
       }
     }
 
