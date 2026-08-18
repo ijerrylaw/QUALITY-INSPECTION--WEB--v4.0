@@ -277,6 +277,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={wgtTol}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'weightTolerance', formatTolerance(e.target.value))}
+                        onBlur={e => handleUpdateFixed(size, 'weightTolerance', applyDecimalsToValue(e.target.value, config.weightDecimals ?? 0))}
                         className={`w-full h-9 rounded-md px-1 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
                             ? `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${wgtTol.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}` 
@@ -329,6 +330,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={lenTol}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'lengthTolerance', formatTolerance(e.target.value))}
+                        onBlur={e => handleUpdateFixed(size, 'lengthTolerance', applyDecimalsToValue(e.target.value, config.lengthDecimals ?? 0))}
                         className={`w-full h-9 rounded-md px-1 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
                             ? `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${lenTol.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}` 
@@ -381,6 +383,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={palmTol}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'palmWidthTolerance', formatTolerance(e.target.value))}
+                        onBlur={e => handleUpdateFixed(size, 'palmWidthTolerance', applyDecimalsToValue(e.target.value, config.palmWidthDecimals ?? 0))}
                         className={`w-full h-9 rounded-md px-1 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
                             ? `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${palmTol.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}` 
@@ -497,6 +500,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                             value={dimVal.tolerance}
                             disabled={!isActive || isReadOnly}
                             onChange={e => handleUpdateDimensionValue(size, def.id, 'tolerance', formatTolerance(e.target.value))}
+                            onBlur={e => handleUpdateDimensionValue(size, def.id, 'tolerance', applyDecimalsToValue(e.target.value, def.decimals ?? 0))}
                             className={`w-full h-9 rounded-md px-1 text-sm font-mono text-center outline-none transition-all ${
                               isActive
                                 ? `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${dimVal.tolerance.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}`

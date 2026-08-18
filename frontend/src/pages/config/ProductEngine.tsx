@@ -20,7 +20,7 @@ import {
   Clock,
   Lock
 } from 'lucide-react';
-import { useConfig } from '../../context/ConfigContext';
+import { useConfig, hasUsableProductMatrix } from '../../context/ConfigContext';
 import type { SKUOption, ProductConfig } from '../../context/ConfigContext';
 import { DictionaryManager } from './DictionaryManager';
 import { ProductConfigAccordion } from './ProductConfigAccordion';
@@ -189,13 +189,22 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
     setExpandedProductDraft(null);
   };
 
-  // Check if a product's matrix is fully configured
+  // Check if a product's matrix is fully configured — mirrors the real
+  // grading-readiness gate (hasUsableProductMatrix, the finding #5 guard
+  // used by dimensionEvaluator.ts/resolveVerdict.ts and StepDimensions.tsx)
+  // rather than a separate, unrelated condition. Previously required at
+  // least one custom/dynamic dimension to exist, which has nothing to do
+  // with whether a product is actually gradeable — a product needing only
+  // the three fixed dimensions (Weight/Length/Palm Width) could never clear
+  // the old check. hasUsableProductMatrix() itself only evaluates one size
+  // at a time and doesn't know about "no sizes enabled at all", so that
+  // case is handled explicitly here.
   const isSetupIncomplete = (code: string) => {
     const conf = productMatrixConfig[code];
     if (!conf) return true;
-    if (Object.keys(conf.sizes).length === 0) return true;
-    if (conf.dimensionDefs.length === 0) return true;
-    return false;
+    const enabledSizes = Object.keys(conf.sizes);
+    if (enabledSizes.length === 0) return true;
+    return !enabledSizes.every(size => hasUsableProductMatrix(conf, size));
   };
 
   return (
