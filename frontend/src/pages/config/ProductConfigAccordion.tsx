@@ -263,6 +263,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={wgtTarget}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'weightTarget', formatTarget(e.target.value))}
+                        onBlur={e => handleUpdateFixed(size, 'weightTarget', applyDecimalsToValue(e.target.value, config.weightDecimals ?? 0))}
                         className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
                             ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary' 
@@ -314,6 +315,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={lenTarget}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'lengthTarget', formatTarget(e.target.value))}
+                        onBlur={e => handleUpdateFixed(size, 'lengthTarget', applyDecimalsToValue(e.target.value, config.lengthDecimals ?? 0))}
                         className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
                             ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary' 
@@ -365,6 +367,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={palmTarget}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'palmWidthTarget', formatTarget(e.target.value))}
+                        onBlur={e => handleUpdateFixed(size, 'palmWidthTarget', applyDecimalsToValue(e.target.value, config.palmWidthDecimals ?? 0))}
                         className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
                             ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary' 
@@ -480,6 +483,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                             value={dimVal.minSpec}
                             disabled={!isActive || isReadOnly}
                             onChange={e => handleUpdateDimensionValue(size, def.id, 'minSpec', formatTarget(e.target.value))}
+                            onBlur={e => handleUpdateDimensionValue(size, def.id, 'minSpec', applyDecimalsToValue(e.target.value, def.decimals ?? 0))}
                             className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
                               isActive
                                 ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary'
