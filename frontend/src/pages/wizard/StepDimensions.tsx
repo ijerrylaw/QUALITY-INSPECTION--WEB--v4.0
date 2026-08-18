@@ -36,7 +36,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Ruler, CheckCircle2, AlertTriangle, AlertCircle, Info } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastProvider';
-import { useConfig, hasUsableProductMatrix } from '../../context/ConfigContext';
+import { useConfig, hasUsableProductMatrix, resolveProductMatrix } from '../../context/ConfigContext';
 import { OriginalValueNote, hasFieldChanged } from '../../utils/fieldDiff';
 import type { ProductDimensionDef } from '../../context/ConfigContext';
 
@@ -69,13 +69,17 @@ export function StepDimensions({
   const size: string = initialData?.size ?? '';
 
   // ── Per-size entry from Product Engine ────────────────────────────────────
-  const sizeEntry = useMemo(() => {
-    return config?.productMatrixConfig?.[productCode]?.sizes?.[size] ?? null;
-  }, [config, productCode, size]);
-
+  // B3: sourced from the consolidated `products` structure via
+  // resolveProductMatrix() rather than indexing productMatrixConfig directly.
+  // Same values (B2 keeps the two in sync on every write), so this step's
+  // spec lookups, decimal precision and entry gate are behaviorally unchanged.
   const matrixEntry = useMemo(() => {
-    return config?.productMatrixConfig?.[productCode] ?? null;
+    return resolveProductMatrix(config, productCode);
   }, [config, productCode]);
+
+  const sizeEntry = useMemo(() => {
+    return matrixEntry?.sizes?.[size] ?? null;
+  }, [matrixEntry, size]);
 
   // ── Zero-usable-dimension entry gate (AUDIT_REPORT.md finding #5) ─────────
   const isMatrixUnusable = Boolean(productCode) && Boolean(size)

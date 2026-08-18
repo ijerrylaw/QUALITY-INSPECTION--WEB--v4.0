@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
-import { useConfig, API_BASE_URL, hasUsableCategories, hasUsableProductMatrix } from '../../context/ConfigContext';
+import { useConfig, API_BASE_URL, hasUsableCategories, hasUsableProductMatrix, resolveProductMatrix } from '../../context/ConfigContext';
 import { useAuth, authHeader, authIdentity } from '../../context/AuthContext';
 import { useToast } from '../../components/ui/ToastProvider';
 import {
@@ -29,8 +29,11 @@ interface BatchLotRow {
 // ── SUBCOMPONENTS ──────────────────────────────────────────────────────────
 
 function BatchModalDimensions({ row, updateRow, config, productCode, size }: any) {
-  const sizeEntry = config?.productMatrixConfig?.[productCode]?.sizes?.[size] ?? null;
-  const matrixEntry = config?.productMatrixConfig?.[productCode];
+  // B3: sourced from `products` via resolveProductMatrix(), same as the
+  // parent's entry gate — keeps this modal's spec/decimal lookups on the
+  // same source of truth rather than straddling both structures.
+  const matrixEntry = resolveProductMatrix(config, productCode);
+  const sizeEntry = matrixEntry?.sizes?.[size] ?? null;
   
   const activeDimensions = React.useMemo(() => {
     return [
@@ -360,9 +363,11 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
   const [lineId, setLineId] = useState<string>('');
 
   // ── Zero-usable-dimension-matrix entry gate (AUDIT_REPORT.md finding #5) ──
+  // B3: sourced from `products` via resolveProductMatrix() (same values as
+  // productMatrixConfig — B2 keeps them in sync), so this gate is unchanged.
   const matrixEntry = useMemo(
-    () => config?.productMatrixConfig?.[productCode] ?? null,
-    [config?.productMatrixConfig, productCode],
+    () => resolveProductMatrix(config, productCode),
+    [config, productCode],
   );
   const isMatrixUnusable = Boolean(productCode) && Boolean(size)
     && !hasUsableProductMatrix(matrixEntry, size);

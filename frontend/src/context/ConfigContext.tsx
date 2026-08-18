@@ -99,6 +99,87 @@ export interface ProductConfig {
   palmWidthDecimals?: number;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CONSOLIDATED PRODUCT STRUCTURE  (DATA_SCHEMAS_AND_TYPES.md §3.1)
+// Mirrors backend/src/lib/productEntry.ts. Exposed by GET /api/config as of
+// Session B3, which made `products` the read source of truth for the admin/
+// config surface. The legacy productCodes/productMatrixConfig/
+// productProfileMap fields are still returned (as projections of this) and
+// still written, so nothing outside the admin surface changed.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The six SKU dictionary VALUES that composed this code, or null if unknown. */
+export interface ProductAttributes {
+  material: string | null;
+  weight: string | null;
+  color: string | null;
+  innerSurface: string | null;
+  length: string | null;
+  texture: string | null;
+}
+
+/** One product code's full record — attributes + matrix + profile link. */
+export interface ProductEntry {
+  attributes: ProductAttributes;
+  matrix: ProductConfig;
+  profileId: string | null;
+}
+
+/**
+ * Resolves one product code's dimension/size matrix from the consolidated
+ * `products` structure — the single place the admin/config surface and the
+ * wizard's entry gate read a matrix from, as of B3.
+ *
+ * Falls back to productMatrixConfig when `products` is absent, which covers
+ * a backend still serving a pre-B3 response shape (and mirrors the server's
+ * own unmigrated-database fallback in config.routes.ts). Returns the same
+ * object either way, so callers — and hasUsableProductMatrix() below — behave
+ * identically regardless of which source supplied it.
+ */
+export function resolveProductMatrix(
+  config: { products?: Record<string, ProductEntry>; productMatrixConfig?: Record<string, ProductConfig> } | null | undefined,
+  productCode: string | null | undefined,
+): ProductConfig | null {
+  if (!productCode) return null;
+  const fromProducts = config?.products?.[productCode]?.matrix;
+  if (fromProducts) return fromProducts;
+  return config?.productMatrixConfig?.[productCode] ?? null;
+}
+
+/**
+ * Projects the whole registry out of `products` — the client-side counterpart
+ * to the server's deriveLegacyStructures(), for callers that need the full
+ * ordered code list and matrix map rather than a single code's matrix
+ * (ProductEngine.tsx's registered-products list).
+ *
+ * `products` key order IS the registry order (B2 made it track the
+ * user-controlled Product Engine ordering), so Object.keys() preserves the
+ * move up/down arrangement without a separate sort.
+ *
+ * Same all-or-nothing fallback rationale as resolveProductMatrix(): if
+ * `products` is absent or empty, fall back to the legacy pair wholesale
+ * rather than merging per-code, so genuine drift stays visible instead of
+ * being silently papered over.
+ */
+export function resolveProductRegistry(
+  config: { products?: Record<string, ProductEntry>; productCodes?: string[]; productMatrixConfig?: Record<string, ProductConfig> } | null | undefined,
+): { productCodes: string[]; productMatrixConfig: Record<string, ProductConfig> } {
+  const products = config?.products;
+  if (products && Object.keys(products).length > 0) {
+    const productCodes: string[] = [];
+    const productMatrixConfig: Record<string, ProductConfig> = {};
+    for (const [code, entry] of Object.entries(products)) {
+      productCodes.push(code);
+      productMatrixConfig[code] = entry.matrix;
+    }
+    return { productCodes, productMatrixConfig };
+  }
+  return {
+    productCodes: config?.productCodes ?? [],
+    productMatrixConfig: config?.productMatrixConfig ?? {},
+  };
+}
+
 /**
  * A product's dimension matrix is usable for the two always-graded fixed
  * dimensions (GLOVE LENGTH, PALM WIDTH) only if the selected size has a real,
@@ -110,6 +191,17 @@ export interface ProductConfig {
  * `hasUsableProductMatrix()` in `backend/src/engine/dimensionEvaluator.ts`
  * exactly — kept in sync deliberately, same pairing as
  * `hasUsableRules()`/`hasUsableCategories()`.
+ *
+ * B3 NOTE — this signature is deliberately UNCHANGED. The cutover onto
+ * `products` happens at the CALL SITES, which now source `matrixEntry` via
+ * resolveProductMatrix() above instead of indexing productMatrixConfig
+ * directly. Keeping the function itself a pure (matrixEntry, size) predicate
+ * preserves its byte-for-byte correspondence with the backend twin, which
+ * B4 has to migrate in lockstep — changing the signature here would have
+ * broken that mirror and made B4's job harder, for no behavioral gain. The
+ * data reaching this function is identical either way (B2 keeps `products`
+ * and productMatrixConfig in sync on every write), so every caller's
+ * block/allow decision is unchanged.
  */
 export function hasUsableProductMatrix(
   matrixEntry: ProductConfig | null | undefined,
@@ -211,7 +303,19 @@ export interface AppConfig {
   sizes: string[];
   /** ISO 2859-1 global bracket sizes — stored at AppConfig root level */
   sampleSizes: number[];
+  /**
+   * @deprecated for READS as of B3 — use `products` (or resolveProductMatrix())
+   * instead. Still returned by GET /api/config as a projection of `products`,
+   * and still the field PATCH /api/config expects on writes (write-path
+   * consolidation is B6), so this is not removable yet.
+   */
   productMatrixConfig: Record<string, ProductConfig>;
+  /**
+   * Consolidated per-product-code registry — the read source of truth for the
+   * admin/config surface as of B3. Keyed by product code, in the user-
+   * controlled Product Engine ordering.
+   */
+  products: Record<string, ProductEntry>;
   /**
    * Computed server-side (not stored) — maps a productCode string to the
    * count of Submission rows referencing it. A code with a count > 0 is

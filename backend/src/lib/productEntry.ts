@@ -155,3 +155,47 @@ export function buildProductsMap(
 
   return products;
 }
+
+/** The three legacy structures, as projected back out of `products`. */
+export interface LegacyProductStructures {
+  productCodes: string[];
+  productMatrixConfig: Record<string, ProductConfig>;
+  productProfileMap: Record<string, string>;
+}
+
+/**
+ * Projects `products` back into the three legacy structures — the exact
+ * inverse of buildProductsMap(), kept beside it so the round-trip stays
+ * visible in one place.
+ *
+ * Session B3 makes `products` the READ source of truth for the admin/config
+ * surface, while the legacy structures continue to be written unchanged
+ * (B2's design; their write-path removal is B6). GET /api/config therefore
+ * still returns all three fields with byte-identical VALUES — they are just
+ * derived from `products` now rather than read straight off their own
+ * columns, so there is exactly one place the admin UI's truth comes from.
+ *
+ * Two deliberate properties, both matching how buildProductsMap() built the
+ * data in the first place, so the round-trip is lossless for any map that
+ * function produced:
+ *   - productCodes order === `products` key order (which B2 made track
+ *     productCodes[], the user-controlled Product Engine ordering).
+ *   - productProfileMap omits null profileIds entirely, rather than emitting
+ *     `code: null` — matching the legacy structure's own convention of only
+ *     holding codes that actually have a profile linked.
+ */
+export function deriveLegacyStructures(products: ProductsMap): LegacyProductStructures {
+  const productCodes: string[] = [];
+  const productMatrixConfig: Record<string, ProductConfig> = {};
+  const productProfileMap: Record<string, string> = {};
+
+  for (const [code, entry] of Object.entries(products)) {
+    productCodes.push(code);
+    productMatrixConfig[code] = entry.matrix;
+    if (entry.profileId !== null && entry.profileId !== undefined) {
+      productProfileMap[code] = entry.profileId;
+    }
+  }
+
+  return { productCodes, productMatrixConfig, productProfileMap };
+}

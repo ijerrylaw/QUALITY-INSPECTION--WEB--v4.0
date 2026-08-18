@@ -13,8 +13,8 @@ import { Router, Request, Response } from 'express';
 import prisma from '../lib/prismaClient';
 import type { AppConfig } from '../../generated/prisma/client';
 import { requireRole } from '../middleware/auth';
-import { buildProductsMap } from '../lib/productEntry';
-import type { ProductsMap } from '../lib/productEntry';
+import { buildProductsMap, deriveLegacyStructures } from '../lib/productEntry';
+import type { ProductsMap, ProductConfig, LegacyProductStructures } from '../lib/productEntry';
 
 const router = Router();
 
@@ -157,22 +157,67 @@ function validateProductMatrixConfig(matrix: unknown): InvalidTargetField[] {
 }
 
 /**
+ * Resolves the product registry for READ purposes (Session B3 cutover).
+ *
+ * `products` is the read source of truth for the admin/config surface as of
+ * B3. The three legacy structures are still written unchanged (B2's design),
+ * so this returns values byte-identical to reading them directly — see
+ * deriveLegacyStructures().
+ *
+ * SAFETY FALLBACK: if `products` is empty while the legacy structures still
+ * hold codes, this is an unmigrated database (e.g. a dev.db restored from
+ * before Session A, which added the column). Reading `products` there would
+ * silently report an EMPTY product catalog — 17 codes vanishing from the
+ * admin UI and every wizard dropdown. Falls back to the legacy structures and
+ * logs loudly instead. The fallback is deliberately all-or-nothing on that one
+ * unambiguous signal: it never merges per-code, because a per-code fallback
+ * would paper over exactly the real drift this cutover needs to surface.
+ */
+function resolveProductRegistry(config: AppConfig): LegacyProductStructures {
+  const products = safeParseJSON<ProductsMap>(config.products, {});
+  const legacyCodes = safeParseJSON<string[]>(config.productCodes, []);
+
+  if (Object.keys(products).length === 0 && legacyCodes.length > 0) {
+    console.warn(
+      `[config] AppConfig.products is empty but productCodes[] holds ${legacyCodes.length} code(s) — ` +
+      'falling back to the legacy structures. This database predates the `products` column ' +
+      '(Session A) or was never migrated; run backend/scripts/migrate-products-field.ts.',
+    );
+    return {
+      productCodes: legacyCodes,
+      productMatrixConfig: safeParseJSON<Record<string, ProductConfig>>(config.productMatrixConfig, {}),
+      productProfileMap: safeParseJSON<Record<string, string>>(config.productProfileMap, {}),
+    };
+  }
+
+  return deriveLegacyStructures(products);
+}
+
+/**
  * Formats a raw Prisma AppConfig database record into a clean, parsed DTO.
+ *
+ * B3: productCodes/productMatrixConfig/productProfileMap are now DERIVED from
+ * `products` rather than read from their own columns. Values are unchanged —
+ * only their source is. `products` itself is also exposed now, so the admin UI
+ * (ProductEngine.tsx) can read the consolidated structure directly. That
+ * deliberately supersedes Session A's "GET must not expose products"
+ * constraint, which existed only because nothing read it yet.
  */
 export function formatAppConfig(config: AppConfig) {
+  const registry = resolveProductRegistry(config);
   return {
     id: config.id,
     companyName: config.companyName,
     portalTitle: config.portalTitle,
     logoImage: config.logoImage,
     accentColor: config.accentColor,
-    productCodes: safeParseJSON<string[]>(config.productCodes, []),
+    productCodes: registry.productCodes,
     lines: safeParseJSON<{ id: string; name: string }[]>(config.lines, []),
     shifts: safeParseJSON<{ id: string; name: string; startHour: number; startMinute: number; durationHours: number }[]>(config.shifts, []),
     sides: safeParseJSON<{ id: string; name: string }[]>(config.sides, []),
     sizes: safeParseJSON<string[]>(config.sizes, []),
     sampleSizes: safeParseJSON<number[]>(config.sampleSizes, []),
-    productProfileMap: safeParseJSON<Record<string, string>>(config.productProfileMap, {}),
+    productProfileMap: registry.productProfileMap,
     skuMaterials: safeParseJSON<{ value: string; label: string }[]>(config.skuMaterials, []),
     skuWeights: safeParseJSON<{ value: string; label: string }[]>(config.skuWeights, []),
     skuColors: safeParseJSON<{ value: string; label: string }[]>(config.skuColors, []),
@@ -181,10 +226,18 @@ export function formatAppConfig(config: AppConfig) {
     skuTextures: safeParseJSON<{ value: string; label: string }[]>(config.skuTextures, []),
     dimensions: safeParseJSON<any[]>(config.dimensions, []),
     targetWeight: safeParseJSON<{ target: number; tolerance: number }>(config.targetWeight, { target: 0, tolerance: 0 }),
-    productMatrixConfig: safeParseJSON<Record<string, any>>(config.productMatrixConfig, {}),
+    productMatrixConfig: registry.productMatrixConfig,
     aqlCategories: safeParseJSON<any[]>(config.aqlCategories, []),
     defectDefinitions: safeParseJSON<any[]>(config.defectDefinitions, []),
     inspectionProfiles: safeParseJSON<any[]>(config.inspectionProfiles, []),
+    /**
+     * The consolidated per-product-code structure — now the read source of
+     * truth for the admin/config surface (ProductEngine.tsx). Exposed as of
+     * B3; the three fields above are projections of it, kept in the response
+     * so every existing consumer (the wizard, in particular) is untouched by
+     * this cutover.
+     */
+    products: safeParseJSON<ProductsMap>(config.products, {}),
     createdAt: config.createdAt,
     updatedAt: config.updatedAt,
   };
@@ -266,13 +319,22 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
       ? await prisma.appConfig.findUnique({ where: { id: '1' } })
       : null;
 
+    // B3: the two lock checks below now read the CURRENT registry through
+    // `products` (same resolver, and therefore same fallback behavior, as
+    // GET /api/config) instead of off the legacy columns directly. Values are
+    // identical — B2 keeps the two byte-identical on every write — so neither
+    // check's decisions change; they simply consult one source of truth.
+    // Deriving once here also means both checks provably see the same view,
+    // rather than each parsing its own column independently.
+    const currentRegistry = currentConfig ? resolveProductRegistry(currentConfig) : null;
+
     // Reject removal of any product code still referenced by a real Submission.
     // productCodes is a flat JSON string[] with no DB-level FK to Submission, so
     // this is the only enforcement point — a client could otherwise send a
     // PATCH that silently drops a code still in use (see Product Engine
     // discovery report §5). Must run before the JSON_FIELDS write-through below.
     if (Array.isArray(payload.productCodes)) {
-      const currentCodes = safeParseJSON<string[]>(currentConfig?.productCodes, []);
+      const currentCodes = currentRegistry?.productCodes ?? [];
       const newCodes: string[] = payload.productCodes;
       const removedCodes = currentCodes.filter((c) => !newCodes.includes(c));
 
@@ -308,7 +370,7 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
     // unchanged entry in the same payload (see ProductEngine.tsx's
     // triggerChange, which always sends the whole productMatrixConfig).
     if (payload.productMatrixConfig !== undefined && typeof payload.productMatrixConfig === 'object') {
-      const currentMatrix = safeParseJSON<Record<string, any>>(currentConfig?.productMatrixConfig, {});
+      const currentMatrix = currentRegistry?.productMatrixConfig ?? {};
       const usage = await getProductCodeUsage();
       const lockedChanges: { productCode: string; submissionCount: number; changedFields: string[] }[] = [];
 

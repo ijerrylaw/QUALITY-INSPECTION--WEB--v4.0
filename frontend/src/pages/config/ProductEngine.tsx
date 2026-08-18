@@ -20,7 +20,7 @@ import {
   Clock,
   Lock
 } from 'lucide-react';
-import { useConfig, hasUsableProductMatrix } from '../../context/ConfigContext';
+import { useConfig, hasUsableProductMatrix, resolveProductRegistry } from '../../context/ConfigContext';
 import type { SKUOption, ProductConfig } from '../../context/ConfigContext';
 import { DictionaryManager } from './DictionaryManager';
 import { ProductConfigAccordion } from './ProductConfigAccordion';
@@ -43,8 +43,21 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
   const [skuLengths, setSkuLengths] = useState<SKUOption[]>(config?.skuLengths || [{value: '24', label: '24cm'}]);
   const [skuTextures, setSkuTextures] = useState<SKUOption[]>(config?.skuTextures || [{value: 'FT', label: 'Finger Textured'}]);
 
-  const [productCodes, setProductCodes] = useState(config?.productCodes || []);
-  const [productMatrixConfig, setProductMatrixConfig] = useState<Record<string, ProductConfig>>(config?.productMatrixConfig || {});
+  // B3 read-cutover: the registered-products list and every code's dimension/
+  // size matrix are now sourced from the consolidated `products` structure
+  // (via resolveProductRegistry) instead of the legacy productCodes[] /
+  // productMatrixConfig pair. Everything downstream — the rendered list, lock
+  // badges, SETUP REQUIRED badges, the accordion, and the save handlers — is
+  // deliberately unchanged and still operates on these two local variables,
+  // so only the SOURCE of the seed moved, not any behavior.
+  //
+  // WRITES are intentionally untouched (B2's design; write-path consolidation
+  // is B6): triggerChange still sends productCodes + productMatrixConfig, and
+  // PATCH /api/config still validates and persists them exactly as before,
+  // rebuilding `products` from them via its write-hook.
+  const initialRegistry = resolveProductRegistry(config);
+  const [productCodes, setProductCodes] = useState<string[]>(initialRegistry.productCodes);
+  const [productMatrixConfig, setProductMatrixConfig] = useState<Record<string, ProductConfig>>(initialRegistry.productMatrixConfig);
 
   // Accordion state — expandedCodes (view-only expand/collapse) is
   // independent per row and can hold multiple codes at once, for side-by-
