@@ -229,7 +229,7 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
 
         {/* ── No Profile Configured Warning ─────────────────────────────────── */}
         {aqlCategories.length === 0 && (
-          <div className="p-3 rounded-lg border border-l-4 border-amber-500/20 border-l-amber-500 bg-amber-500/5 flex gap-3 text-sm">
+          <div className="p-3 rounded-lg border border-l-4 border-amber-500/30 border-l-amber-500 bg-amber-500/5 flex gap-3 text-sm">
             <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" strokeWidth={2} />
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-amber-400">NO INSPECTION PROFILE CONFIGURED</p>

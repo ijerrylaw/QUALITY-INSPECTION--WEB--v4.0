@@ -4115,6 +4115,59 @@ notes there is no Emerald "proposed" counterpart for this use, since the
 field's own live value already serves that role.
 → Original finding: this file's now-removed `AUDIT_REPORT.md` open item #23.
 
+### 18.10 (was open item #24) `OriginalValueNote`'s conditional-mount pattern caused a layout jiggle — Fixed 2026-08-14
+
+The note returned `null` (unmounting entirely) whenever the field was
+unchanged, so every edit that moved a field's value toward or away from its
+original caused sibling fields to reflow as the note's box appeared/
+disappeared.
+
+**Fix:** the note now stays mounted for the whole amendment session
+(toggling Tailwind's `invisible` instead of unmounting) once `hasOriginal`
+is true, so its height is always reserved and edits never shift sibling
+layout. Outside amendment mode (`hasOriginal` false) it still renders
+nothing at all — zero footprint, unchanged from prior behavior, so entry
+mode's layout is untouched.
+
+Already resolved in substance at the time it was flagged; formally closed
+here — no outstanding action.
+→ Original finding: this file's now-removed `AUDIT_REPORT.md` open item #24.
+
+### 18.11 (was open item #25) `UI_DESIGN_SYSTEM.md` §5.3's documented Amber border opacity didn't match live usage — Fixed 2026-08-18
+
+§5.3 documented `border-amber-500/30` for the Amber warning-banner border,
+but every live implementation of that banner pattern
+(`border border-l-4 border-amber-500/20 border-l-amber-500 bg-amber-500/5`)
+actually used `/20`. Noticed 2026-08-14 while formalizing the
+amendment-mode lot-number-change banner as a documented §5.3 example (§18's
+housekeeping pass above), then grep-confirmed the mismatch wasn't unique to
+that one banner — all live instances of the pattern used `/20`.
+
+**Decision:** fix the code to match the documented spec (`/30`), not the
+other way around — §5.3's value was treated as the source of truth.
+
+**Grep-reconfirmed before fixing (2026-08-18):** exactly 4 files, 6 banner
+instances, matched the exact pattern above (a 5th file,
+`HistoryFeed.tsx`, uses `border-amber-500/20` too but on an unrelated
+badge/pill/chip element, not this banner pattern — left untouched):
+- `frontend/src/pages/wizard/StepMetadata.tsx` — "PROFILE NOT USABLE" and
+  the amendment lot-number-change banner (2 instances)
+- `frontend/src/pages/wizard/StepDimensions.tsx` — "PRODUCT DIMENSIONS NOT
+  CONFIGURED" (1 instance)
+- `frontend/src/pages/wizard/StepDefects.tsx` — "NO INSPECTION PROFILE
+  CONFIGURED" (1 instance)
+- `frontend/src/pages/wizard/BatchEntry.tsx` — mirrors the same two
+  StepDimensions/StepDefects banners for SPREADSHEET mode (2 instances)
+
+All 6 changed from `border-amber-500/20` to `border-amber-500/30`, no other
+class changes. Pure color-value change, no logic touched. Sanity-checked
+live via computed styles (`getComputedStyle` on injected copies of both
+values in the running app) — opacity compiled correctly as 0.2 → 0.3; the
+banner's solid `border-l-amber-500` left-accent bar remains the dominant
+visual anchor, so the subtle ambient-border opacity increase doesn't read
+as broken.
+→ Original finding: this file's now-removed `AUDIT_REPORT.md` open item #25.
+
 ## 19. False-Positive "Unsaved Changes" Warning on Untouched Wizard Entry — Fixed 2026-08-14
 
 Navigating away from the Quality Entry Wizard (Single Entry / GUIDED mode)
