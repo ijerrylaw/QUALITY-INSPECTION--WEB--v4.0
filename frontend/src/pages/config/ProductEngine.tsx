@@ -46,8 +46,14 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
   const [productCodes, setProductCodes] = useState(config?.productCodes || []);
   const [productMatrixConfig, setProductMatrixConfig] = useState<Record<string, ProductConfig>>(config?.productMatrixConfig || {});
 
-  // Accordion state
-  const [expandedProduct, setExpandedProduct] = useState<string | null>(null);
+  // Accordion state — expandedCodes (view-only expand/collapse) is
+  // independent per row and can hold multiple codes at once, for side-by-
+  // side comparison. editingCode is deliberately a single value, not part
+  // of the set: only one code may be in Edit mode system-wide at a time
+  // (unchanged from before — see the Move/Edit/Delete disable logic below,
+  // which still gates on "is any code being edited", not per-row).
+  const [expandedCodes, setExpandedCodes] = useState<Set<string>>(new Set());
+  const [editingCode, setEditingCode] = useState<string | null>(null);
   const [expandedProductDraft, setExpandedProductDraft] = useState<ProductConfig | null>(null);
 
   // Delete confirmation state — every removal requires confirmation; locked
@@ -161,12 +167,17 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
   };
 
   const handleToggleExpandProduct = (code: string) => {
-    if (expandedProductDraft) return; // Prevent collapsing/expanding while editing
-    setExpandedProduct(expandedProduct === code ? null : code);
+    if (editingCode === code) return; // Don't collapse the row actively being edited
+    setExpandedCodes(prev => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code); else next.add(code);
+      return next;
+    });
   };
 
   const handleStartEditProduct = (code: string) => {
-    setExpandedProduct(code);
+    setEditingCode(code);
+    setExpandedCodes(prev => new Set(prev).add(code)); // ensure the row is visibly expanded while editing
     setExpandedProductDraft(JSON.parse(JSON.stringify(productMatrixConfig[code] || { dimensionDefs: [], sizes: {} })));
   };
 
@@ -190,12 +201,12 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
         triggerChange({ productMatrixConfig: updatedMatrix });
       }
     }
-    setExpandedProduct(null);
+    setEditingCode(null);
     setExpandedProductDraft(null);
   };
 
   const handleCancelProductConfig = () => {
-    setExpandedProduct(null);
+    setEditingCode(null);
     setExpandedProductDraft(null);
   };
 
@@ -385,14 +396,15 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
 
         <div className="flex flex-col">
           {productCodes.map((code, index) => {
-            const isExpanded = expandedProduct === code;
+            const isExpanded = expandedCodes.has(code);
+            const isEditingThis = editingCode === code;
             const needsSetup = isSetupIncomplete(code);
 
             return (
               <div key={code} className="border-b border-gray-800 last:border-b-0 group/prod">
                 {/* Row Header */}
-                <div 
-                  className={`h-12 px-4 flex items-center justify-between transition-colors ${isExpanded && !expandedProductDraft ? 'bg-surface' : 'cursor-pointer hover:bg-surface-light'}`}
+                <div
+                  className={`h-12 px-4 flex items-center justify-between transition-colors ${isExpanded && !isEditingThis ? 'bg-surface' : 'cursor-pointer hover:bg-surface-light'}`}
                   onClick={() => handleToggleExpandProduct(code)}
                 >
                   <div className="flex items-center gap-3">
@@ -422,8 +434,8 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                       </span>
                     ) : null}
                   </div>
-                  <div className={`flex items-center gap-1 transition-opacity ${(expandedProductDraft && isExpanded) ? 'opacity-100' : 'opacity-0 group-hover/prod:opacity-100'}`} onClick={e => e.stopPropagation()}>
-                    {(expandedProductDraft && isExpanded) ? (
+                  <div className={`flex items-center gap-1 transition-opacity ${isEditingThis ? 'opacity-100' : 'opacity-0 group-hover/prod:opacity-100'}`} onClick={e => e.stopPropagation()}>
+                    {isEditingThis ? (
                       <>
                         <button onClick={() => handleSaveProductConfig(code)} className="w-7 h-7 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-500/20 outline-none" title="Save">
                           <Check className="w-4 h-4" />
@@ -434,28 +446,28 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                       </>
                     ) : (
                       <>
-                        <button 
-                          onClick={() => moveProductCode(index, 'up')} 
-                          disabled={index === 0 || !!expandedProductDraft}
-                          className={`p-1.5 rounded-md transition-colors outline-none ${expandedProductDraft || index === 0 ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`} 
+                        <button
+                          onClick={() => moveProductCode(index, 'up')}
+                          disabled={index === 0 || !!editingCode}
+                          className={`p-1.5 rounded-md transition-colors outline-none ${editingCode || index === 0 ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
                           title="Move Up"
                         >
                           <ArrowUp className="w-4 h-4" />
                         </button>
-                        <button 
-                          onClick={() => moveProductCode(index, 'down')} 
-                          disabled={index === productCodes.length - 1 || !!expandedProductDraft}
-                          className={`p-1.5 rounded-md transition-colors outline-none ${expandedProductDraft || index === productCodes.length - 1 ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`} 
+                        <button
+                          onClick={() => moveProductCode(index, 'down')}
+                          disabled={index === productCodes.length - 1 || !!editingCode}
+                          className={`p-1.5 rounded-md transition-colors outline-none ${editingCode || index === productCodes.length - 1 ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
                           title="Move Down"
                         >
                           <ArrowDown className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => { if (!isCodeLocked(code)) handleStartEditProduct(code); }}
-                          disabled={!!expandedProductDraft || isCodeLocked(code)}
-                          className={`p-1.5 rounded-md transition-colors outline-none ${(expandedProductDraft || isCodeLocked(code)) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
+                          disabled={!!editingCode || isCodeLocked(code)}
+                          className={`p-1.5 rounded-md transition-colors outline-none ${(editingCode || isCodeLocked(code)) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
                           title={
-                            expandedProductDraft
+                            editingCode
                               ? 'Save active edits first'
                               : isCodeLocked(code)
                                 ? `Cannot edit — used by ${productCodeUsage[code]} submission${productCodeUsage[code] === 1 ? '' : 's'}`
@@ -466,10 +478,10 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                         </button>
                         <button
                           onClick={() => setConfirmDeleteCode(code)}
-                          disabled={!!expandedProductDraft || isCodeLocked(code)}
-                          className={`p-1.5 rounded-md transition-colors outline-none ${(expandedProductDraft || isCodeLocked(code)) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-rose-400 hover:bg-rose-500/10'}`}
+                          disabled={!!editingCode || isCodeLocked(code)}
+                          className={`p-1.5 rounded-md transition-colors outline-none ${(editingCode || isCodeLocked(code)) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-rose-400 hover:bg-rose-500/10'}`}
                           title={
-                            expandedProductDraft
+                            editingCode
                               ? 'Save active edits first'
                               : isCodeLocked(code)
                                 ? `Cannot delete — used by ${productCodeUsage[code]} submission${productCodeUsage[code] === 1 ? '' : 's'}`
@@ -485,10 +497,10 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
 
                 {/* Accordion Body */}
                 {isExpanded && (
-                  <ProductConfigAccordion 
-                    config={expandedProductDraft || productMatrixConfig[code] || { dimensionDefs: [], sizes: {} }}
-                    onChange={expandedProductDraft ? setExpandedProductDraft : () => {}}
-                    isReadOnly={!expandedProductDraft}
+                  <ProductConfigAccordion
+                    config={isEditingThis ? (expandedProductDraft ?? { dimensionDefs: [], sizes: {} }) : (productMatrixConfig[code] || { dimensionDefs: [], sizes: {} })}
+                    onChange={isEditingThis ? setExpandedProductDraft : () => {}}
+                    isReadOnly={!isEditingThis}
                   />
                 )}
               </div>
