@@ -93,3 +93,65 @@ export interface ProductEntry {
 
 /** AppConfig.products — JSON: Record<productCode, ProductEntry>. */
 export type ProductsMap = Record<string, ProductEntry>;
+
+/** A code registered with no matrix entry yet — never fabricated data. */
+const EMPTY_MATRIX: ProductConfig = { dimensionDefs: [], sizes: {} };
+
+/** The six attributes, unset. The legacy structures can never supply these. */
+const NULL_ATTRIBUTES: ProductAttributes = {
+  material: null,
+  weight: null,
+  color: null,
+  innerSurface: null,
+  length: null,
+  texture: null,
+};
+
+/**
+ * Rebuilds the consolidated `products` map from the three legacy structures.
+ *
+ * THE single canonical implementation, deliberately shared by both callers:
+ *   - PATCH /api/config's write-hook (config.routes.ts), which keeps
+ *     `products` in sync automatically on every real config write.
+ *   - scripts/migrate-products-field.ts, the manual catch-up/backfill tool.
+ *
+ * Keeping one implementation is the whole point: two copies of this logic
+ * drifting apart would reintroduce exactly the class of three-way-drift bug
+ * this consolidation exists to make structurally impossible.
+ *
+ * `products` is a pure MIRROR — it derives entirely from whatever the legacy
+ * structures contain after all existing validation and lock-checks have
+ * passed. It never gates, relaxes, or second-guesses those checks.
+ *
+ * Attributes are the one exception to "rebuild from source": they cannot be
+ * derived from the legacy structures at all (nothing there holds them), so an
+ * existing entry's attributes are PRESERVED verbatim. Rebuilding them would
+ * silently wipe the six-attribute data the pilot/batch2 imports wrote for 16
+ * of the 17 live codes.
+ *
+ * @param codes         Final productCodes[] — defines the keyset exactly.
+ * @param matrix        Final productMatrixConfig.
+ * @param profileMap    Final productProfileMap.
+ * @param existing      Current products map, read only for attribute preservation.
+ */
+export function buildProductsMap(
+  codes: string[],
+  matrix: Record<string, ProductConfig>,
+  profileMap: Record<string, string>,
+  existing: ProductsMap,
+): ProductsMap {
+  const products: ProductsMap = {};
+
+  // Keyed strictly off productCodes[] — a code dropped from the registry
+  // disappears from `products` too, and a stale matrix/profileMap entry for
+  // an unregistered code is never resurrected into it.
+  for (const code of codes) {
+    products[code] = {
+      attributes: existing[code]?.attributes ?? NULL_ATTRIBUTES,
+      matrix: matrix[code] ?? EMPTY_MATRIX,
+      profileId: profileMap[code] ?? null,
+    };
+  }
+
+  return products;
+}

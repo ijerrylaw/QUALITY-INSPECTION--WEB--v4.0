@@ -24,7 +24,8 @@
 
 import 'dotenv/config';
 import prisma from '../src/lib/prismaClient';
-import type { ProductEntry, ProductAttributes, ProductConfig, ProductsMap } from '../src/lib/productEntry';
+import { buildProductsMap } from '../src/lib/productEntry';
+import type { ProductConfig, ProductsMap } from '../src/lib/productEntry';
 
 function safeParseJSON<T>(raw: string | null | undefined, fallback: T): T {
   if (!raw) return fallback;
@@ -34,16 +35,6 @@ function safeParseJSON<T>(raw: string | null | undefined, fallback: T): T {
     return fallback;
   }
 }
-
-const EMPTY_MATRIX: ProductConfig = { dimensionDefs: [], sizes: {} };
-const NULL_ATTRIBUTES: ProductAttributes = {
-  material: null,
-  weight: null,
-  color: null,
-  innerSurface: null,
-  length: null,
-  texture: null,
-};
 
 async function main() {
   const config = await prisma.appConfig.findUnique({ where: { id: '1' } });
@@ -59,31 +50,25 @@ async function main() {
 
   console.log(`[migrate-products-field] Found ${productCodes.length} product code(s) in productCodes[]:`, productCodes);
 
-  const products: ProductsMap = {};
+  // Warn about codes with no matrix entry — buildProductsMap() substitutes an
+  // empty default (never fabricated data), but that is worth surfacing here.
   let missingMatrixCount = 0;
-
   for (const code of productCodes) {
-    const matrix = productMatrixConfig[code];
-    if (!matrix) {
+    if (!productMatrixConfig[code]) {
       missingMatrixCount++;
       console.warn(`[migrate-products-field] '${code}' has no productMatrixConfig entry — using empty default, not fabricated data.`);
     }
-
-    const profileId = productProfileMap[code] ?? null;
-
-    // Preserve any attributes a later (pilot-import) write already set for
-    // this code — this script only ever supplies null attributes itself,
-    // since the old three structures have no attribute data to migrate.
-    const preservedAttributes = existingProducts[code]?.attributes ?? NULL_ATTRIBUTES;
-
-    const entry: ProductEntry = {
-      attributes: preservedAttributes,
-      matrix: matrix ?? EMPTY_MATRIX,
-      profileId,
-    };
-
-    products[code] = entry;
   }
+
+  // Shares ONE canonical rebuild with PATCH /api/config's write-hook
+  // (see buildProductsMap in src/lib/productEntry.ts) — this script and the
+  // live write path can no longer drift apart in how they derive `products`.
+  const products: ProductsMap = buildProductsMap(
+    productCodes,
+    productMatrixConfig,
+    productProfileMap,
+    existingProducts,
+  );
 
   await prisma.appConfig.update({
     where: { id: '1' },

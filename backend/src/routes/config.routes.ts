@@ -13,6 +13,8 @@ import { Router, Request, Response } from 'express';
 import prisma from '../lib/prismaClient';
 import type { AppConfig } from '../../generated/prisma/client';
 import { requireRole } from '../middleware/auth';
+import { buildProductsMap } from '../lib/productEntry';
+import type { ProductsMap } from '../lib/productEntry';
 
 const router = Router();
 
@@ -247,9 +249,20 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
     const payload = req.body || {};
     const updateData: Record<string, any> = {};
 
-    // Shared across the two lock-related checks below — only fetched once.
-    const needsCurrentConfig = Array.isArray(payload.productCodes) || payload.productMatrixConfig !== undefined;
-    const currentConfig = needsCurrentConfig
+    // True when this PATCH touches any of the three legacy product structures —
+    // which is also exactly when the `products` mirror below has to be rebuilt.
+    const touchesProductStructures =
+      Array.isArray(payload.productCodes) ||
+      payload.productMatrixConfig !== undefined ||
+      payload.productProfileMap !== undefined;
+
+    // Shared across the two lock-related checks and the `products` write-hook
+    // below — only fetched once. productProfileMap was added to the condition
+    // for the write-hook's benefit (the two lock checks don't consult it);
+    // both of those checks are independently gated by their own `if` and read
+    // through `currentConfig?.` with a parse fallback, so widening when this
+    // is fetched cannot change their behavior.
+    const currentConfig = touchesProductStructures
       ? await prisma.appConfig.findUnique({ where: { id: '1' } })
       : null;
 
@@ -351,6 +364,44 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
           updateData[field] = JSON.stringify(payload[field]);
         }
       }
+    }
+
+    // ── Keep AppConfig.products in sync (Session B2) ──────────────────────────
+    // The consolidated per-product-code structure (see lib/productEntry.ts) had
+    // no automated write path: it was only ever as fresh as the last manual
+    // re-run of scripts/migrate-products-field.ts, so any edit made through
+    // this endpoint in between runs silently drifted it out of sync. This hook
+    // closes that gap.
+    //
+    // Deliberately placed AFTER every existing validation and lock check above
+    // (delete-safety 409, locked-code matrix diff 409, non-numeric target 400)
+    // and AFTER the JSON_FIELDS loop — so it can only ever run on a payload
+    // that has already fully passed, and mirrors the exact values those checks
+    // approved. It adds no rules of its own and cannot admit a write the
+    // legacy structures would have rejected.
+    //
+    // Atomic by construction: this only adds a field to `updateData`, which the
+    // single upsert below writes in one statement. `products` can never land
+    // without the legacy structures it mirrors, or vice versa.
+    if (touchesProductStructures) {
+      // Read the FINAL values — what this PATCH is actually about to persist.
+      // updateData holds the already-normalized JSON string for any of the
+      // three present in the payload; anything absent keeps its stored value.
+      const finalCodes = safeParseJSON<string[]>(
+        updateData['productCodes'] ?? currentConfig?.productCodes, [],
+      );
+      const finalMatrix = safeParseJSON<Record<string, any>>(
+        updateData['productMatrixConfig'] ?? currentConfig?.productMatrixConfig, {},
+      );
+      const finalProfileMap = safeParseJSON<Record<string, string>>(
+        updateData['productProfileMap'] ?? currentConfig?.productProfileMap, {},
+      );
+      // Read only so per-code attributes survive — they have no legacy source.
+      const existingProducts = safeParseJSON<ProductsMap>(currentConfig?.products, {});
+
+      updateData['products'] = JSON.stringify(
+        buildProductsMap(finalCodes, finalMatrix, finalProfileMap, existingProducts),
+      );
     }
 
     const updatedConfig = await prisma.appConfig.upsert({
