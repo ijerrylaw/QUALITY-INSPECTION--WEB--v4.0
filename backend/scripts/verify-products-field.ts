@@ -90,8 +90,22 @@ async function main() {
     const expectedProfileId = productProfileMap[code] ?? null;
     report(entry.profileId === expectedProfileId, `profileId matches productProfileMap['${code}'] ?? null (${JSON.stringify(expectedProfileId)})`);
 
-    const allAttrsNull = Object.values(entry.attributes).every((v) => v === null);
-    report(allAttrsNull, `attributes are all null (no six-attribute data existed to migrate)`);
+    // Attributes are NOT sourced from the three legacy structures (they can't
+    // be — see productEntry.ts), so there is nothing to compare them against
+    // here. This originally asserted "all null", which was true only in
+    // Session A before any code had attribute data; the pilot/batch2 imports
+    // have since populated 16 of 17 codes, which made a healthy database
+    // report 16 failures and exit non-zero. What actually matters for
+    // migration safety is the SHAPE — all six keys present, each either a
+    // string or null — since migrate-products-field.ts preserves this object
+    // verbatim rather than rebuilding it.
+    const ATTR_KEYS = ['material', 'weight', 'color', 'innerSurface', 'length', 'texture'] as const;
+    const attrs = entry.attributes as unknown as Record<string, unknown>;
+    const shapeOk = attrs !== null && typeof attrs === 'object'
+      && ATTR_KEYS.every((k) => k in attrs && (attrs[k] === null || typeof attrs[k] === 'string'))
+      && Object.keys(attrs).length === ATTR_KEYS.length;
+    const populated = ATTR_KEYS.filter((k) => attrs?.[k] !== null).length;
+    report(shapeOk, `attributes well-formed (six keys, string|null) — ${populated}/6 populated`);
   }
 
   console.log('\n=== Source-structure integrity (must be completely untouched) ===\n');
