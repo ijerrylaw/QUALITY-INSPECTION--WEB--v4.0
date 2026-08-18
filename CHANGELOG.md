@@ -4103,7 +4103,7 @@ field's annotation; §3.4's untouched/touched pair, above, is prefill-trust
 state, not amendment-change state). Resolved provisionally with Rose
 (`text-rose-400`), reusing §4.12's existing "Original" convention rather
 than inventing a new color, deliberately not Cyan/Info (already claimed on
-the same screen for the changed-field highlight, finding #21 below).
+the same screen for the changed-field highlight — see §18.12 below).
 
 **Resolved by extending §4.12, not a new section:** added a new bullet to
 §4.12 documenting this as a related-but-distinct use of the same Rose
@@ -4167,6 +4167,83 @@ banner's solid `border-l-amber-500` left-accent bar remains the dominant
 visual anchor, so the subtle ambient-border opacity increase doesn't read
 as broken.
 → Original finding: this file's now-removed `AUDIT_REPORT.md` open item #25.
+
+### 18.12 (was open item #21) `UI_DESIGN_SYSTEM.md` had no token for the amendment-mode changed-field highlight — Resolved 2026-08-18
+
+**Note on this section's original task framing:** the task that produced this
+closure described finding #21 as covering the "Live Re-Grade — Not the
+Original Result" banner (`HistoryFeed.tsx`, finding #18's `gradingSnapshot`
+work). That description didn't match this item's actual text below, and
+`HistoryFeed.tsx:447`'s own code comment ties that banner explicitly to
+finding #18, not #21 — and §5.3's Info/Cyan entry already documented that
+banner's use case before this pass (added in commit `ae20947`). This
+closure instead documents finding #21's real, as-written subject: the
+amendment-mode changed-field highlight below. Finding #18 and its Live
+Re-Grade banner remain open, untouched by this pass.
+
+No `UI_DESIGN_SYSTEM.md` token existed for "a live editable field's value
+differs from its amendment-original value," needed for amendment mode's
+field-level changed-highlight (`StepMetadata.tsx`, `StepDimensions.tsx`,
+`StepDefects.tsx`, 2026-08-14). At the time, checked Chapter 1 core tokens,
+§3.1–3.7 form controls, §4.8 badges, §4.12 diff coloring, and §5.1–5.3
+alerts — nothing fit. The two closest candidates were both explicitly ruled
+out: §4.12's Rose=Original/Emerald=Proposed diff pair is scoped to the
+read-only two-column diff viewer (`JsonViewer.tsx`, Approvals Queue /
+Pre-Submit Summary), not a live-editable input; §3.4's untouched/touched
+pair (§18.8 above) is prefill-trust state, a different semantic.
+
+**Resolved provisionally at implementation time (2026-08-14):** reused
+Cyan/Info (`bg-brand-secondary/5 border-brand-secondary/50`) — the closest
+existing semantic, already used for informational/provenance signals (§5.3
+Info, §4.8D presence dots). Applied consistently across all three step
+components via each field's own `hasFieldChanged()` comparison
+(`StepMetadata.tsx`'s `changedFieldClasses()` helper; `StepDimensions.tsx`
+and `StepDefects.tsx` each with their own local `isChanged` check).
+
+**Formalized 2026-08-18:** added a new bullet to `UI_DESIGN_SYSTEM.md` §5.3,
+directly beneath the existing Info/Cyan entry, documenting this as a second,
+structurally distinct use of the same token — a per-field border highlight,
+not the section's `p-3 rounded-lg border-l-4` alert-banner geometry.
+Live-checked via `getComputedStyle` on an injected copy of the exact class
+string in the running app: `bg-brand-secondary/5 border-brand-secondary/50`
+compiled to background opacity 0.05 / border opacity 0.5 on the Cyan
+(brand-secondary) hue, confirming the documented values match what actually
+renders.
+→ Original finding: this file's now-removed `AUDIT_REPORT.md` open item #21.
+
+### 18.13 (was open item #22) `AI_RULES.md`'s "One Complete File per Turn" rule was exceeded for the amendment-mode changed-field highlight — Closed, historical note only, 2026-08-18
+
+**Note on this section's original task framing:** the task that produced this
+closure described finding #22 as being about commit `8deac5a` (the
+`composeFullLotNumber` blank-sequence fix, §18.7 above) touching multiple
+files. That commit's own message states it "ended up single-file"
+(`frontend/src/utils/lotNumber.ts` only — `BatchEntry.tsx` needed no
+changes), so that specific claim doesn't hold for `8deac5a` either. This
+closure instead documents finding #22's real, as-written subject below,
+which is unrelated to `8deac5a` — it's about the same 2026-08-14
+changed-field-highlight feature as §18.12 above, not the lot-number fix.
+
+**What happened:** implementing the amendment-mode changed-field highlight
+(§18.12 above) required editing `StepMetadata.tsx`, `StepDimensions.tsx`,
+and `StepDefects.tsx` in the same turn — one component per wizard step, all
+three explicitly required by the feature's own verification criteria (one
+field changed-highlight test per step). This is on its face against
+`AI_RULES.md`'s "One Complete File per Turn" rule.
+
+**Why it was justified at the time:** unlike the entry-mode sequence-number
+fix (§3.4/§18.8, where a single-file workaround was found), this feature is
+inherently cross-cutting — the same visual treatment and the same
+`hasFieldChanged()` comparison had to land in all three step components with
+no single-file decomposition available. Confirmed with the user before
+proceeding, rather than silently breaking the rule or arbitrarily picking
+one file to "count."
+
+**Decision on closure (2026-08-18):** closed as a historical note only.
+`AI_RULES.md` is deliberately NOT amended with a standing exception — this
+was a one-time, confirmed-with-the-user judgment call for one specific
+cross-cutting feature, not a precedent for a general carve-out to the
+one-file-per-turn rule.
+→ Original finding: this file's now-removed `AUDIT_REPORT.md` open item #22.
 
 ## 19. False-Positive "Unsaved Changes" Warning on Untouched Wizard Entry — Fixed 2026-08-14
 

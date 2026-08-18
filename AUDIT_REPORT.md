@@ -217,39 +217,3 @@ with its full original context, reasoning, and verification trail.
     to have graded, visible directly in the UI with zero indication the
     displayed breakdown may no longer match what was true at submission time.
 
-21. **No `UI_DESIGN_SYSTEM.md` token exists for "live editable field's value
-    differs from its amendment-original value."** Needed for amendment
-    mode's field-level changed-highlight (`StepMetadata.tsx`,
-    `StepDimensions.tsx`, `StepDefects.tsx`, 2026-08-14). Checked Chapter 1
-    core tokens, §3.1–3.7 form controls, §4.8 badges, §4.12 diff coloring,
-    and §5.1–5.3 alerts — nothing fits. The two closest candidates were both
-    explicitly ruled out: §4.12's Rose=Original/Emerald=Proposed diff pair
-    is scoped to the read-only two-column diff viewer (`JsonViewer.tsx`,
-    Approvals Queue / Pre-Submit Summary), not a live-editable input; §3.4's
-    `text-muted opacity-80`→`text-primary` pair (reused for the now-closed
-    finding #20 — see `CHANGELOG.md` §18.8) is a different semantic —
-    prefill-trust state, not amendment-change state.
-
-    **Resolved for this implementation, pending formal doc addition:**
-    reused Cyan/Info (`bg-brand-secondary/5 border-brand-secondary/50`) —
-    the closest existing semantic, already used for informational/
-    provenance signals (§5.3 Info, §4.8D presence dots). Applied consistently
-    across all three step components via each field's own
-    `hasFieldChanged()` comparison. **Next step:** ratify this as a formal
-    token in `UI_DESIGN_SYSTEM.md` (e.g. a new §5.3-adjacent or §3.x entry
-    for "Amendment Changed Field"), or replace with a purpose-picked color if
-    Cyan/Info's reuse turns out to read as ambiguous once seen live.
-
-22. **`AI_RULES.md`'s "One Complete File per Turn" rule was necessarily
-    exceeded for the amendment-mode changed-field highlight (2026-08-14).**
-    Unlike the entry-mode sequence-number fix (single-file workaround
-    found), this feature is inherently cross-cutting: the same visual
-    treatment and the same `hasFieldChanged()` comparison had to land in
-    `StepMetadata.tsx`, `StepDimensions.tsx`, and `StepDefects.tsx` — one
-    component per wizard step, all three explicitly required by the task's
-    own verification criteria (one field changed-highlight test per step).
-    No single-file decomposition existed. Confirmed with the user before
-    proceeding rather than silently breaking the rule or arbitrarily
-    picking one file to "count." Noting here so the exception is visible
-    in the same place other rule-tension findings live, not just in this
-    session's chat history.
