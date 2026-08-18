@@ -73,6 +73,68 @@ async function getProductCodeUsage(): Promise<Record<string, number>> {
 }
 
 /**
+ * A clean numeric string: digits and an optional single decimal point (e.g.
+ * '105', '105.5', '.5'), or empty/unset (a size row may legitimately have no
+ * target yet — see hasUsableProductMatrix()). Mirrors what the frontend's
+ * formatTarget() in ProductConfigAccordion.tsx can actually produce now that
+ * it strips non-numeric characters on keystroke — this is the server-side
+ * backstop for the same fields in case a client bypasses that UI.
+ */
+const NUMERIC_TARGET_RE = /^\d*\.?\d*$/;
+
+function isValidNumericTarget(value: unknown): boolean {
+  if (value === undefined || value === null || value === '') return true;
+  if (typeof value !== 'string') return false;
+  return NUMERIC_TARGET_RE.test(value) && /\d/.test(value);
+}
+
+interface InvalidTargetField {
+  productCode: string;
+  size: string;
+  field: string;
+  value: unknown;
+}
+
+/**
+ * Validates weightTarget/lengthTarget/palmWidthTarget and dynamic-dimension
+ * minSpec across every product/size in an incoming productMatrixConfig
+ * payload — the four fields dimensionEvaluator.ts reads directly as grading
+ * thresholds (see Product Engine discovery report §3). Tolerance fields are
+ * intentionally out of scope here: they already went through the frontend's
+ * formatTolerance() sanitizer before this validation existed and are not
+ * read the same way (they also carry the 'MIN' sentinel, which this numeric
+ * check would wrongly reject).
+ */
+function validateProductMatrixConfig(matrix: unknown): InvalidTargetField[] {
+  const errors: InvalidTargetField[] = [];
+  if (!matrix || typeof matrix !== 'object') return errors;
+
+  for (const [productCode, conf] of Object.entries(matrix as Record<string, any>)) {
+    const sizes = conf?.sizes;
+    if (!sizes || typeof sizes !== 'object') continue;
+
+    for (const [size, sizeEntry] of Object.entries(sizes as Record<string, any>)) {
+      for (const field of ['weightTarget', 'lengthTarget', 'palmWidthTarget'] as const) {
+        const value = sizeEntry?.[field];
+        if (!isValidNumericTarget(value)) errors.push({ productCode, size, field, value });
+      }
+
+      const dimensions = sizeEntry?.dimensions;
+      if (dimensions && typeof dimensions === 'object') {
+        for (const [dimId, dimValue] of Object.entries(dimensions as Record<string, any>)) {
+          const minSpec = (dimValue as any)?.minSpec;
+          if (!isValidNumericTarget(minSpec)) {
+            errors.push({ productCode, size, field: `dimensions.${dimId}.minSpec`, value: minSpec });
+          }
+        }
+      }
+    }
+  }
+
+  return errors;
+}
+
+/**
  * Formats a raw Prisma AppConfig database record into a clean, parsed DTO.
  */
 export function formatAppConfig(config: AppConfig) {
@@ -194,6 +256,23 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
           });
           return;
         }
+      }
+    }
+
+    // Reject non-numeric target-field values (weightTarget/lengthTarget/
+    // palmWidthTarget/dimension minSpec) — these feed dimensionEvaluator.ts's
+    // grading math directly, unlike the six SKU dictionary attributes. The
+    // frontend now strips non-numeric characters on keystroke (see
+    // ProductConfigAccordion.tsx's formatTarget), but PATCH /api/config has
+    // no other guard against a client that bypasses the UI entirely.
+    if (payload.productMatrixConfig !== undefined) {
+      const invalidFields = validateProductMatrixConfig(payload.productMatrixConfig);
+      if (invalidFields.length > 0) {
+        res.status(400).json({
+          error: 'productMatrixConfig contains non-numeric target value(s)',
+          invalidFields,
+        });
+        return;
       }
     }
 

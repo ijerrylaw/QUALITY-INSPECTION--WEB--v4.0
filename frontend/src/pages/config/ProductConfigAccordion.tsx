@@ -34,6 +34,16 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
     return upper.replace(/[^0-9.]/g, '');
   };
 
+  /**
+   * Same on-keystroke character-stripping as formatTolerance(), minus the
+   * 'MIN' sentinel (targets are always numeric, never that literal). Applied
+   * to weightTarget/lengthTarget/palmWidthTarget and dynamic-dimension
+   * minSpec — previously unvalidated, unlike their Tolerance siblings, which
+   * let a stray non-numeric character (e.g. "105m") through into a value
+   * that feeds dimensionEvaluator.ts's grading math untouched.
+   */
+  const formatTarget = (val: string) => val.replace(/[^0-9.]/g, '');
+
   const applyDecimalsToValue = (v: string, dec: number) => {
     if (!v || v.toUpperCase() === 'MIN') return v;
     const n = parseFloat(v);
@@ -252,7 +262,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         type="text"
                         value={wgtTarget}
                         disabled={!isActive || isReadOnly}
-                        onChange={e => handleUpdateFixed(size, 'weightTarget', e.target.value)}
+                        onChange={e => handleUpdateFixed(size, 'weightTarget', formatTarget(e.target.value))}
                         className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
                             ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary' 
@@ -303,7 +313,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         type="text"
                         value={lenTarget}
                         disabled={!isActive || isReadOnly}
-                        onChange={e => handleUpdateFixed(size, 'lengthTarget', e.target.value)}
+                        onChange={e => handleUpdateFixed(size, 'lengthTarget', formatTarget(e.target.value))}
                         className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
                             ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary' 
@@ -354,7 +364,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         type="text"
                         value={palmTarget}
                         disabled={!isActive || isReadOnly}
-                        onChange={e => handleUpdateFixed(size, 'palmWidthTarget', e.target.value)}
+                        onChange={e => handleUpdateFixed(size, 'palmWidthTarget', formatTarget(e.target.value))}
                         className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
                             ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary' 
@@ -469,7 +479,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                             type="text"
                             value={dimVal.minSpec}
                             disabled={!isActive || isReadOnly}
-                            onChange={e => handleUpdateDimensionValue(size, def.id, 'minSpec', e.target.value)}
+                            onChange={e => handleUpdateDimensionValue(size, def.id, 'minSpec', formatTarget(e.target.value))}
                             className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
                               isActive
                                 ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary'
