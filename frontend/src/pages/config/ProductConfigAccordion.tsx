@@ -50,6 +50,26 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
     return isNaN(n) ? v : n.toFixed(dec);
   };
 
+  /**
+   * Snapshots the value present when a field is focused, so onBlur can tell
+   * "the operator actually typed something this session" apart from "they
+   * just clicked in and out" — same class of fix as wizardDirty.ts's
+   * sequenceTouched (see commit 8b116d8), applied here because blur-time
+   * rounding was firing unconditionally, silently reformatting an already-
+   * stored value (e.g. "3.2" -> "3.20") on a field nobody edited and
+   * marking the whole page dirty as a side effect of merely viewing it.
+   */
+  const handleFocusSnapshot = (e: React.FocusEvent<HTMLInputElement>) => {
+    e.target.dataset.prevValue = e.target.value;
+  };
+
+  /** Only rounds — and only calls `apply` — if this field's value actually changed since focus. */
+  const handleRoundOnBlur = (e: React.FocusEvent<HTMLInputElement>, dec: number, apply: (v: string) => void) => {
+    if (e.target.value !== e.target.dataset.prevValue) {
+      apply(applyDecimalsToValue(e.target.value, dec));
+    }
+  };
+
   // ── Fixed-row format change ──────────────────────────────────────────────────
   const handleFixedRowFormatChange = (
     decimalField: 'weightDecimals' | 'lengthDecimals' | 'palmWidthDecimals',
@@ -263,7 +283,8 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={wgtTarget}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'weightTarget', formatTarget(e.target.value))}
-                        onBlur={e => handleUpdateFixed(size, 'weightTarget', applyDecimalsToValue(e.target.value, config.weightDecimals ?? 0))}
+                        onFocus={handleFocusSnapshot}
+                        onBlur={e => handleRoundOnBlur(e, config.weightDecimals ?? 0, v => handleUpdateFixed(size, 'weightTarget', v))}
                         className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
                             ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary' 
@@ -277,7 +298,8 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={wgtTol}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'weightTolerance', formatTolerance(e.target.value))}
-                        onBlur={e => handleUpdateFixed(size, 'weightTolerance', applyDecimalsToValue(e.target.value, config.weightDecimals ?? 0))}
+                        onFocus={handleFocusSnapshot}
+                        onBlur={e => handleRoundOnBlur(e, config.weightDecimals ?? 0, v => handleUpdateFixed(size, 'weightTolerance', v))}
                         className={`w-full h-9 rounded-md px-1 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
                             ? `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${wgtTol.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}` 
@@ -316,7 +338,8 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={lenTarget}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'lengthTarget', formatTarget(e.target.value))}
-                        onBlur={e => handleUpdateFixed(size, 'lengthTarget', applyDecimalsToValue(e.target.value, config.lengthDecimals ?? 0))}
+                        onFocus={handleFocusSnapshot}
+                        onBlur={e => handleRoundOnBlur(e, config.lengthDecimals ?? 0, v => handleUpdateFixed(size, 'lengthTarget', v))}
                         className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
                             ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary' 
@@ -330,7 +353,8 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={lenTol}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'lengthTolerance', formatTolerance(e.target.value))}
-                        onBlur={e => handleUpdateFixed(size, 'lengthTolerance', applyDecimalsToValue(e.target.value, config.lengthDecimals ?? 0))}
+                        onFocus={handleFocusSnapshot}
+                        onBlur={e => handleRoundOnBlur(e, config.lengthDecimals ?? 0, v => handleUpdateFixed(size, 'lengthTolerance', v))}
                         className={`w-full h-9 rounded-md px-1 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
                             ? `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${lenTol.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}` 
@@ -369,7 +393,8 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={palmTarget}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'palmWidthTarget', formatTarget(e.target.value))}
-                        onBlur={e => handleUpdateFixed(size, 'palmWidthTarget', applyDecimalsToValue(e.target.value, config.palmWidthDecimals ?? 0))}
+                        onFocus={handleFocusSnapshot}
+                        onBlur={e => handleRoundOnBlur(e, config.palmWidthDecimals ?? 0, v => handleUpdateFixed(size, 'palmWidthTarget', v))}
                         className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
                             ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary' 
@@ -383,7 +408,8 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         value={palmTol}
                         disabled={!isActive || isReadOnly}
                         onChange={e => handleUpdateFixed(size, 'palmWidthTolerance', formatTolerance(e.target.value))}
-                        onBlur={e => handleUpdateFixed(size, 'palmWidthTolerance', applyDecimalsToValue(e.target.value, config.palmWidthDecimals ?? 0))}
+                        onFocus={handleFocusSnapshot}
+                        onBlur={e => handleRoundOnBlur(e, config.palmWidthDecimals ?? 0, v => handleUpdateFixed(size, 'palmWidthTolerance', v))}
                         className={`w-full h-9 rounded-md px-1 text-sm font-mono text-center outline-none transition-all ${
                           isActive 
                             ? `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${palmTol.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}` 
@@ -486,7 +512,8 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                             value={dimVal.minSpec}
                             disabled={!isActive || isReadOnly}
                             onChange={e => handleUpdateDimensionValue(size, def.id, 'minSpec', formatTarget(e.target.value))}
-                            onBlur={e => handleUpdateDimensionValue(size, def.id, 'minSpec', applyDecimalsToValue(e.target.value, def.decimals ?? 0))}
+                            onFocus={handleFocusSnapshot}
+                            onBlur={e => handleRoundOnBlur(e, def.decimals ?? 0, v => handleUpdateDimensionValue(size, def.id, 'minSpec', v))}
                             className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
                               isActive
                                 ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary'
@@ -500,7 +527,8 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                             value={dimVal.tolerance}
                             disabled={!isActive || isReadOnly}
                             onChange={e => handleUpdateDimensionValue(size, def.id, 'tolerance', formatTolerance(e.target.value))}
-                            onBlur={e => handleUpdateDimensionValue(size, def.id, 'tolerance', applyDecimalsToValue(e.target.value, def.decimals ?? 0))}
+                            onFocus={handleFocusSnapshot}
+                            onBlur={e => handleRoundOnBlur(e, def.decimals ?? 0, v => handleUpdateDimensionValue(size, def.id, 'tolerance', v))}
                             className={`w-full h-9 rounded-md px-1 text-sm font-mono text-center outline-none transition-all ${
                               isActive
                                 ? `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${dimVal.tolerance.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}`

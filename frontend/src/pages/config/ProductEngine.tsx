@@ -171,14 +171,24 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
   };
 
   const handleSaveProductConfig = (code: string) => {
+    // Only stamp a new lastAmended / push a change if something in the
+    // draft actually differs from what's stored — previously this ran
+    // unconditionally on every Save click, so opening a product to look at
+    // it and clicking the checkmark without editing anything still
+    // rewrote lastAmended and marked the whole config page dirty (same
+    // class of false-positive already fixed for the wizard in 8b116d8).
     if (expandedProductDraft) {
-      const draftWithTime = { 
-        ...expandedProductDraft, 
-        lastAmended: new Date().toISOString() 
-      };
-      const updatedMatrix = { ...productMatrixConfig, [code]: draftWithTime };
-      setProductMatrixConfig(updatedMatrix);
-      triggerChange({ productMatrixConfig: updatedMatrix });
+      const stored = productMatrixConfig[code] || { dimensionDefs: [], sizes: {} };
+      const actuallyChanged = JSON.stringify(expandedProductDraft) !== JSON.stringify(stored);
+      if (actuallyChanged) {
+        const draftWithTime = {
+          ...expandedProductDraft,
+          lastAmended: new Date().toISOString()
+        };
+        const updatedMatrix = { ...productMatrixConfig, [code]: draftWithTime };
+        setProductMatrixConfig(updatedMatrix);
+        triggerChange({ productMatrixConfig: updatedMatrix });
+      }
     }
     setExpandedProduct(null);
     setExpandedProductDraft(null);
