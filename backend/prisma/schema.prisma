@@ -350,6 +350,18 @@ model AppConfig {
   defectDefinitions   String   @default("[]")
   inspectionProfiles  String   @default("[]")
 
+  // --- Consolidated Product Record (additive, Session A — see Product Engine
+  // discovery report §2/§5 and the productProfileMap corrupted-key incident
+  // in CHANGELOG.md). Migrates the three independently-keyed structures
+  // above (productCodes / productMatrixConfig / productProfileMap) plus the
+  // six SKU dictionary attributes (previously discarded after composing the
+  // code string) into ONE per-code record, eliminating the three-way drift
+  // risk. Additive only: nothing reads from this field yet — the three
+  // structures above remain the live source of truth until a later session
+  // rewires call sites onto this one and removes them. ---
+  /// JSON: Record<productCode, ProductEntry> — see DATA_SCHEMAS_AND_TYPES.md §3.
+  products            String   @default("{}")
+
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 

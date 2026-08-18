@@ -282,3 +282,49 @@ export interface SizeConfig {
   dimensions: Record<string, { minSpec: string; tolerance: string }>;
 }
 ```
+
+### 3.1 Consolidated Product Record (`AppConfig.products`) — additive, not yet live
+
+**Not read by any call site yet.** Session A of a multi-session fix for the
+drift risk of keeping one product code's data split across three
+independently-keyed structures above (`productCodes[]` /
+`productMatrixConfig` / `productProfileMap`) — a real corrupted-key
+incident on `productProfileMap` is documented in `CHANGELOG.md`. This new
+field consolidates all three, plus the six SKU dictionary attributes
+(previously discarded after composing the code string — see the Product
+Engine discovery report), into one per-code record. `productCodes` /
+`productMatrixConfig` / `productProfileMap` remain the live source of
+truth for every existing call site until a later session rewires reads
+onto `products` and removes them. Backend type source of truth:
+`backend/src/lib/productEntry.ts`.
+
+```typescript
+export interface AppConfig {
+  // ...all fields above, plus:
+  /** JSON: Record<productCode, ProductEntry> — see §3.1. Additive only, not yet consumed anywhere. */
+  products?: Record<string, ProductEntry>;
+}
+
+export interface ProductEntry {
+  attributes: ProductAttributes;
+  /** Same shape and content as productMatrixConfig[code]. */
+  matrix: ProductConfig;
+  /** Same value as productProfileMap[code]; null if no profile is linked yet. */
+  profileId: string | null;
+}
+
+/**
+ * The six SKU dictionary attribute VALUES (not labels) that composed this
+ * product code's string at creation time. Null for every code migrated so
+ * far — the old structures never had attribute data to migrate; a future
+ * pilot-import session populates these directly for newly-registered codes.
+ */
+export interface ProductAttributes {
+  material: string | null;      // SkuOption.value from skuMaterials
+  weight: string | null;        // SkuOption.value from skuWeights
+  color: string | null;         // SkuOption.value from skuColors
+  innerSurface: string | null;  // SkuOption.value from skuTreatments (UI label "Inner Surface")
+  length: string | null;        // SkuOption.value from skuLengths
+  texture: string | null;       // SkuOption.value from skuTextures
+}
+```
