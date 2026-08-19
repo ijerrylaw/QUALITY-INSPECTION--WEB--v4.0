@@ -3,11 +3,12 @@
  * @description Phase 3: Configuration Control - Product Engine
  */
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   Plus,
   Trash,
   Edit2,
+  Copy,
   ArrowUp,
   ArrowDown,
   Box,
@@ -82,6 +83,16 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
   const [selLen, setSelLen] = useState('');
   const [selTex, setSelTex] = useState('');
 
+  // Duplicate+edit — reuses the existing PRODUCT CODE REGISTRATION panel
+  // (the six dropdowns above) rather than a parallel UI. `duplicatingFrom`
+  // is the source code while the panel is pre-filled and awaiting submit;
+  // null means the panel is in normal "Add" mode. registrationPanelRef/
+  // firstSelectRef exist only to scroll/focus the panel into view when
+  // Duplicate is clicked on a row that's currently off-screen.
+  const [duplicatingFrom, setDuplicatingFrom] = useState<string | null>(null);
+  const registrationPanelRef = useRef<HTMLDivElement>(null);
+  const firstSelectRef = useRef<HTMLSelectElement>(null);
+
   // ── Handlers ─────────────────────────────────────────────────────────────
   const triggerChange = (updates: any) => {
     onDirty();
@@ -127,33 +138,107 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
 
   const derivedSKU = `${selMat}${selWgt}${selCol}-${selTrt}-${selLen}${selTex}`;
   const canBuildSKU = selMat && selWgt && selCol && selTrt && selLen && selTex;
+  // Blocks Add/Duplicate submission while another row is mid-edit — the same
+  // "only one code editable system-wide" invariant Move/Edit/Delete already
+  // enforce. This matters specifically because a successful Duplicate now
+  // lands the NEW code into edit mode immediately: without this guard, that
+  // would silently steal edit mode away from whatever row the user already
+  // had open, discarding its unsaved draft with no warning.
+  const canSubmitRegistration = canBuildSKU && !productCodes.includes(derivedSKU) && !editingCode;
+
+  const resetRegistrationPanel = () => {
+    setSelMat(''); setSelWgt(''); setSelCol(''); setSelTrt(''); setSelLen(''); setSelTex('');
+    setDuplicatingFrom(null);
+  };
+
+  // Pre-fills the six dropdowns from the source code's current attributes and
+  // switches the existing PRODUCT CODE REGISTRATION panel into "Duplicating
+  // from X" mode — no parallel UI. Available on every code, including locked
+  // ones (this is the only way to change a locked code's specs: the locked
+  // code itself stays permanently immutable, but a new, unlocked, freely-
+  // editable copy of it can always be created). Missing/null attributes
+  // (e.g. N035MNV-OC-24FT, never backfilled) leave their dropdown blank
+  // rather than fabricating a value — canBuildSKU then correctly keeps the
+  // submit button disabled until the user picks something for every one.
+  const handleDuplicateProduct = (code: string) => {
+    const attrs = config?.products?.[code]?.attributes;
+    setSelMat(attrs?.material ?? '');
+    setSelWgt(attrs?.weight ?? '');
+    setSelCol(attrs?.color ?? '');
+    setSelTrt(attrs?.innerSurface ?? '');
+    setSelLen(attrs?.length ?? '');
+    setSelTex(attrs?.texture ?? '');
+    setDuplicatingFrom(code);
+    registrationPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    firstSelectRef.current?.focus();
+  };
+
+  const handleCancelDuplicate = () => {
+    resetRegistrationPanel();
+  };
 
   const handleAddProduct = () => {
-    if (canBuildSKU && !productCodes.includes(derivedSKU)) {
-      const updatedCodes = [...productCodes, derivedSKU];
-      
-      const STANDARD_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
-      const initialSizes: Record<string, any> = {};
-      STANDARD_SIZES.forEach(size => {
-        initialSizes[size] = { 
-          weightTarget: '', weightTolerance: '', 
-          lengthTarget: '', lengthTolerance: '', 
-          palmWidthTarget: '', palmWidthTolerance: '',
-          dimensions: {} 
-        };
-      });
-      
-      const updatedMatrix = { 
-        ...productMatrixConfig,
-        [derivedSKU]: { dimensionDefs: [], sizes: initialSizes }
-      };
+    if (!canSubmitRegistration) return;
 
-      setProductCodes(updatedCodes);
-      setProductMatrixConfig(updatedMatrix);
+    const updatedCodes = [...productCodes, derivedSKU];
+
+    // Duplicate mode: copy the source's full matrix wholesale (all sizes,
+    // targets, tolerances, decimals, dynamic dimension defs) rather than
+    // re-entering it — deep-cloned so editing the new code's draft can never
+    // mutate the source's stored entry. Normal Add mode: unchanged blank
+    // STANDARD_SIZES matrix, exactly as before this feature.
+    const newMatrixEntry: ProductConfig = duplicatingFrom
+      ? JSON.parse(JSON.stringify(productMatrixConfig[duplicatingFrom] || { dimensionDefs: [], sizes: {} }))
+      : (() => {
+          const STANDARD_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+          const initialSizes: Record<string, any> = {};
+          STANDARD_SIZES.forEach(size => {
+            initialSizes[size] = {
+              weightTarget: '', weightTolerance: '',
+              lengthTarget: '', lengthTolerance: '',
+              palmWidthTarget: '', palmWidthTolerance: '',
+              dimensions: {}
+            };
+          });
+          return { dimensionDefs: [], sizes: initialSizes };
+        })();
+
+    const updatedMatrix = {
+      ...productMatrixConfig,
+      [derivedSKU]: newMatrixEntry
+    };
+
+    setProductCodes(updatedCodes);
+    setProductMatrixConfig(updatedMatrix);
+
+    if (duplicatingFrom) {
+      // profileId is deliberately NOT copied — every new code starts with
+      // profileId: null, consistent with product-level profile defaults not
+      // being used by this app (every real submission carries its own
+      // explicit profileId from the required wizard field).
+      triggerChange({
+        productCodes: updatedCodes,
+        productMatrixConfig: updatedMatrix,
+        productAttributes: {
+          [derivedSKU]: { material: selMat, weight: selWgt, color: selCol, innerSurface: selTrt, length: selLen, texture: selTex }
+        }
+      });
+
+      // Land the new code in edit mode immediately, same as clicking the Edit
+      // pencil — but seeded from `newMatrixEntry` directly rather than via
+      // handleStartEditProduct(derivedSKU), which would read the pre-update
+      // (stale) `productMatrixConfig` closure and miss the just-created entry.
+      // Only ever touches the new code's own state — expandedCodes gains an
+      // entry, it never loses one, so any other currently-expanded row is
+      // completely unaffected.
+      setEditingCode(derivedSKU);
+      setExpandedCodes(prev => new Set(prev).add(derivedSKU));
+      setExpandedProductDraft(JSON.parse(JSON.stringify(newMatrixEntry)));
+    } else {
       triggerChange({ productCodes: updatedCodes, productMatrixConfig: updatedMatrix });
-      
-      setSelMat(''); setSelWgt(''); setSelCol(''); setSelTrt(''); setSelLen(''); setSelTex('');
     }
+
+    resetRegistrationPanel();
   };
 
   const handleRemoveProduct = (code: string) => {
@@ -343,7 +428,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
       </div>
 
       {/* ── Section 2: PRODUCT CODE REGISTRATION ───────────────────────────── */}
-      <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
+      <div ref={registrationPanelRef} className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
         <div className="p-4 border-b border-gray-800 bg-surface flex items-center justify-between">
           <div>
             <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
@@ -353,10 +438,27 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
           <p className="text-xs text-muted mt-1 font-normal normal-case">Assemble new Product Codes from the dictionaries.</p>
           </div>
         </div>
-        
+
+        {duplicatingFrom && (
+          <div className="px-4 py-2.5 bg-brand-secondary/5 border-b border-brand-secondary/20 flex items-center justify-between gap-3">
+            <span className="text-xs font-semibold uppercase tracking-wider text-brand-secondary flex items-center gap-2">
+              <Copy className="w-3.5 h-3.5" strokeWidth={2} />
+              Duplicating from <span className="font-mono normal-case">{duplicatingFrom}</span>
+            </span>
+            <button
+              onClick={handleCancelDuplicate}
+              className="text-[10px] font-bold uppercase tracking-wider text-muted hover:text-white flex items-center gap-1 outline-none"
+              title="Cancel — back to normal Add mode"
+            >
+              <X className="w-3 h-3" strokeWidth={2} />
+              Cancel
+            </button>
+          </div>
+        )}
+
         <div className="p-4 bg-canvas flex flex-col gap-4">
           <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
-            <select value={selMat} onChange={e => setSelMat(e.target.value)} className="h-9 px-2 bg-canvas border border-gray-700 rounded-lg font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none">
+            <select ref={firstSelectRef} value={selMat} onChange={e => setSelMat(e.target.value)} className="h-9 px-2 bg-canvas border border-gray-700 rounded-lg font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none">
               <option value="">1. MATERIAL</option>
               {skuMaterials.map(o => <option key={o.value} value={o.value}>{o.value} - {o.label}</option>)}
             </select>
@@ -386,12 +488,13 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
             <div className="h-12 flex-1 rounded-lg bg-surface border border-gray-700 flex items-center justify-center font-mono text-lg font-bold text-brand-secondary tracking-widest shadow-inner">
               {canBuildSKU ? derivedSKU : <span className="text-muted opacity-50">___ ___ ___ - __ - __ __</span>}
             </div>
-            <button 
+            <button
               onClick={handleAddProduct}
-              disabled={!canBuildSKU || productCodes.includes(derivedSKU)}
+              disabled={!canSubmitRegistration}
+              title={editingCode ? 'Save or cancel the active edit first' : undefined}
               className="h-12 px-8 rounded-lg bg-canvas border border-emerald-500/50 text-emerald-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500 text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all outline-none disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
             >
-              <Plus className="w-5 h-5" /> ADD PRODUCT CODE
+              {duplicatingFrom ? (<><Copy className="w-5 h-5" /> CREATE DUPLICATE</>) : (<><Plus className="w-5 h-5" /> ADD PRODUCT CODE</>)}
             </button>
           </div>
         </div>
@@ -488,6 +591,22 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                           }
                         >
                           <Edit2 className="w-4 h-4" />
+                        </button>
+                        {/* Duplicate — deliberately NOT gated on isCodeLocked(code).
+                            This is the only way to change a locked code's specs:
+                            the locked code itself remains permanently immutable,
+                            but duplicating it creates a brand-new, unlocked copy
+                            that can be freely edited. Still gated on !!editingCode
+                            like every other row action, since a successful
+                            duplicate immediately enters edit mode for the new
+                            code (see canSubmitRegistration). */}
+                        <button
+                          onClick={() => handleDuplicateProduct(code)}
+                          disabled={!!editingCode}
+                          className={`p-1.5 rounded-md transition-colors outline-none ${editingCode ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
+                          title={editingCode ? 'Save active edits first' : `Duplicate — create an editable copy of ${code}`}
+                        >
+                          <Copy className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => setConfirmDeleteCode(code)}

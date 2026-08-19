@@ -302,13 +302,16 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
     const updateData: Record<string, any> = {};
 
     // True when this PATCH supplies any of the three legacy-shaped product
-    // fields — which is exactly when the `products` registry has to be rebuilt
-    // and re-validated below. The API still accepts these field names (the
-    // request contract is unchanged); only their destination has moved.
+    // fields, OR the additive productAttributes field (duplicate+edit) —
+    // which is exactly when the `products` registry has to be rebuilt and
+    // re-validated below. The API still accepts the three legacy field names
+    // unchanged (the request contract is unchanged); only their destination
+    // has moved. productAttributes is new — see buildProductsMap()'s docs.
     const touchesProductStructures =
       Array.isArray(payload.productCodes) ||
       payload.productMatrixConfig !== undefined ||
-      payload.productProfileMap !== undefined;
+      payload.productProfileMap !== undefined ||
+      payload.productAttributes !== undefined;
 
     // Shared across the validation checks and the `products` write below —
     // only fetched once.
@@ -354,6 +357,9 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
             ? coerceJSON<Record<string, string>>(payload.productProfileMap, currentRegistry.productProfileMap)
             : currentRegistry.productProfileMap,
           currentProducts,
+          payload.productAttributes !== undefined
+            ? coerceJSON<Record<string, unknown>>(payload.productAttributes, {})
+            : undefined,
         )
       : null;
 

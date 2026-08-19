@@ -107,6 +107,28 @@ const NULL_ATTRIBUTES: ProductAttributes = {
   texture: null,
 };
 
+const ATTRIBUTE_KEYS = ['material', 'weight', 'color', 'innerSurface', 'length', 'texture'] as const;
+
+/**
+ * Coerces an arbitrary payload value into a well-formed ProductAttributes
+ * object — exactly the six known keys, each either a string or null. Any
+ * other shape (wrong type, extra keys, non-string values) degrades to null
+ * per field rather than being rejected outright: attributes are decorative/
+ * traceability data, not grading-critical (see ProductAttributes' own docs),
+ * so there is no correctness reason to fail the whole request over a
+ * malformed one, unlike the numeric target fields dimensionEvaluator.ts
+ * reads directly as grading thresholds.
+ */
+function sanitizeAttributes(raw: unknown): ProductAttributes {
+  const src = (raw && typeof raw === 'object') ? (raw as Record<string, unknown>) : {};
+  const out = {} as ProductAttributes;
+  for (const key of ATTRIBUTE_KEYS) {
+    const v = src[key];
+    out[key] = typeof v === 'string' && v.length > 0 ? v : null;
+  }
+  return out;
+}
+
 /**
  * Rebuilds the consolidated `products` map from the three legacy structures.
  *
@@ -124,22 +146,33 @@ const NULL_ATTRIBUTES: ProductAttributes = {
  * itself is unchanged — only when it is called, and what is done with the
  * result.
  *
- * Attributes are the one exception to "rebuild from source": they cannot be
- * derived from the legacy structures at all (nothing there holds them), so an
- * existing entry's attributes are PRESERVED verbatim. Rebuilding them would
- * silently wipe the six-attribute data the pilot/batch2 imports wrote for 16
- * of the 17 live codes.
+ * Attributes are the one exception to "rebuild from source": the three
+ * legacy structures never held them, so an existing entry's attributes are
+ * PRESERVED verbatim by default. Rebuilding them from nothing would silently
+ * wipe the six-attribute data the pilot/batch2 imports wrote for 16 of the
+ * 17 live codes.
  *
- * @param codes         Final productCodes[] — defines the keyset exactly.
- * @param matrix        Final productMatrixConfig.
- * @param profileMap    Final productProfileMap.
- * @param existing      Current products map, read only for attribute preservation.
+ * `incomingAttributes` is the one deliberate override of that default —
+ * added for the duplicate+edit feature, the first live UI path that ever
+ * needs to WRITE attributes for a code (previously they could only be
+ * populated by one-off backfill scripts). When present for a given code,
+ * it wins over both the preserved and null defaults for that code only;
+ * every other code's attributes are untouched. Sanitized through
+ * sanitizeAttributes() rather than trusted verbatim, since — unlike matrix/
+ * profileMap — this is genuinely new, previously-unvalidated request input.
+ *
+ * @param codes               Final productCodes[] — defines the keyset exactly.
+ * @param matrix              Final productMatrixConfig.
+ * @param profileMap          Final productProfileMap.
+ * @param existing            Current products map, read for attribute preservation.
+ * @param incomingAttributes  Optional per-code attribute overrides from the request.
  */
 export function buildProductsMap(
   codes: string[],
   matrix: Record<string, ProductConfig>,
   profileMap: Record<string, string>,
   existing: ProductsMap,
+  incomingAttributes?: Record<string, unknown>,
 ): ProductsMap {
   const products: ProductsMap = {};
 
@@ -148,7 +181,9 @@ export function buildProductsMap(
   // an unregistered code is never resurrected into it.
   for (const code of codes) {
     products[code] = {
-      attributes: existing[code]?.attributes ?? NULL_ATTRIBUTES,
+      attributes: incomingAttributes && code in incomingAttributes
+        ? sanitizeAttributes(incomingAttributes[code])
+        : existing[code]?.attributes ?? NULL_ATTRIBUTES,
       matrix: matrix[code] ?? EMPTY_MATRIX,
       profileId: profileMap[code] ?? null,
     };
