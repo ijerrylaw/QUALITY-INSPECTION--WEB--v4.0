@@ -179,6 +179,13 @@ export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpd
     const dimStats: Record<string, any> = inspectionData?.dimensionStats ?? {};
     let failed = 0;
     Object.values(dimStats).forEach((dim: any) => {
+      // Record-only dimensions are measured but never graded. StepDimensions
+      // already emits an all-false `fails` for them, so this guard is belt-
+      // and-braces — stated explicitly rather than relied on implicitly,
+      // because this is the site that turns a dimension failure into a FAIL
+      // verdict and the rule should be visible where the consequence is.
+      // Absent (pre-flag stats) reads as graded, matching isDimensionGraded().
+      if (dim?.isGraded === false) return;
       if (dim?.fails?.some((f: boolean) => f === true)) failed++;
     });
     return failed;

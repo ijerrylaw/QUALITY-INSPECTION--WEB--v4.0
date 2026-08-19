@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
-import { useConfig, API_BASE_URL, hasUsableCategories, hasUsableProductMatrix, resolveProductMatrix } from '../../context/ConfigContext';
+import { useConfig, API_BASE_URL, hasUsableCategories, hasUsableProductMatrix, resolveProductMatrix, isDimensionGraded } from '../../context/ConfigContext';
 import { useAuth, authHeader, authIdentity } from '../../context/AuthContext';
 import { useToast } from '../../components/ui/ToastProvider';
 import {
@@ -146,22 +146,30 @@ function BatchModalDimensions({ row, updateRow, config, productCode, size }: any
   const stats = React.useMemo(() => {
     const calcStats: any = {};
     activeDimensions.forEach((dim: any) => {
+      const graded = isDimensionGraded(dim);
       const { minSpec, tolerance, isMin } = getDimSpec(dim.id);
       const threshold    = minSpec > 0 ? minSpec - tolerance : 0;
       const maxThreshold = minSpec > 0 && tolerance > 0 && !isMin ? minSpec + tolerance : Infinity;
       const vals = row.dimensions[dim.id] ?? Array(5).fill('');
 
-      const fails = vals.map((v: string) => {
-        const num = parseFloat(v);
-        if (isNaN(num)) return false;
-        return num < threshold || (!isMin && tolerance > 0 && num > maxThreshold);
-      });
+      // Record-only: no comparison attempted, same rule as StepDimensions and
+      // the server engine. These stats are DISPLAY-ONLY in this wizard —
+      // BatchEntry posts `dimensionMins: {}` and no verdict, so the server
+      // grades from raw measurements — but a red slot here would still tell
+      // the operator a lot was failing on a dimension that cannot fail it.
+      const fails = graded
+        ? vals.map((v: string) => {
+            const num = parseFloat(v);
+            if (isNaN(num)) return false;
+            return num < threshold || (!isMin && tolerance > 0 && num > maxThreshold);
+          })
+        : vals.map(() => false);
 
       const numVals = vals.map((v: string) => parseFloat(v)).filter((v: number) => !isNaN(v));
       const min = numVals.length > 0 ? Math.min(...numVals) : 0;
       const max = numVals.length > 0 ? Math.max(...numVals) : 0;
 
-      calcStats[dim.id] = { min, max, fails, threshold, maxThreshold, isMin };
+      calcStats[dim.id] = { min, max, fails, threshold, maxThreshold, isMin, isGraded: graded };
     });
     return calcStats;
   }, [row.dimensions, activeDimensions, sizeEntry, matrixEntry]);
@@ -174,9 +182,10 @@ function BatchModalDimensions({ row, updateRow, config, productCode, size }: any
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {activeDimensions.map((dim: any) => {
-          const dimStats = stats[dim.id] ?? { min: 0, max: 0, fails: [], threshold: 0, maxThreshold: Infinity, isMin: false };
+          const dimStats = stats[dim.id] ?? { min: 0, max: 0, fails: [], threshold: 0, maxThreshold: Infinity, isMin: false, isGraded: true };
           const { minSpec, tolerance, isMin: dimIsMin } = getDimSpec(dim.id);
           const effectiveIsMin = dimIsMin || !!dim.isMin;
+          const graded = dimStats.isGraded;
           const decPlaces = getDecimalPlaces(dim);
           const vals = row.dimensions[dim.id] || Array(5).fill('');
           const dirty = row.dirtySlots?.[dim.id] || Array(5).fill(false);
@@ -187,18 +196,29 @@ function BatchModalDimensions({ row, updateRow, config, productCode, size }: any
               <div className="flex items-center justify-between border-b border-gray-700/50 pb-3 mb-4">
                 <span className={`text-sm font-bold uppercase tracking-wider flex items-baseline gap-2 ${dim.id.startsWith('__fixed_') ? 'text-brand-secondary' : 'text-primary'}`}>
                   {dim.name}
-                  {minSpec > 0 && (
-                    <span className="text-xs font-mono font-normal normal-case text-muted">
-                      TARGET: {effectiveIsMin
-                        ? `\u2265${minSpec.toFixed(decPlaces)}${dim.unit}`
-                        : `${minSpec.toFixed(decPlaces)}${tolerance > 0 ? '\u00b1' + tolerance.toFixed(decPlaces) : ''}${dim.unit}`
-                      }
+                  {/* Same treatment as StepDimensions: a record-only dimension
+                      shows no TARGET, since its stored spec is never applied. */}
+                  {graded ? (
+                    minSpec > 0 && (
+                      <span className="text-xs font-mono font-normal normal-case text-muted">
+                        TARGET: {effectiveIsMin
+                          ? `\u2265${minSpec.toFixed(decPlaces)}${dim.unit}`
+                          : `${minSpec.toFixed(decPlaces)}${tolerance > 0 ? '\u00b1' + tolerance.toFixed(decPlaces) : ''}${dim.unit}`
+                        }
+                      </span>
+                    )
+                  ) : (
+                    <span
+                      className="text-[10px] font-mono font-bold normal-case px-2 py-0.5 rounded-md border bg-gray-800/50 border-gray-700/50 text-muted"
+                      title="Record-only \u2014 measured and stored, but not graded against a spec"
+                    >
+                      RECORD-ONLY
                     </span>
                   )}
                 </span>
                 <div className="flex items-center gap-2">
                   <span className={`font-mono text-[10px] uppercase px-2 py-1 rounded-md border ${
-                    dimStats.min > 0 && dimStats.min < dimStats.threshold
+                    graded && dimStats.min > 0 && dimStats.min < dimStats.threshold
                       ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 font-bold'
                       : 'bg-gray-800/50 border-gray-700/50 text-muted'
                   }`}>
@@ -206,7 +226,7 @@ function BatchModalDimensions({ row, updateRow, config, productCode, size }: any
                   </span>
                   {!effectiveIsMin && (
                     <span className={`font-mono text-[10px] uppercase px-2 py-1 rounded-md border ${
-                      tolerance > 0 && dimStats.max > 0 && dimStats.max > dimStats.maxThreshold
+                      graded && tolerance > 0 && dimStats.max > 0 && dimStats.max > dimStats.maxThreshold
                         ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 font-bold'
                         : 'bg-gray-800/50 border-gray-700/50 text-muted'
                     }`}>

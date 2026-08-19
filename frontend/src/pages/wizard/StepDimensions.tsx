@@ -36,7 +36,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Ruler, CheckCircle2, AlertTriangle, AlertCircle, Info } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastProvider';
-import { useConfig, hasUsableProductMatrix, resolveProductMatrix } from '../../context/ConfigContext';
+import { useConfig, hasUsableProductMatrix, resolveProductMatrix, isDimensionGraded } from '../../context/ConfigContext';
 import { OriginalValueNote, hasFieldChanged } from '../../utils/fieldDiff';
 import type { ProductDimensionDef } from '../../context/ConfigContext';
 
@@ -223,19 +223,28 @@ export function StepDimensions({
     let filled = 0;
     let passed = 0;
     let failed = 0;
-    const calcStats: Record<string, { min: number; max: number; avg: number; fails: boolean[]; threshold: number; maxThreshold: number; isMin: boolean }> = {};
+    const calcStats: Record<string, { min: number; max: number; avg: number; fails: boolean[]; threshold: number; maxThreshold: number; isMin: boolean; isGraded: boolean }> = {};
 
     activeDimensions.forEach((dim) => {
+      const graded = isDimensionGraded(dim);
       const { minSpec, tolerance, isMin } = getDimSpec(dim.id);
       const threshold    = minSpec > 0 ? minSpec - tolerance : 0;
       const maxThreshold = minSpec > 0 && tolerance > 0 && !isMin ? minSpec + tolerance : Infinity;
       const vals = measurements[dim.id] ?? Array(SLOTS_PER_DIM).fill('');
 
-      const fails = vals.map((v) => {
-        const num = parseFloat(v);
-        if (isNaN(num)) return false;
-        return num < threshold || (!isMin && tolerance > 0 && num > maxThreshold);
-      });
+      // Record-only: no comparison is attempted, exactly as the server-side
+      // evaluateDimensions() does. All-false rather than a computed-then-
+      // discarded result, so every downstream `fails.some(...)` consumer —
+      // this step's own failedSlots, the per-slot red styling below, and
+      // StepReviewSubmit's failedDimensions — is correct without each having
+      // to know about the flag separately.
+      const fails = graded
+        ? vals.map((v) => {
+            const num = parseFloat(v);
+            if (isNaN(num)) return false;
+            return num < threshold || (!isMin && tolerance > 0 && num > maxThreshold);
+          })
+        : vals.map(() => false);
 
       vals.forEach((v, i) => {
         if (v !== '') {
@@ -250,7 +259,7 @@ export function StepDimensions({
       const max = numVals.length > 0 ? Math.max(...numVals) : 0;
       const avg = numVals.length > 0 ? numVals.reduce((a, b) => a + b, 0) / numVals.length : 0;
 
-      calcStats[dim.id] = { min, max, avg, fails, threshold, maxThreshold, isMin };
+      calcStats[dim.id] = { min, max, avg, fails, threshold, maxThreshold, isMin, isGraded: graded };
     });
 
     const tSlots = activeDimensions.length * SLOTS_PER_DIM;
@@ -362,10 +371,11 @@ export function StepDimensions({
       {activeDimensions.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {activeDimensions.map((dim) => {
-            const dimStats = stats[dim.id] ?? { min: 0, max: 0, avg: 0, fails: [], threshold: 0, maxThreshold: Infinity, isMin: false };
+            const dimStats = stats[dim.id] ?? { min: 0, max: 0, avg: 0, fails: [], threshold: 0, maxThreshold: Infinity, isMin: false, isGraded: true };
             const { minSpec, tolerance, isMin: dimIsMin } = getDimSpec(dim.id);
             // Merge isMin from spec lookup (covers 'MIN' tolerance) and the def flag
             const effectiveIsMin = dimIsMin || !!dim.isMin;
+            const graded       = dimStats.isGraded;
             const threshold    = dimStats.threshold;
             const maxThreshold = dimStats.maxThreshold;
             const decPlaces    = getDecimalPlaces(dim);
@@ -380,12 +390,26 @@ export function StepDimensions({
                     dim.id === FIXED_DIM_LENGTH || dim.id === FIXED_DIM_PALM ? 'text-brand-secondary' : 'text-primary'
                   }`}>
                     {dim.name}
-                    {minSpec > 0 && (
-                      <span className="text-xs font-mono font-normal normal-case text-muted">
-                        TARGET: {effectiveIsMin
-                          ? `\u2265${minSpec.toFixed(decPlaces)}${dim.unit}`
-                          : `${minSpec.toFixed(decPlaces)}${tolerance > 0 ? '\u00b1' + tolerance.toFixed(decPlaces) : ''}${dim.unit}`
-                        }
+                    {/* A record-only dimension has no spec to meet, so showing
+                        it a TARGET would imply a threshold the operator's
+                        numbers will never be judged against. The stored
+                        minSpec/tolerance are untouched \u2014 just not advertised
+                        here. */}
+                    {graded ? (
+                      minSpec > 0 && (
+                        <span className="text-xs font-mono font-normal normal-case text-muted">
+                          TARGET: {effectiveIsMin
+                            ? `\u2265${minSpec.toFixed(decPlaces)}${dim.unit}`
+                            : `${minSpec.toFixed(decPlaces)}${tolerance > 0 ? '\u00b1' + tolerance.toFixed(decPlaces) : ''}${dim.unit}`
+                          }
+                        </span>
+                      )
+                    ) : (
+                      <span
+                        className="text-[10px] font-mono font-bold normal-case px-2 py-0.5 rounded-md border bg-gray-800/50 border-gray-700/50 text-muted"
+                        title="Record-only \u2014 measured and stored, but not graded against a spec"
+                      >
+                        RECORD-ONLY
                       </span>
                     )}
                   </span>
@@ -393,7 +417,7 @@ export function StepDimensions({
                   {/* Top-Right Metrics Badges */}
                   <div className="flex items-center gap-2">
                     <span className={`font-mono text-[10px] uppercase px-2 py-1 rounded-md border ${
-                      dimStats.min > 0 && dimStats.min < threshold
+                      graded && dimStats.min > 0 && dimStats.min < threshold
                         ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 font-bold'
                         : 'bg-gray-800/50 border-gray-700/50 text-muted'
                     }`}>
@@ -401,7 +425,7 @@ export function StepDimensions({
                     </span>
                     {!effectiveIsMin && (
                       <span className={`font-mono text-[10px] uppercase px-2 py-1 rounded-md border ${
-                        tolerance > 0 && dimStats.max > 0 && dimStats.max > maxThreshold
+                        graded && tolerance > 0 && dimStats.max > 0 && dimStats.max > maxThreshold
                           ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 font-bold'
                           : 'bg-gray-800/50 border-gray-700/50 text-muted'
                       }`}>
