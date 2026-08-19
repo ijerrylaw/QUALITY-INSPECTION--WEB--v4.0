@@ -110,18 +110,19 @@ const NULL_ATTRIBUTES: ProductAttributes = {
 /**
  * Rebuilds the consolidated `products` map from the three legacy structures.
  *
- * THE single canonical implementation, deliberately shared by both callers:
- *   - PATCH /api/config's write-hook (config.routes.ts), which keeps
- *     `products` in sync automatically on every real config write.
- *   - scripts/migrate-products-field.ts, the manual catch-up/backfill tool.
+ * As of B6 this has exactly one caller: PATCH /api/config, which calls it at
+ * the START of the request to fold the incoming payload (still in the legacy
+ * field shapes — the API contract is unchanged) into the single authoritative
+ * `products` object that every validation check then runs against and that is
+ * then persisted. The manual migrate/verify scripts that used to share it were
+ * deleted in B6, having become meaningless once the legacy columns stopped
+ * being written.
  *
- * Keeping one implementation is the whole point: two copies of this logic
- * drifting apart would reintroduce exactly the class of three-way-drift bug
- * this consolidation exists to make structurally impossible.
- *
- * `products` is a pure MIRROR — it derives entirely from whatever the legacy
- * structures contain after all existing validation and lock-checks have
- * passed. It never gates, relaxes, or second-guesses those checks.
+ * Note the inversion: before B6 this produced a MIRROR, derived from the legacy
+ * structures after they had been validated and queued for writing. It now
+ * produces the PRIMARY record, built before validation runs. The function
+ * itself is unchanged — only when it is called, and what is done with the
+ * result.
  *
  * Attributes are the one exception to "rebuild from source": they cannot be
  * derived from the legacy structures at all (nothing there holds them), so an
@@ -213,13 +214,21 @@ function parseJSON<T>(raw: string | null | undefined, fallback: T): T {
  * as a wrong pass/fail — exactly the failure mode this consolidation exists to
  * eliminate.
  *
- * SAFETY FALLBACK: if `products` is empty while the legacy structures still
- * hold codes, this is an unmigrated database (e.g. a dev.db restored from
- * before Session A, which added the column). Reading `products` there would
- * silently report an EMPTY registry — which for the admin UI means 17 codes
- * vanishing, and for the GRADING engine means every dimension gate failing
- * closed with VerdictNoUsableDimensionConfigError. Falls back to the legacy
- * structures and logs loudly instead.
+ * SAFETY FALLBACK: if `products` is empty while the legacy columns still hold
+ * codes, this is an unmigrated database (e.g. a dev.db restored from before
+ * Session A, which added the column). Reading `products` there would silently
+ * report an EMPTY registry — which for the admin UI means every code vanishing,
+ * and for the GRADING engine means every dimension gate failing closed with
+ * VerdictNoUsableDimensionConfigError. Falls back to the legacy columns and
+ * logs loudly instead.
+ *
+ * B6 makes this fallback MORE load-bearing, not less. The legacy columns are no
+ * longer written (they are frozen at their B6-era values), and the manual
+ * migrate/verify scripts were deleted, so this is now the ONLY recovery path
+ * for such a database. It is also self-healing: the fallback values feed
+ * buildProductsMap() on the next PATCH that touches the product registry, which
+ * persists them into `products` and retires the fallback permanently. Until
+ * that save happens, reads keep working off the frozen columns.
  *
  * The fallback is deliberately all-or-nothing on that one unambiguous signal:
  * it never merges per-code, because a per-code fallback would paper over
@@ -231,9 +240,10 @@ export function resolveProductRegistry(config: RawProductColumns): LegacyProduct
 
   if (Object.keys(products).length === 0 && legacyCodes.length > 0) {
     console.warn(
-      `[productRegistry] AppConfig.products is empty but productCodes[] holds ${legacyCodes.length} code(s) — ` +
-      'falling back to the legacy structures. This database predates the `products` column ' +
-      '(Session A) or was never migrated; run backend/scripts/migrate-products-field.ts.',
+      `[productRegistry] AppConfig.products is empty but the frozen productCodes column holds ${legacyCodes.length} code(s) — ` +
+      'falling back to the legacy columns. This database predates the `products` column (Session A) ' +
+      'or was never migrated. No action needed: the next configuration save will persist this ' +
+      'registry into `products` and the fallback will stop firing.',
     );
     return {
       productCodes: legacyCodes,

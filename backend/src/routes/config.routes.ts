@@ -17,19 +17,31 @@ import { requireRole } from '../middleware/auth';
 // the grading engine (resolveVerdict.ts) so both read the registry through
 // exactly one implementation and one fallback policy.
 import { buildProductsMap, resolveProductRegistry } from '../lib/productEntry';
-import type { ProductsMap } from '../lib/productEntry';
+import type { ProductsMap, ProductConfig } from '../lib/productEntry';
 
 const router = Router();
 
-/** JSON field names on AppConfig model that store arrays or objects */
+/**
+ * JSON field names on AppConfig model that store arrays or objects.
+ *
+ * B6 — productCodes / productMatrixConfig / productProfileMap are deliberately
+ * ABSENT from this list. Those three DB columns are no longer written: the
+ * consolidated `products` column is now the sole write target for the product
+ * registry (see the PATCH handler below). Their columns are left in place and
+ * frozen at whatever value they held when B6 shipped — no schema migration —
+ * and nothing reads them any more except resolveProductRegistry()'s
+ * unmigrated-database fallback.
+ *
+ * The API contract is unchanged: PATCH still ACCEPTS those three field names in
+ * the request body, and GET still RETURNS them (projected out of `products`).
+ * Only where they land in storage has changed.
+ */
 const JSON_FIELDS = [
-  'productCodes',
   'lines',
   'shifts',
   'sides',
   'sizes',
   'sampleSizes',
-  'productProfileMap',
   'skuMaterials',
   'skuWeights',
   'skuColors',
@@ -38,7 +50,6 @@ const JSON_FIELDS = [
   'skuTextures',
   'dimensions',
   'targetWeight',
-  'productMatrixConfig',
   'aqlCategories',
   'defectDefinitions',
   'inspectionProfiles',
@@ -56,6 +67,28 @@ function safeParseJSON<T>(raw: string | null | undefined, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+/**
+ * Normalizes a payload field that may arrive either as a real object/array or
+ * as a pre-serialized JSON string.
+ *
+ * The JSON_FIELDS write loop has always tolerated both forms (`typeof === 'string'`
+ * is written through verbatim, anything else is stringified), and the previous
+ * write-hook then re-parsed whatever landed. B6 consumes these fields before the
+ * write instead of after it, so that same tolerance has to be applied here to
+ * keep string-form payloads behaving exactly as they did.
+ */
+function coerceJSON<T>(value: unknown, fallback: T): T {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      return fallback;
+    }
+  }
+  return value as T;
 }
 
 /**
@@ -268,40 +301,85 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
     const payload = req.body || {};
     const updateData: Record<string, any> = {};
 
-    // True when this PATCH touches any of the three legacy product structures —
-    // which is also exactly when the `products` mirror below has to be rebuilt.
+    // True when this PATCH supplies any of the three legacy-shaped product
+    // fields — which is exactly when the `products` registry has to be rebuilt
+    // and re-validated below. The API still accepts these field names (the
+    // request contract is unchanged); only their destination has moved.
     const touchesProductStructures =
       Array.isArray(payload.productCodes) ||
       payload.productMatrixConfig !== undefined ||
       payload.productProfileMap !== undefined;
 
-    // Shared across the two lock-related checks and the `products` write-hook
-    // below — only fetched once. productProfileMap was added to the condition
-    // for the write-hook's benefit (the two lock checks don't consult it);
-    // both of those checks are independently gated by their own `if` and read
-    // through `currentConfig?.` with a parse fallback, so widening when this
-    // is fetched cannot change their behavior.
+    // Shared across the validation checks and the `products` write below —
+    // only fetched once.
     const currentConfig = touchesProductStructures
       ? await prisma.appConfig.findUnique({ where: { id: '1' } })
       : null;
 
-    // B3: the two lock checks below now read the CURRENT registry through
-    // `products` (same resolver, and therefore same fallback behavior, as
-    // GET /api/config) instead of off the legacy columns directly. Values are
-    // identical — B2 keeps the two byte-identical on every write — so neither
-    // check's decisions change; they simply consult one source of truth.
-    // Deriving once here also means both checks provably see the same view,
-    // rather than each parsing its own column independently.
-    const currentRegistry = currentConfig ? resolveProductRegistry(currentConfig) : null;
+    // The CURRENT registry, read through `products` (same resolver, and
+    // therefore same unmigrated-database fallback, as GET /api/config). Empty
+    // defaults rather than null so the first-run create path needs no special
+    // casing — equivalent to the `?? []` / `?? {}` the checks used before.
+    const currentRegistry = currentConfig
+      ? resolveProductRegistry(currentConfig)
+      : { productCodes: [], productMatrixConfig: {}, productProfileMap: {} };
+    const currentProducts = safeParseJSON<ProductsMap>(currentConfig?.products, {});
+
+    // ── B6: build `products` FIRST, then validate against it ─────────────────
+    // Previously this ran LAST, after the three legacy structures had been
+    // validated and queued for writing, deriving `products` from them as a
+    // mirror. Now the order is inverted: the incoming payload (still in the
+    // legacy field shapes — the API contract is unchanged) is folded into one
+    // authoritative in-memory `products` object up front, every check below
+    // reads from that object, and it is the only thing persisted.
+    //
+    // Anything the payload does not supply falls back to the CURRENT value, so
+    // a partial PATCH (e.g. only productMatrixConfig) leaves the rest intact —
+    // exactly as the previous write-hook's `?? currentConfig?.<column>`
+    // fallbacks did, but sourced through the registry resolver instead of the
+    // raw columns (which are no longer written, and so must not be trusted as
+    // a fallback source going forward).
+    //
+    // buildProductsMap() also preserves each code's `attributes` verbatim —
+    // they have no legacy source and would otherwise be wiped.
+    const incomingProducts: ProductsMap | null = touchesProductStructures
+      ? buildProductsMap(
+          Array.isArray(payload.productCodes)
+            ? (payload.productCodes as string[])
+            : currentRegistry.productCodes,
+          payload.productMatrixConfig !== undefined
+            ? coerceJSON<Record<string, ProductConfig>>(payload.productMatrixConfig, currentRegistry.productMatrixConfig)
+            : currentRegistry.productMatrixConfig,
+          payload.productProfileMap !== undefined
+            ? coerceJSON<Record<string, string>>(payload.productProfileMap, currentRegistry.productProfileMap)
+            : currentRegistry.productProfileMap,
+          currentProducts,
+        )
+      : null;
+
+    /**
+     * The matrix map the payload actually supplied, normalized. Used ONLY to
+     * scope the two productMatrixConfig-gated checks below to the same set of
+     * codes they examined before B6 — the values they compare are read from
+     * `incomingProducts`, but WHICH codes get examined is unchanged.
+     */
+    const suppliedMatrix: Record<string, unknown> =
+      payload.productMatrixConfig !== undefined
+        ? coerceJSON<Record<string, unknown>>(payload.productMatrixConfig, {})
+        : {};
 
     // Reject removal of any product code still referenced by a real Submission.
     // productCodes is a flat JSON string[] with no DB-level FK to Submission, so
     // this is the only enforcement point — a client could otherwise send a
     // PATCH that silently drops a code still in use (see Product Engine
     // discovery report §5). Must run before the JSON_FIELDS write-through below.
-    if (Array.isArray(payload.productCodes)) {
-      const currentCodes = currentRegistry?.productCodes ?? [];
-      const newCodes: string[] = payload.productCodes;
+    if (Array.isArray(payload.productCodes) && incomingProducts) {
+      const currentCodes = currentRegistry.productCodes;
+      // B6: the resulting registry's keyset, read off the built `products`
+      // object rather than the raw payload array. buildProductsMap() keys
+      // strictly off productCodes[], so this is the same set the payload asked
+      // for — just sourced from the object that will actually be persisted.
+      const newCodes: string[] = Object.keys(incomingProducts);
       const removedCodes = currentCodes.filter((c) => !newCodes.includes(c));
 
       if (removedCodes.length > 0) {
@@ -335,17 +413,30 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
     // unrelated (unlocked) product legitimately re-sends every product's
     // unchanged entry in the same payload (see ProductEngine.tsx's
     // triggerChange, which always sends the whole productMatrixConfig).
-    if (payload.productMatrixConfig !== undefined && typeof payload.productMatrixConfig === 'object') {
-      const currentMatrix = currentRegistry?.productMatrixConfig ?? {};
+    if (payload.productMatrixConfig !== undefined && typeof payload.productMatrixConfig === 'object' && incomingProducts) {
       const usage = await getProductCodeUsage();
       const lockedChanges: { productCode: string; submissionCount: number; changedFields: string[] }[] = [];
 
-      for (const [productCode, incomingEntry] of Object.entries(payload.productMatrixConfig as Record<string, any>)) {
+      // B6: both sides of the diff now come from `products` — the stored entry's
+      // .matrix vs the built entry's .matrix. Deliberately still iterating the
+      // codes the PAYLOAD supplied, not every code in `incomingProducts`, so the
+      // set of codes examined is byte-for-byte the same as before B6 (per this
+      // session's like-for-like scope decision). The `?? suppliedMatrix[...]`
+      // fallback covers a code present in the matrix payload but absent from
+      // productCodes[]: buildProductsMap() keys off productCodes[] and so would
+      // not carry such a code, and this keeps the compared value identical to
+      // what the pre-B6 check would have used.
+      for (const productCode of Object.keys(suppliedMatrix)) {
         const submissionCount = usage[productCode] ?? 0;
         if (submissionCount === 0) continue;
 
         const changedFields: string[] = [];
-        diffValues(currentMatrix[productCode], incomingEntry, '', changedFields);
+        diffValues(
+          currentProducts[productCode]?.matrix,
+          incomingProducts[productCode]?.matrix ?? suppliedMatrix[productCode],
+          '',
+          changedFields,
+        );
         if (changedFields.length > 0) {
           lockedChanges.push({ productCode, submissionCount, changedFields });
         }
@@ -366,8 +457,20 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
     // frontend now strips non-numeric characters on keystroke (see
     // ProductConfigAccordion.tsx's formatTarget), but PATCH /api/config has
     // no other guard against a client that bypasses the UI entirely.
-    if (payload.productMatrixConfig !== undefined) {
-      const invalidFields = validateProductMatrixConfig(payload.productMatrixConfig);
+    if (payload.productMatrixConfig !== undefined && incomingProducts) {
+      // B6: the values validated are read from the built `products` object
+      // (entry.matrix), while the SET of codes validated stays scoped to what
+      // the payload supplied — same rejection condition as before B6, just a
+      // different in-memory source. Validating every code in `incomingProducts`
+      // instead would newly reject a payload touching one product because of a
+      // pre-existing bad value on an unrelated one.
+      const matrixToValidate: Record<string, unknown> = {};
+      for (const productCode of Object.keys(suppliedMatrix)) {
+        matrixToValidate[productCode] =
+          incomingProducts[productCode]?.matrix ?? suppliedMatrix[productCode];
+      }
+
+      const invalidFields = validateProductMatrixConfig(matrixToValidate);
       if (invalidFields.length > 0) {
         res.status(400).json({
           error: 'productMatrixConfig contains non-numeric target value(s)',
@@ -394,42 +497,18 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
       }
     }
 
-    // ── Keep AppConfig.products in sync (Session B2) ──────────────────────────
-    // The consolidated per-product-code structure (see lib/productEntry.ts) had
-    // no automated write path: it was only ever as fresh as the last manual
-    // re-run of scripts/migrate-products-field.ts, so any edit made through
-    // this endpoint in between runs silently drifted it out of sync. This hook
-    // closes that gap.
+    // ── Persist the product registry (B6) ─────────────────────────────────────
+    // `products` is now the SOLE write target for the product registry. The
+    // object was built at the top of this handler and every check above has
+    // already passed against it, so this is a straight serialize — no second
+    // derivation, and no path by which what was validated can differ from what
+    // is stored.
     //
-    // Deliberately placed AFTER every existing validation and lock check above
-    // (delete-safety 409, locked-code matrix diff 409, non-numeric target 400)
-    // and AFTER the JSON_FIELDS loop — so it can only ever run on a payload
-    // that has already fully passed, and mirrors the exact values those checks
-    // approved. It adds no rules of its own and cannot admit a write the
-    // legacy structures would have rejected.
-    //
-    // Atomic by construction: this only adds a field to `updateData`, which the
-    // single upsert below writes in one statement. `products` can never land
-    // without the legacy structures it mirrors, or vice versa.
-    if (touchesProductStructures) {
-      // Read the FINAL values — what this PATCH is actually about to persist.
-      // updateData holds the already-normalized JSON string for any of the
-      // three present in the payload; anything absent keeps its stored value.
-      const finalCodes = safeParseJSON<string[]>(
-        updateData['productCodes'] ?? currentConfig?.productCodes, [],
-      );
-      const finalMatrix = safeParseJSON<Record<string, any>>(
-        updateData['productMatrixConfig'] ?? currentConfig?.productMatrixConfig, {},
-      );
-      const finalProfileMap = safeParseJSON<Record<string, string>>(
-        updateData['productProfileMap'] ?? currentConfig?.productProfileMap, {},
-      );
-      // Read only so per-code attributes survive — they have no legacy source.
-      const existingProducts = safeParseJSON<ProductsMap>(currentConfig?.products, {});
-
-      updateData['products'] = JSON.stringify(
-        buildProductsMap(finalCodes, finalMatrix, finalProfileMap, existingProducts),
-      );
+    // productCodes / productMatrixConfig / productProfileMap are intentionally
+    // NOT written: they are absent from JSON_FIELDS, so their columns keep
+    // whatever value they held when B6 shipped and are frozen from here on.
+    if (incomingProducts) {
+      updateData['products'] = JSON.stringify(incomingProducts);
     }
 
     const updatedConfig = await prisma.appConfig.upsert({
