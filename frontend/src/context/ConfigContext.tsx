@@ -311,6 +311,18 @@ export interface AppConfig {
    */
   productMatrixConfig: Record<string, ProductConfig>;
   /**
+   * @deprecated for READS as of B3 — use `products[code].profileId` instead.
+   * Still returned by GET /api/config as a projection of `products` (only
+   * codes with a non-null profileId are present, matching the legacy
+   * structure's own convention), and still an accepted PATCH field — see
+   * config.routes.ts's formatAppConfig(). No live admin UI writes this
+   * today (product-level profile defaults aren't used by this app — every
+   * submission carries its own explicit profileId), but the rename feature
+   * reads and re-sends it so a renamed code's profile link (if it ever has
+   * one) isn't silently dropped.
+   */
+  productProfileMap?: Record<string, string>;
+  /**
    * Consolidated per-product-code registry — the read source of truth for the
    * admin/config surface as of B3. Keyed by product code, in the user-
    * controlled Product Engine ordering.

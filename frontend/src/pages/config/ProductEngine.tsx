@@ -9,6 +9,7 @@ import {
   Trash,
   Edit2,
   Copy,
+  PenLine,
   ArrowUp,
   ArrowDown,
   Box,
@@ -93,6 +94,17 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
   const registrationPanelRef = useRef<HTMLDivElement>(null);
   const firstSelectRef = useRef<HTMLSelectElement>(null);
 
+  // Rename — reuses the same panel and pre-fill mechanism as Duplicate, but is
+  // a REPLACE (old key removed, new key added with the same attributes/matrix/
+  // profileId) rather than an independent new entry, requires a confirmation
+  // step before applying, and is only reachable on unlocked (zero-submission)
+  // codes. `renamingCode` and `duplicatingFrom` are deliberately mutually
+  // exclusive — entering one clears the other, so the panel only ever shows
+  // one mode's banner at a time. `confirmRename` holds the pending old/new
+  // pair between clicking submit and the user confirming in the modal.
+  const [renamingCode, setRenamingCode] = useState<string | null>(null);
+  const [confirmRename, setConfirmRename] = useState<{ oldCode: string; newCode: string } | null>(null);
+
   // ── Handlers ─────────────────────────────────────────────────────────────
   const triggerChange = (updates: any) => {
     onDirty();
@@ -138,17 +150,26 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
 
   const derivedSKU = `${selMat}${selWgt}${selCol}-${selTrt}-${selLen}${selTex}`;
   const canBuildSKU = selMat && selWgt && selCol && selTrt && selLen && selTex;
-  // Blocks Add/Duplicate submission while another row is mid-edit — the same
-  // "only one code editable system-wide" invariant Move/Edit/Delete already
-  // enforce. This matters specifically because a successful Duplicate now
-  // lands the NEW code into edit mode immediately: without this guard, that
-  // would silently steal edit mode away from whatever row the user already
-  // had open, discarding its unsaved draft with no warning.
-  const canSubmitRegistration = canBuildSKU && !productCodes.includes(derivedSKU) && !editingCode;
+  // Renaming to the SAME code as the source (no dropdown changed) is the one
+  // case where derivedSKU is allowed to already exist in productCodes — it's
+  // the silent no-op case (see handleAddProduct), not a real collision.
+  // Every other mode (Add, Duplicate, or Rename onto a genuinely different,
+  // already-taken code) must still be blocked by the existing uniqueness
+  // check, unchanged from before this feature.
+  const isRenameNoOp = renamingCode !== null && derivedSKU === renamingCode;
+  const codeCollision = productCodes.includes(derivedSKU) && !isRenameNoOp;
+  // Blocks Add/Duplicate/Rename submission while another row is mid-edit —
+  // the same "only one code editable system-wide" invariant Move/Edit/Delete
+  // already enforce. This matters specifically because a successful
+  // Duplicate now lands the NEW code into edit mode immediately: without
+  // this guard, that would silently steal edit mode away from whatever row
+  // the user already had open, discarding its unsaved draft with no warning.
+  const canSubmitRegistration = canBuildSKU && !codeCollision && !editingCode;
 
   const resetRegistrationPanel = () => {
     setSelMat(''); setSelWgt(''); setSelCol(''); setSelTrt(''); setSelLen(''); setSelTex('');
     setDuplicatingFrom(null);
+    setRenamingCode(null);
   };
 
   // Pre-fills the six dropdowns from the source code's current attributes and
@@ -168,6 +189,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
     setSelTrt(attrs?.innerSurface ?? '');
     setSelLen(attrs?.length ?? '');
     setSelTex(attrs?.texture ?? '');
+    setRenamingCode(null); // mutually exclusive with Rename mode
     setDuplicatingFrom(code);
     registrationPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     firstSelectRef.current?.focus();
@@ -177,8 +199,48 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
     resetRegistrationPanel();
   };
 
+  // Same pre-fill/scroll/focus mechanism as Duplicate, switching the panel
+  // into "Renaming X" mode instead. Only ever called on an unlocked code —
+  // the row button itself is disabled on locked ones (unlike Duplicate,
+  // which is deliberately always enabled).
+  const handleRenameProduct = (code: string) => {
+    const attrs = config?.products?.[code]?.attributes;
+    setSelMat(attrs?.material ?? '');
+    setSelWgt(attrs?.weight ?? '');
+    setSelCol(attrs?.color ?? '');
+    setSelTrt(attrs?.innerSurface ?? '');
+    setSelLen(attrs?.length ?? '');
+    setSelTex(attrs?.texture ?? '');
+    setDuplicatingFrom(null); // mutually exclusive with Duplicate mode
+    setRenamingCode(code);
+    registrationPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    firstSelectRef.current?.focus();
+  };
+
+  const handleCancelRename = () => {
+    resetRegistrationPanel();
+  };
+
   const handleAddProduct = () => {
     if (!canSubmitRegistration) return;
+
+    // Rename mode branches off entirely before touching any Add/Duplicate
+    // logic below — it never appends a new registry entry, it moves an
+    // existing one.
+    if (renamingCode) {
+      if (isRenameNoOp) {
+        // No dropdown was changed from the pre-filled values: the derived
+        // code is identical to the source. Per design, this is a SILENT
+        // no-op — no confirmation dialog, no error, just close the panel.
+        resetRegistrationPanel();
+        return;
+      }
+      // A real rename: hand off to the confirmation modal rather than
+      // applying immediately (unlike Duplicate, which is instant) — the
+      // actual PATCH happens in handleConfirmRename() on explicit confirm.
+      setConfirmRename({ oldCode: renamingCode, newCode: derivedSKU });
+      return;
+    }
 
     const updatedCodes = [...productCodes, derivedSKU];
 
@@ -239,6 +301,75 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
     }
 
     resetRegistrationPanel();
+  };
+
+  // Executed only from the confirmation modal's Confirm button. Moves the
+  // registry entry from oldCode to newCode in a single PATCH — old key
+  // removed, new key added with the exact same matrix (deep-copied, so the
+  // old in-memory entry being deleted can't leave a dangling shared
+  // reference) and the exact same profileId. Attributes are rebuilt from
+  // the CURRENT six dropdown values rather than copied verbatim from the
+  // source: those dropdowns are what determine the code string itself, so
+  // wherever the user changed one to produce the new code, the attributes
+  // must track that change too — an unchanged dropdown reproduces the
+  // source's original value exactly, which is the common case, but a
+  // stored attribute that contradicted the new code string would be
+  // inconsistent. Same field/mechanism Duplicate already uses.
+  //
+  // productProfileMap is sent explicitly (full map, oldCode's entry moved
+  // to newCode) even though no live UI currently sets a product-level
+  // profileId — ProductEngine never writes productProfileMap today, so
+  // omitting it here would let the write-hook's fallback silently drop
+  // oldCode's profile link on rename for the one path (a future profile-
+  // linking UI, or already-migrated data) where a renameable code might
+  // have one.
+  const handleConfirmRename = () => {
+    if (!confirmRename) return;
+    const { oldCode, newCode } = confirmRename;
+
+    const sourceMatrix = productMatrixConfig[oldCode] || { dimensionDefs: [], sizes: {} };
+    const updatedMatrix = { ...productMatrixConfig };
+    delete updatedMatrix[oldCode];
+    updatedMatrix[newCode] = JSON.parse(JSON.stringify(sourceMatrix));
+
+    const updatedCodes = productCodes.map(c => (c === oldCode ? newCode : c));
+
+    const updatedProfileMap = { ...(config?.productProfileMap ?? {}) };
+    const sourceProfileId = config?.products?.[oldCode]?.profileId ?? null;
+    delete updatedProfileMap[oldCode];
+    if (sourceProfileId) updatedProfileMap[newCode] = sourceProfileId;
+
+    setProductCodes(updatedCodes);
+    setProductMatrixConfig(updatedMatrix);
+    triggerChange({
+      productCodes: updatedCodes,
+      productMatrixConfig: updatedMatrix,
+      productProfileMap: updatedProfileMap,
+      productAttributes: {
+        [newCode]: { material: selMat, weight: selWgt, color: selCol, innerSurface: selTrt, length: selLen, texture: selTex }
+      }
+    });
+
+    // Migrate expand state so the renamed row keeps its open/closed state
+    // under its new key rather than leaving a stale, now-unreachable old-
+    // code entry sitting in the Set. Every OTHER row's entry is left alone.
+    setExpandedCodes(prev => {
+      if (!prev.has(oldCode)) return prev;
+      const next = new Set(prev);
+      next.delete(oldCode);
+      next.add(newCode);
+      return next;
+    });
+
+    setConfirmRename(null);
+    resetRegistrationPanel();
+  };
+
+  // Closes only the confirmation modal — the panel stays in "Renaming X"
+  // mode (dropdowns and banner untouched) so the user can adjust and
+  // resubmit, or use the banner's own Cancel to fully back out.
+  const handleCancelRenameConfirm = () => {
+    setConfirmRename(null);
   };
 
   const handleRemoveProduct = (code: string) => {
@@ -456,6 +587,23 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
           </div>
         )}
 
+        {renamingCode && (
+          <div className="px-4 py-2.5 bg-brand-secondary/5 border-b border-brand-secondary/20 flex items-center justify-between gap-3">
+            <span className="text-xs font-semibold uppercase tracking-wider text-brand-secondary flex items-center gap-2">
+              <PenLine className="w-3.5 h-3.5" strokeWidth={2} />
+              Renaming <span className="font-mono normal-case">{renamingCode}</span>
+            </span>
+            <button
+              onClick={handleCancelRename}
+              className="text-[10px] font-bold uppercase tracking-wider text-muted hover:text-white flex items-center gap-1 outline-none"
+              title="Cancel — back to normal Add mode"
+            >
+              <X className="w-3 h-3" strokeWidth={2} />
+              Cancel
+            </button>
+          </div>
+        )}
+
         <div className="p-4 bg-canvas flex flex-col gap-4">
           <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
             <select ref={firstSelectRef} value={selMat} onChange={e => setSelMat(e.target.value)} className="h-9 px-2 bg-canvas border border-gray-700 rounded-lg font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none">
@@ -494,7 +642,11 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
               title={editingCode ? 'Save or cancel the active edit first' : undefined}
               className="h-12 px-8 rounded-lg bg-canvas border border-emerald-500/50 text-emerald-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500 text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all outline-none disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
             >
-              {duplicatingFrom ? (<><Copy className="w-5 h-5" /> CREATE DUPLICATE</>) : (<><Plus className="w-5 h-5" /> ADD PRODUCT CODE</>)}
+              {duplicatingFrom
+                ? (<><Copy className="w-5 h-5" /> CREATE DUPLICATE</>)
+                : renamingCode
+                  ? (<><PenLine className="w-5 h-5" /> RENAME PRODUCT CODE</>)
+                  : (<><Plus className="w-5 h-5" /> ADD PRODUCT CODE</>)}
             </button>
           </div>
         </div>
@@ -592,6 +744,26 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
+                        {/* Rename — the opposite convention from Duplicate: gated
+                            on isCodeLocked(code) using the exact same predicate
+                            Edit/Delete already use, since a locked code's identity
+                            can never change (only Duplicate can produce an
+                            editable copy of one). Visible but disabled, same
+                            pattern as Edit/Delete on a locked row, not hidden. */}
+                        <button
+                          onClick={() => { if (!isCodeLocked(code)) handleRenameProduct(code); }}
+                          disabled={!!editingCode || isCodeLocked(code)}
+                          className={`p-1.5 rounded-md transition-colors outline-none ${(editingCode || isCodeLocked(code)) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
+                          title={
+                            editingCode
+                              ? 'Save active edits first'
+                              : isCodeLocked(code)
+                                ? `Cannot rename — used by ${productCodeUsage[code]} submission${productCodeUsage[code] === 1 ? '' : 's'}`
+                                : 'Rename Product Code'
+                          }
+                        >
+                          <PenLine className="w-4 h-4" />
+                        </button>
                         {/* Duplicate — deliberately NOT gated on isCodeLocked(code).
                             This is the only way to change a locked code's specs:
                             the locked code itself remains permanently immutable,
@@ -675,6 +847,48 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
               >
                 <Trash className="w-4 h-4" strokeWidth={2} />
                 <span>CONFIRM REMOVE</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Rename Confirmation Modal ───────────────────────────────────────── */}
+      {confirmRename && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-canvas border border-gray-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
+            <div className="flex items-start gap-4 p-4 border-b border-gray-800">
+              <div className="w-12 h-12 rounded-full bg-brand-secondary/10 flex items-center justify-center shrink-0">
+                <PenLine className="w-6 h-6 text-brand-secondary" strokeWidth={2} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold uppercase tracking-wide text-primary mb-1">
+                  RENAME PRODUCT CODE?
+                </h3>
+                <p className="text-sm text-muted flex items-center flex-wrap gap-x-2">
+                  <span className="font-mono font-bold text-white">{confirmRename.oldCode}</span>
+                  <span className="text-muted">→</span>
+                  <span className="font-mono font-bold text-brand-secondary">{confirmRename.newCode}</span>
+                </p>
+                <p className="text-sm text-muted mt-2">
+                  The dimension/size matrix moves unchanged to the new code. This takes effect once you save configuration, and cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="p-4 bg-surface flex items-center justify-end gap-3">
+              <button
+                onClick={handleCancelRenameConfirm}
+                className="h-10 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-white font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none"
+              >
+                <X className="w-4 h-4" strokeWidth={2} />
+                <span>CANCEL</span>
+              </button>
+              <button
+                onClick={handleConfirmRename}
+                className="h-10 px-5 rounded-lg bg-brand-secondary/20 text-brand-secondary hover:bg-brand-secondary/30 font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none border border-brand-secondary/50 shadow-sm"
+              >
+                <PenLine className="w-4 h-4" strokeWidth={2} />
+                <span>CONFIRM RENAME</span>
               </button>
             </div>
           </div>
