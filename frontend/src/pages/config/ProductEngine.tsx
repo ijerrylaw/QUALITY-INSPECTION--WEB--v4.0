@@ -105,6 +105,24 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
   const [renamingCode, setRenamingCode] = useState<string | null>(null);
   const [confirmRename, setConfirmRename] = useState<{ oldCode: string; newCode: string } | null>(null);
 
+  // Which row (if any) is the source of an in-progress Duplicate/Rename
+  // composition — the two states are mutually exclusive, so at most one of
+  // them is ever non-null. Drives both the row highlight and the row-action
+  // freeze below: while a composition is pending, EVERY row's Edit/Rename/
+  // Duplicate/Delete are disabled (including the source row's own — clicking
+  // a second action on the same row mid-composition doesn't make sense
+  // either), closing a gap that existed before this: those four buttons
+  // previously only checked !!editingCode, which stays null for the entire
+  // pending-composition window (Duplicate only sets it AFTER a successful
+  // submit; Rename never sets it at all) — so clicking Edit/Delete on a
+  // DIFFERENT row while composing was previously unguarded. Move Up/Down are
+  // deliberately left alone: reordering can't corrupt or conflict with a
+  // pending composition (the arrays are read fresh from state at actual
+  // submit time), and expand/collapse is untouched for the same reason plus
+  // it doesn't touch any state the composition depends on.
+  const activeComposition = duplicatingFrom ?? renamingCode;
+  const isComposing = activeComposition !== null;
+
   // ── Handlers ─────────────────────────────────────────────────────────────
   const triggerChange = (updates: any) => {
     onDirty();
@@ -670,9 +688,21 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
 
             return (
               <div key={code} className="border-b border-gray-800 last:border-b-0 group/prod">
-                {/* Row Header */}
+                {/* Row Header — highlighted in the same Cyan/Info tint as the
+                    "Duplicating from X"/"Renaming X" banner when this row IS
+                    that X, so the panel and the row it applies to read as
+                    visually connected rather than disconnected across a
+                    scroll. Expand/collapse stays fully interactive on this
+                    row (cursor-pointer preserved) — only the action buttons
+                    freeze, not the read-only accordion. The isExpanded/
+                    isEditingThis branch below is otherwise UNCHANGED from
+                    before this session — same classes, same conditions. */}
                 <div
-                  className={`h-12 px-4 flex items-center justify-between transition-colors ${isExpanded && !isEditingThis ? 'bg-surface' : 'cursor-pointer hover:bg-surface-light'}`}
+                  className={`h-12 px-4 flex items-center justify-between transition-colors ${
+                    code === activeComposition
+                      ? 'bg-brand-secondary/10 border-l-2 border-l-brand-secondary cursor-pointer hover:bg-brand-secondary/[0.15]'
+                      : isExpanded && !isEditingThis ? 'bg-surface' : 'cursor-pointer hover:bg-surface-light'
+                  }`}
                   onClick={() => handleToggleExpandProduct(code)}
                 >
                   <div className="flex items-center gap-3">
@@ -732,14 +762,16 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                         </button>
                         <button
                           onClick={() => { if (!isCodeLocked(code)) handleStartEditProduct(code); }}
-                          disabled={!!editingCode || isCodeLocked(code)}
-                          className={`p-1.5 rounded-md transition-colors outline-none ${(editingCode || isCodeLocked(code)) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
+                          disabled={!!editingCode || isCodeLocked(code) || isComposing}
+                          className={`p-1.5 rounded-md transition-colors outline-none ${(editingCode || isCodeLocked(code) || isComposing) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
                           title={
-                            editingCode
-                              ? 'Save active edits first'
-                              : isCodeLocked(code)
-                                ? `Cannot edit — used by ${productCodeUsage[code]} submission${productCodeUsage[code] === 1 ? '' : 's'}`
-                                : 'Edit Config'
+                            isComposing
+                              ? 'Finish or cancel the pending rename/duplicate first'
+                              : editingCode
+                                ? 'Save active edits first'
+                                : isCodeLocked(code)
+                                  ? `Cannot edit — used by ${productCodeUsage[code]} submission${productCodeUsage[code] === 1 ? '' : 's'}`
+                                  : 'Edit Config'
                           }
                         >
                           <Edit2 className="w-4 h-4" />
@@ -752,14 +784,16 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                             pattern as Edit/Delete on a locked row, not hidden. */}
                         <button
                           onClick={() => { if (!isCodeLocked(code)) handleRenameProduct(code); }}
-                          disabled={!!editingCode || isCodeLocked(code)}
-                          className={`p-1.5 rounded-md transition-colors outline-none ${(editingCode || isCodeLocked(code)) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
+                          disabled={!!editingCode || isCodeLocked(code) || isComposing}
+                          className={`p-1.5 rounded-md transition-colors outline-none ${(editingCode || isCodeLocked(code) || isComposing) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
                           title={
-                            editingCode
-                              ? 'Save active edits first'
-                              : isCodeLocked(code)
-                                ? `Cannot rename — used by ${productCodeUsage[code]} submission${productCodeUsage[code] === 1 ? '' : 's'}`
-                                : 'Rename Product Code'
+                            isComposing
+                              ? 'Finish or cancel the pending rename/duplicate first'
+                              : editingCode
+                                ? 'Save active edits first'
+                                : isCodeLocked(code)
+                                  ? `Cannot rename — used by ${productCodeUsage[code]} submission${productCodeUsage[code] === 1 ? '' : 's'}`
+                                  : 'Rename Product Code'
                           }
                         >
                           <PenLine className="w-4 h-4" />
@@ -771,25 +805,36 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                             that can be freely edited. Still gated on !!editingCode
                             like every other row action, since a successful
                             duplicate immediately enters edit mode for the new
-                            code (see canSubmitRegistration). */}
+                            code (see canSubmitRegistration). Also gated on
+                            isComposing — including on the SOURCE row of the
+                            current composition itself, so a second Duplicate
+                            can't be started on top of an already-pending one. */}
                         <button
                           onClick={() => handleDuplicateProduct(code)}
-                          disabled={!!editingCode}
-                          className={`p-1.5 rounded-md transition-colors outline-none ${editingCode ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
-                          title={editingCode ? 'Save active edits first' : `Duplicate — create an editable copy of ${code}`}
+                          disabled={!!editingCode || isComposing}
+                          className={`p-1.5 rounded-md transition-colors outline-none ${(editingCode || isComposing) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
+                          title={
+                            isComposing
+                              ? 'Finish or cancel the pending rename/duplicate first'
+                              : editingCode
+                                ? 'Save active edits first'
+                                : `Duplicate — create an editable copy of ${code}`
+                          }
                         >
                           <Copy className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => setConfirmDeleteCode(code)}
-                          disabled={!!editingCode || isCodeLocked(code)}
-                          className={`p-1.5 rounded-md transition-colors outline-none ${(editingCode || isCodeLocked(code)) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-rose-400 hover:bg-rose-500/10'}`}
+                          disabled={!!editingCode || isCodeLocked(code) || isComposing}
+                          className={`p-1.5 rounded-md transition-colors outline-none ${(editingCode || isCodeLocked(code) || isComposing) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-rose-400 hover:bg-rose-500/10'}`}
                           title={
-                            editingCode
-                              ? 'Save active edits first'
-                              : isCodeLocked(code)
-                                ? `Cannot delete — used by ${productCodeUsage[code]} submission${productCodeUsage[code] === 1 ? '' : 's'}`
-                                : 'Remove'
+                            isComposing
+                              ? 'Finish or cancel the pending rename/duplicate first'
+                              : editingCode
+                                ? 'Save active edits first'
+                                : isCodeLocked(code)
+                                  ? `Cannot delete — used by ${productCodeUsage[code]} submission${productCodeUsage[code] === 1 ? '' : 's'}`
+                                  : 'Remove'
                           }
                         >
                           <Trash className="w-4 h-4" />
