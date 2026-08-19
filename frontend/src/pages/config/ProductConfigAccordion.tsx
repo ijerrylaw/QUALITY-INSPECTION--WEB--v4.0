@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, Edit2, Trash, Check, X, ToggleLeft, ToggleRight, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Edit2, Trash, Check, X, ToggleLeft, ToggleRight, ArrowUp, ArrowDown, Ruler, Eye } from 'lucide-react';
+import { isDimensionGraded } from '../../context/ConfigContext';
 import type { ProductConfig, ProductDimensionDef, ProductDimensionValue } from '../../context/ConfigContext';
 
 interface Props {
@@ -181,6 +182,31 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
     const updatedDefs = dimensionDefs.map(d => d.id === id ? { ...d, name, unit } : d);
     triggerChange({ dimensionDefs: updatedDefs });
     setEditingDim(null);
+  };
+
+  /**
+   * Flips one custom dimension between Graded and Record-only.
+   *
+   * Toggling to Record-only WRITES `isGraded: false`. Toggling back REMOVES
+   * the key rather than writing `isGraded: true` — so a def that was flipped
+   * and flipped back is byte-identical to how it started. That matters twice:
+   * ProductEngine's `actuallyChanged` JSON comparison then correctly reports
+   * "nothing changed" (no spurious lastAmended stamp, no dirty page), and the
+   * server's locked-code deep diff sees no phantom field. See
+   * isDimensionGraded() for why the default is never materialized.
+   *
+   * Purely a mode flag: no minSpec or tolerance is read, written, cleared or
+   * zeroed here, in either direction, however many times it is toggled.
+   */
+  const handleToggleGraded = (dimId: string) => {
+    if (isReadOnly) return;
+    const updatedDefs = dimensionDefs.map(d => {
+      if (d.id !== dimId) return d;
+      if (isDimensionGraded(d)) return { ...d, isGraded: false };
+      const { isGraded: _dropped, ...rest } = d;
+      return rest as ProductDimensionDef;
+    });
+    triggerChange({ dimensionDefs: updatedDefs });
   };
 
   const handleRemoveDimension = (id: string) => {
@@ -425,35 +451,86 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
             {/* DYNAMIC DIMENSIONS */}
             {dimensionDefs.map((def, index) => {
               const isEditing = editingDim?.id === def.id;
+              const graded = isDimensionGraded(def);
 
               return (
                 <tr key={def.id} className="hover:bg-surface-light/40 transition-colors group/row">
                   <td className="py-2.5 px-3 border-r border-gray-800/50 relative">
                     {isEditing ? (
-                      <div className="flex items-center gap-2">
-                        <input 
-                          type="text"
-                          value={editingDim.name}
-                          autoFocus
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') handleSaveDimension();
-                            if (e.key === 'Escape') setEditingDim(null);
-                          }}
-                          onChange={e => setEditingDim({ ...editingDim, name: e.target.value.toUpperCase() })}
-                          className="w-full h-9 px-2 bg-canvas border border-gray-700 rounded font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none uppercase"
-                        />
-                        <div className="flex items-center gap-0.5 shrink-0">
-                          <button onClick={handleSaveDimension} className="w-7 h-7 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-500/20 outline-none" title="Save">
-                            <Check className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => setEditingDim(null)} className="w-7 h-7 rounded flex items-center justify-center text-rose-400 hover:bg-rose-500/20 outline-none" title="Cancel (Esc)">
-                            <X className="w-4 h-4" />
-                          </button>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={editingDim.name}
+                            autoFocus
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') handleSaveDimension();
+                              if (e.key === 'Escape') setEditingDim(null);
+                            }}
+                            onChange={e => setEditingDim({ ...editingDim, name: e.target.value.toUpperCase() })}
+                            className="w-full h-9 px-2 bg-canvas border border-gray-700 rounded font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none uppercase"
+                          />
+                          <div className="flex items-center gap-0.5 shrink-0">
+                            <button onClick={handleSaveDimension} className="w-7 h-7 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-500/20 outline-none" title="Save">
+                              <Check className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => setEditingDim(null)} className="w-7 h-7 rounded flex items-center justify-center text-rose-400 hover:bg-rose-500/20 outline-none" title="Cancel (Esc)">
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
+                        {/* Full labeled grading-mode toggle — the expanded
+                            counterpart to the icon-only control shown on the
+                            collapsed row. Commits immediately via
+                            triggerChange, exactly like the format dropdown
+                            beside it; it is not staged through editingDim,
+                            which only carries name/unit. */}
+                        <button
+                          onClick={() => handleToggleGraded(def.id)}
+                          className={`w-full h-8 rounded flex items-center justify-center gap-1.5 border text-[10px] font-bold uppercase tracking-wider transition-colors outline-none ${
+                            graded
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                              : 'bg-gray-500/10 border-gray-500/30 text-gray-400 hover:bg-gray-500/20'
+                          }`}
+                          title={graded
+                            ? 'Graded — measurements are checked against this row’s spec. Click to make Record-only.'
+                            : 'Record-only — measurements are captured but never graded. Click to make Graded.'}
+                        >
+                          {graded ? <Ruler className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          <span>{graded ? 'Graded' : 'Record-only'}</span>
+                        </button>
                       </div>
                     ) : (
                       <div className="flex items-center justify-between">
-                        <span className="font-mono text-sm text-primary uppercase">{def.name}</span>
+                        <span className="font-mono text-sm text-primary uppercase flex items-center gap-2">
+                          {def.name}
+                          {/* Icon-only grading-mode toggle. Deliberately NOT
+                              inside the hover-reveal action group below: this
+                              is a persistent mode INDICATOR, and which
+                              dimensions are record-only must be legible at a
+                              glance. On a locked/read-only code it renders as
+                              a static, non-interactive icon rather than
+                              disappearing, so the mode stays visible even
+                              where it cannot be changed. */}
+                          <button
+                            onClick={() => handleToggleGraded(def.id)}
+                            disabled={isReadOnly}
+                            className={`w-6 h-6 rounded flex items-center justify-center shrink-0 outline-none transition-colors ${
+                              isReadOnly
+                                ? `cursor-default ${graded ? 'text-emerald-400/60' : 'text-gray-500'}`
+                                : graded
+                                  ? 'text-emerald-400 hover:bg-emerald-500/20'
+                                  : 'text-gray-400 hover:bg-gray-500/20'
+                            }`}
+                            title={isReadOnly
+                              ? (graded ? 'Graded' : 'Record-only')
+                              : graded
+                                ? 'Graded — click to make Record-only'
+                                : 'Record-only — click to make Graded'}
+                          >
+                            {graded ? <Ruler className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+                        </span>
                         {!isReadOnly && (
                           <div className="flex items-center gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity">
                             <button 
@@ -503,36 +580,48 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                   {STANDARD_SIZES.map(size => {
                     const isActive = !!sizes[size];
                     const dimVal = sizes[size]?.dimensions[def.id] || { minSpec: '', tolerance: '' };
-                    
+                    // Record-only greys out the spec inputs but never hides or
+                    // clears them: the stored numbers stay on screen and in the
+                    // data, so flipping back to Graded restores the exact spec
+                    // with nothing retyped. `isReadOnly` (the locked-code
+                    // freeze) is a separate, independent reason to disable.
+                    const specDisabled = !isActive || isReadOnly || !graded;
+
                     return (
                       <React.Fragment key={`${size}-${def.id}`}>
                         <td className={`py-2.5 px-2 border-r border-gray-800/50 transition-colors ${isActive ? 'bg-brand-primary/5' : 'bg-canvas/50'}`}>
-                          <input 
+                          <input
                             type="text"
                             value={dimVal.minSpec}
-                            disabled={!isActive || isReadOnly}
+                            disabled={specDisabled}
+                            title={!graded ? 'Record-only — this dimension is not graded, so its spec is not applied' : undefined}
                             onChange={e => handleUpdateDimensionValue(size, def.id, 'minSpec', formatTarget(e.target.value))}
                             onFocus={handleFocusSnapshot}
                             onBlur={e => handleRoundOnBlur(e, def.decimals ?? 0, v => handleUpdateDimensionValue(size, def.id, 'minSpec', v))}
                             className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
-                              isActive
-                                ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary'
-                                : 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
+                              !isActive
+                                ? 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
+                                : !graded
+                                  ? 'bg-canvas/40 border border-gray-800 text-gray-600 cursor-not-allowed'
+                                  : 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary'
                             }`}
                           />
                         </td>
                         <td className={`py-2.5 px-2 border-r border-gray-800/50 transition-colors ${!isActive ? 'bg-canvas/50' : 'bg-surface'}`}>
-                          <input 
+                          <input
                             type="text"
                             value={dimVal.tolerance}
-                            disabled={!isActive || isReadOnly}
+                            disabled={specDisabled}
+                            title={!graded ? 'Record-only — this dimension is not graded, so its spec is not applied' : undefined}
                             onChange={e => handleUpdateDimensionValue(size, def.id, 'tolerance', formatTolerance(e.target.value))}
                             onFocus={handleFocusSnapshot}
                             onBlur={e => handleRoundOnBlur(e, def.decimals ?? 0, v => handleUpdateDimensionValue(size, def.id, 'tolerance', v))}
                             className={`w-full h-9 rounded-md px-1 text-sm font-mono text-center outline-none transition-all ${
-                              isActive
-                                ? `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${dimVal.tolerance.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}`
-                                : 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
+                              !isActive
+                                ? 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
+                                : !graded
+                                  ? 'bg-canvas/40 border border-gray-800 text-gray-600 cursor-not-allowed'
+                                  : `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${dimVal.tolerance.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}`
                             }`}
                           />
                         </td>

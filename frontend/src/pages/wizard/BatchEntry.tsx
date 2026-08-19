@@ -209,7 +209,7 @@ function BatchModalDimensions({ row, updateRow, config, productCode, size }: any
                     )
                   ) : (
                     <span
-                      className="text-[10px] font-mono font-bold normal-case px-2 py-0.5 rounded-md border bg-gray-800/50 border-gray-700/50 text-muted"
+                      className="text-[10px] font-bold uppercase tracking-wider normal-case px-2 py-0.5 rounded-full border bg-gray-500/10 border-gray-500/30 text-gray-400"
                       title="Record-only \u2014 measured and stored, but not graded against a spec"
                     >
                       RECORD-ONLY
