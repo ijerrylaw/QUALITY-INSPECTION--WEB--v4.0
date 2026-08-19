@@ -108,18 +108,20 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
   // Which row (if any) is the source of an in-progress Duplicate/Rename
   // composition — the two states are mutually exclusive, so at most one of
   // them is ever non-null. Drives both the row highlight and the row-action
-  // freeze below: while a composition is pending, EVERY row's Edit/Rename/
-  // Duplicate/Delete are disabled (including the source row's own — clicking
-  // a second action on the same row mid-composition doesn't make sense
-  // either), closing a gap that existed before this: those four buttons
+  // freeze below: while a composition is pending, EVERY row's Move/Edit/
+  // Rename/Duplicate/Delete are disabled (including the source row's own —
+  // clicking a second action on the same row mid-composition doesn't make
+  // sense either), closing a gap that existed before this: those buttons
   // previously only checked !!editingCode, which stays null for the entire
   // pending-composition window (Duplicate only sets it AFTER a successful
   // submit; Rename never sets it at all) — so clicking Edit/Delete on a
-  // DIFFERENT row while composing was previously unguarded. Move Up/Down are
-  // deliberately left alone: reordering can't corrupt or conflict with a
-  // pending composition (the arrays are read fresh from state at actual
-  // submit time), and expand/collapse is untouched for the same reason plus
-  // it doesn't touch any state the composition depends on.
+  // DIFFERENT row while composing was previously unguarded. Move Up/Down
+  // were initially left unfrozen (reordering can't corrupt or conflict with
+  // a pending composition — the arrays are read fresh from state at actual
+  // submit time) but are now frozen too, for full consistency across every
+  // row action rather than a partial freeze. expand/collapse remains the
+  // one deliberate exception: it doesn't touch any state the composition
+  // depends on, so it stays interactive throughout.
   const activeComposition = duplicatingFrom ?? renamingCode;
   const isComposing = activeComposition !== null;
 
@@ -746,17 +748,17 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                       <>
                         <button
                           onClick={() => moveProductCode(index, 'up')}
-                          disabled={index === 0 || !!editingCode}
-                          className={`p-1.5 rounded-md transition-colors outline-none ${editingCode || index === 0 ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
-                          title="Move Up"
+                          disabled={index === 0 || !!editingCode || isComposing}
+                          className={`p-1.5 rounded-md transition-colors outline-none ${editingCode || index === 0 || isComposing ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
+                          title={isComposing ? 'Finish or cancel the pending rename/duplicate first' : 'Move Up'}
                         >
                           <ArrowUp className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => moveProductCode(index, 'down')}
-                          disabled={index === productCodes.length - 1 || !!editingCode}
-                          className={`p-1.5 rounded-md transition-colors outline-none ${editingCode || index === productCodes.length - 1 ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
-                          title="Move Down"
+                          disabled={index === productCodes.length - 1 || !!editingCode || isComposing}
+                          className={`p-1.5 rounded-md transition-colors outline-none ${editingCode || index === productCodes.length - 1 || isComposing ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
+                          title={isComposing ? 'Finish or cancel the pending rename/duplicate first' : 'Move Down'}
                         >
                           <ArrowDown className="w-4 h-4" />
                         </button>
