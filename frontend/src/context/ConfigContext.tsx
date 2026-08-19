@@ -70,8 +70,35 @@ export interface ProductDimensionDef {
   name: string;
   unit: string;
   isMin?: boolean;
+  /**
+   * Record-only mode when explicitly `false`: the operator still captures all
+   * 5 measurements, but they are never compared against a threshold and never
+   * affect the verdict. Absent/true = graded.
+   *
+   * The default is intentionally NOT written onto stored defs — see
+   * isDimensionGraded() below, which is the single place that rule lives.
+   */
+  isGraded?: boolean;
   /** Number of decimal places (0–3). Controls both the config setup grid and the Wizard entry inputs. Default: 0 (integer). */
   decimals?: number;
+}
+
+/**
+ * Client-side twin of backend/src/engine/dimensionEvaluator.ts's
+ * isDimensionGraded() — kept in sync deliberately, same pairing convention as
+ * hasUsableProductMatrix()/hasUsableRules().
+ *
+ * Only the explicit literal `false` means record-only. Every other value
+ * (absent, undefined, true) grades, so the 51 existing dimension defs — none
+ * of which carry this key — are unaffected until someone toggles one.
+ *
+ * Never materialize the `true` default onto a stored def: PATCH /api/config
+ * deep-diffs a locked product code's whole matrix subtree and ProductEngine
+ * re-sends every code on every save, so an injected default would 409 the
+ * request. The key appears only when a human toggles it.
+ */
+export function isDimensionGraded(dim: { isGraded?: boolean } | null | undefined): boolean {
+  return dim?.isGraded !== false;
 }
 
 export interface ProductDimensionValue {

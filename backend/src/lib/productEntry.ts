@@ -27,6 +27,14 @@ export interface ProductDimensionDef {
   unit: string;
   /** When true: minimum-only boundary — see dimensionEvaluator.ts's isMin handling. */
   isMin?: boolean;
+  /**
+   * Record-only mode when explicitly `false`: measured but excluded from
+   * grading. Absent/true = graded — the default is deliberately never
+   * materialized onto stored defs, because PATCH /api/config's locked-code
+   * deep diff would read that as a change. See isDimensionGraded() in
+   * engine/dimensionEvaluator.ts for the full rationale.
+   */
+  isGraded?: boolean;
   /** Format precision for this dynamic dimension (0–3 decimals). */
   decimals?: number;
 }

@@ -9,6 +9,10 @@
  * read here, same as the frontend — `isMin` is derived purely from whether a
  * size's tolerance field is the literal string `'MIN'`.
  *
+ * `isGraded` is the one exception to that "def fields are not read" rule: it
+ * is a per-dimension mode switch rather than a spec value, and StepDimensions
+ * applies it identically client-side (see isDimensionGraded below).
+ *
  * Historically dimension pass/fail existed ONLY client-side (ISO2859_MATH_ENGINE.md
  * §5 documents it as a system fully independent from AQL). This evaluator gives
  * resolveVerdict.ts a server-side equivalent so persisted verdicts (initial
@@ -26,9 +30,38 @@ const FIXED_DIM_PALM = '__fixed_palm__';
 export interface ProductDimensionDef {
   id: string;
   name: string;
+  /**
+   * Record-only mode. `false` means the operator still captures all 5
+   * measurements but they are NEVER compared against a threshold and never
+   * contribute to pass/fail — see isDimensionGraded() for the default rule.
+   * Only ever set on CUSTOM dimensions; the two fixed rows (GLOVE LENGTH,
+   * PALM WIDTH) are always graded and never carry this flag.
+   */
+  isGraded?: boolean;
   /** Legacy flat-format fallback fields — rarely populated, mirrored for parity. */
   minSpec?: string;
   tolerance?: string;
+}
+
+/**
+ * The graded/record-only rule, in exactly one place.
+ *
+ * The default is DELIBERATELY IMPLICIT: only the explicit literal `false`
+ * means record-only. Absent, undefined, or `true` all mean graded, so every
+ * pre-existing dimension def — none of which carry this key — keeps grading
+ * with byte-identical behavior and no backfill.
+ *
+ * That implicitness is load-bearing, not merely tidy. PATCH /api/config
+ * rejects ANY change to a locked product code's matrix via a recursive deep
+ * diff of the whole subtree (config.routes.ts), and ProductEngine.tsx always
+ * re-sends every product's matrix on every save. Materializing a default
+ * `isGraded: true` onto existing defs would therefore register as
+ * `undefined -> true` on locked codes and 409 the entire request, breaking
+ * every configuration save in the app. The key must only ever appear because
+ * a human actually toggled it.
+ */
+export function isDimensionGraded(dim: { isGraded?: boolean } | null | undefined): boolean {
+  return dim?.isGraded !== false;
 }
 
 export interface ProductDimensionValue {
@@ -84,6 +117,14 @@ export interface DimensionResult {
   threshold: number;
   maxThreshold: number;
   isMin: boolean;
+  /**
+   * false for a record-only dimension: `fails` is all-false and `failed` is
+   * false because no comparison was ATTEMPTED, not because the measurements
+   * were in spec. `threshold`/`maxThreshold` are still reported — they are
+   * real stored config, and this flag exists so a reader can tell "not
+   * evaluated" apart from "evaluated and passed".
+   */
+  isGraded: boolean;
 }
 
 export interface DimensionEvalParams {
@@ -177,26 +218,34 @@ export function evaluateDimensions(params: DimensionEvalParams): DimensionEvalRe
   let failedDimensions = 0;
 
   activeDimensions.forEach((dim) => {
+    const graded = isDimensionGraded(dim);
     const { minSpec, tolerance, isMin } = getDimSpec(dim.id, sizeEntry, dynamicDimensions);
     const threshold = minSpec > 0 ? minSpec - tolerance : 0;
     const maxThreshold = minSpec > 0 && tolerance > 0 && !isMin ? minSpec + tolerance : Infinity;
 
     const vals = measurements[dim.id] ?? Array(SLOTS_PER_DIM).fill('');
-    const fails = vals.map((v) => {
-      const num = parseFloat(v);
-      if (isNaN(num)) return false;
-      return num < threshold || (!isMin && tolerance > 0 && num > maxThreshold);
-    });
+    // Record-only: no threshold comparison is attempted at all. The slots are
+    // still read and summarized below (min/max/avg are recorded data, wanted
+    // for reporting/trending) — only the pass/fail judgement is skipped.
+    const fails = graded
+      ? vals.map((v) => {
+          const num = parseFloat(v);
+          if (isNaN(num)) return false;
+          return num < threshold || (!isMin && tolerance > 0 && num > maxThreshold);
+        })
+      : vals.map(() => false);
 
     const numVals = vals.map((v) => parseFloat(v)).filter((v) => !isNaN(v));
     const min = numVals.length > 0 ? Math.min(...numVals) : 0;
     const max = numVals.length > 0 ? Math.max(...numVals) : 0;
     const avg = numVals.length > 0 ? numVals.reduce((a, b) => a + b, 0) / numVals.length : 0;
 
+    // Unreachable for a record-only dimension (fails is all-false above), so
+    // it can never reach failedDimensions and therefore never flip the verdict.
     const failed = fails.some((f) => f === true);
     if (failed) failedDimensions++;
 
-    dimensionResults.push({ id: dim.id, name: dim.name, min, max, avg, fails, failed, threshold, maxThreshold, isMin });
+    dimensionResults.push({ id: dim.id, name: dim.name, min, max, avg, fails, failed, threshold, maxThreshold, isMin, isGraded: graded });
   });
 
   return { failedDimensions, dimensionResults };
