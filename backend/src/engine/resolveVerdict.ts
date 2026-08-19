@@ -20,6 +20,7 @@ import { evaluateAQLVerdict } from './aqlEvaluator';
 import type { CategoryResult } from './aqlEvaluator';
 import { evaluateDimensions, hasUsableProductMatrix } from './dimensionEvaluator';
 import type { DimensionResult, ProductConfig, ProductDimensionDef } from './dimensionEvaluator';
+import { resolveProductRegistry } from '../lib/productEntry';
 import prisma from '../lib/prismaClient';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -342,11 +343,27 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
     ? safeParseJSON<any[]>(appConfig.inspectionProfiles, [])
     : [];
 
+  // ── B4 grading cutover ──────────────────────────────────────────────────
+  // The product registry (per-code matrix + profile link) is now read from
+  // AppConfig.products, through the SAME resolver the admin/config surface
+  // uses (lib/productEntry.ts). Resolved once here and used for both reads
+  // below, so a single request can never see one structure's view of a code
+  // for its profile and another's for its dimensions.
+  //
+  // This is a DATA-SOURCE swap only — no grading logic, threshold, tolerance
+  // or MIN-sentinel behavior is changed. `products` is kept byte-identical to
+  // the legacy structures on every write by B2's write-hook, so the values
+  // reaching the math are the same ones it received before.
+  const registry = resolveProductRegistry(appConfig ?? {});
+
   let profileId = params.profileId || null;
 
-  if (!profileId && productCode && appConfig?.productProfileMap) {
-    const profileMap = safeParseJSON<Record<string, string>>(appConfig.productProfileMap, {});
-    profileId = profileMap[productCode] ?? null;
+  // Unchanged semantics: only consulted when no explicit profileId was
+  // supplied. Previously guarded on the raw productProfileMap column being
+  // truthy; an absent/empty registry now yields the same outcome (lookup
+  // misses -> null -> the safety net below), so the net behavior is identical.
+  if (!profileId && productCode) {
+    profileId = registry.productProfileMap[productCode] ?? null;
   }
 
   // Captured before any safety-net substitution — see ResolveVerdictResult.requestedProfileId.
@@ -430,9 +447,12 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
   let dimensionResults: DimensionResult[] = [];
 
   if (params.size && params.dimensionMeasurements) {
-    const productMatrixConfig = safeParseJSON<Record<string, ProductConfig>>(
-      appConfig?.productMatrixConfig, {},
-    );
+    // B4: per-code dimension specs now come from `products` via the shared
+    // registry resolver above, instead of the productMatrixConfig column.
+    // globalDimensionDefs stays on AppConfig.dimensions — that is a global
+    // fallback list, not per-product data, and was never part of the three
+    // consolidated structures.
+    const productMatrixConfig = registry.productMatrixConfig as Record<string, ProductConfig>;
     const globalDimensionDefs = safeParseJSON<ProductDimensionDef[]>(appConfig?.dimensions, []);
 
     if (!hasUsableProductMatrix(productMatrixConfig[productCode ?? ''], params.size)) {

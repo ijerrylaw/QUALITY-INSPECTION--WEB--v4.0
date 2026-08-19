@@ -184,6 +184,67 @@ export interface LegacyProductStructures {
  *     `code: null` — matching the legacy structure's own convention of only
  *     holding codes that actually have a profile linked.
  */
+/** The raw AppConfig JSON columns this module needs. Structural, not Prisma-typed. */
+export interface RawProductColumns {
+  products?: string | null;
+  productCodes?: string | null;
+  productMatrixConfig?: string | null;
+  productProfileMap?: string | null;
+}
+
+function parseJSON<T>(raw: string | null | undefined, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * THE single resolver for reading the product registry — shared by the
+ * admin/config surface (config.routes.ts, cut over in B3) and the grading
+ * engine (resolveVerdict.ts, cut over in B4).
+ *
+ * Promoted here from config.routes.ts in B4 precisely so both callers share
+ * one implementation and one fallback policy. If the admin UI and the grading
+ * engine could ever disagree about which codes exist or what a code's matrix
+ * says, that disagreement would be invisible in the UI and would surface only
+ * as a wrong pass/fail — exactly the failure mode this consolidation exists to
+ * eliminate.
+ *
+ * SAFETY FALLBACK: if `products` is empty while the legacy structures still
+ * hold codes, this is an unmigrated database (e.g. a dev.db restored from
+ * before Session A, which added the column). Reading `products` there would
+ * silently report an EMPTY registry — which for the admin UI means 17 codes
+ * vanishing, and for the GRADING engine means every dimension gate failing
+ * closed with VerdictNoUsableDimensionConfigError. Falls back to the legacy
+ * structures and logs loudly instead.
+ *
+ * The fallback is deliberately all-or-nothing on that one unambiguous signal:
+ * it never merges per-code, because a per-code fallback would paper over
+ * exactly the real drift this cutover needs to surface.
+ */
+export function resolveProductRegistry(config: RawProductColumns): LegacyProductStructures {
+  const products = parseJSON<ProductsMap>(config.products, {});
+  const legacyCodes = parseJSON<string[]>(config.productCodes, []);
+
+  if (Object.keys(products).length === 0 && legacyCodes.length > 0) {
+    console.warn(
+      `[productRegistry] AppConfig.products is empty but productCodes[] holds ${legacyCodes.length} code(s) — ` +
+      'falling back to the legacy structures. This database predates the `products` column ' +
+      '(Session A) or was never migrated; run backend/scripts/migrate-products-field.ts.',
+    );
+    return {
+      productCodes: legacyCodes,
+      productMatrixConfig: parseJSON<Record<string, ProductConfig>>(config.productMatrixConfig, {}),
+      productProfileMap: parseJSON<Record<string, string>>(config.productProfileMap, {}),
+    };
+  }
+
+  return deriveLegacyStructures(products);
+}
+
 export function deriveLegacyStructures(products: ProductsMap): LegacyProductStructures {
   const productCodes: string[] = [];
   const productMatrixConfig: Record<string, ProductConfig> = {};

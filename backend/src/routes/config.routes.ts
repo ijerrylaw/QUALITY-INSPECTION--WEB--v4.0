@@ -13,8 +13,11 @@ import { Router, Request, Response } from 'express';
 import prisma from '../lib/prismaClient';
 import type { AppConfig } from '../../generated/prisma/client';
 import { requireRole } from '../middleware/auth';
-import { buildProductsMap, deriveLegacyStructures } from '../lib/productEntry';
-import type { ProductsMap, ProductConfig, LegacyProductStructures } from '../lib/productEntry';
+// resolveProductRegistry lives in lib/productEntry.ts as of B4 — shared with
+// the grading engine (resolveVerdict.ts) so both read the registry through
+// exactly one implementation and one fallback policy.
+import { buildProductsMap, resolveProductRegistry } from '../lib/productEntry';
+import type { ProductsMap } from '../lib/productEntry';
 
 const router = Router();
 
@@ -154,43 +157,6 @@ function validateProductMatrixConfig(matrix: unknown): InvalidTargetField[] {
   }
 
   return errors;
-}
-
-/**
- * Resolves the product registry for READ purposes (Session B3 cutover).
- *
- * `products` is the read source of truth for the admin/config surface as of
- * B3. The three legacy structures are still written unchanged (B2's design),
- * so this returns values byte-identical to reading them directly — see
- * deriveLegacyStructures().
- *
- * SAFETY FALLBACK: if `products` is empty while the legacy structures still
- * hold codes, this is an unmigrated database (e.g. a dev.db restored from
- * before Session A, which added the column). Reading `products` there would
- * silently report an EMPTY product catalog — 17 codes vanishing from the
- * admin UI and every wizard dropdown. Falls back to the legacy structures and
- * logs loudly instead. The fallback is deliberately all-or-nothing on that one
- * unambiguous signal: it never merges per-code, because a per-code fallback
- * would paper over exactly the real drift this cutover needs to surface.
- */
-function resolveProductRegistry(config: AppConfig): LegacyProductStructures {
-  const products = safeParseJSON<ProductsMap>(config.products, {});
-  const legacyCodes = safeParseJSON<string[]>(config.productCodes, []);
-
-  if (Object.keys(products).length === 0 && legacyCodes.length > 0) {
-    console.warn(
-      `[config] AppConfig.products is empty but productCodes[] holds ${legacyCodes.length} code(s) — ` +
-      'falling back to the legacy structures. This database predates the `products` column ' +
-      '(Session A) or was never migrated; run backend/scripts/migrate-products-field.ts.',
-    );
-    return {
-      productCodes: legacyCodes,
-      productMatrixConfig: safeParseJSON<Record<string, ProductConfig>>(config.productMatrixConfig, {}),
-      productProfileMap: safeParseJSON<Record<string, string>>(config.productProfileMap, {}),
-    };
-  }
-
-  return deriveLegacyStructures(products);
 }
 
 /**
