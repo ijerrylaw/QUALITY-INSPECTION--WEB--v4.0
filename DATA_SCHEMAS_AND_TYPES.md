@@ -102,6 +102,15 @@ export type DimensionStats = Record<string, {
   threshold: number;
   maxThreshold: number;
   isMin: boolean;
+  /**
+   * false for a Record-only dimension (see ProductDimensionDef.isGraded).
+   * `fails` is then all-false because no comparison was ATTEMPTED, not
+   * because the measurements were in spec — this flag is what distinguishes
+   * "not evaluated" from "evaluated and passed". `threshold`/`maxThreshold`
+   * still carry the real stored spec. Absent on stats written before the flag
+   * existed, which reads as graded.
+   */
+  isGraded: boolean;
 }>;
 
 export interface AmendmentLog {
@@ -269,6 +278,31 @@ export interface ProductDimensionDef {
    * Suppresses the MAX upper limit check in StepDimensions and BatchEntry.
    */
   isMin?: boolean;
+  /**
+   * Graded (default) vs Record-only. When explicitly `false`, the operator
+   * still captures all 5 measurements and they are still persisted in
+   * `Submission.dimensions`, but the dimension is excluded from ISO 2859
+   * grading entirely — no threshold comparison is attempted and it can never
+   * contribute to a FAIL verdict. Applies ONLY to custom dimensions; the two
+   * fixed rows (GLOVE LENGTH, PALM WIDTH) are always graded.
+   *
+   * THE DEFAULT IS NEVER MATERIALIZED. Only the literal `false` means
+   * record-only — absent/undefined/true all grade, and the admin UI removes
+   * the key rather than writing `true` when toggling back to Graded. This is
+   * required, not cosmetic: PATCH /api/config rejects ANY change to a locked
+   * product code's matrix via a recursive deep diff (`diffValues`), and
+   * ProductEngine.tsx re-sends every code's matrix on every save, so writing a
+   * default onto existing defs would 409 every configuration save. The single
+   * source of the rule is `isDimensionGraded()`, declared in both
+   * `backend/src/engine/dimensionEvaluator.ts` and
+   * `frontend/src/context/ConfigContext.tsx`.
+   *
+   * Note the flag lives on the DEFINITION (per product code) while the values
+   * it suppresses live per SIZE, in `SizeConfig.dimensions[dimId]`. Those
+   * stored minSpec/tolerance values are never cleared, zeroed or mutated by
+   * toggling, in either direction, at any toggle count.
+   */
+  isGraded?: boolean;
   decimals?: number;            // Format precision for dynamic dimensions (0–3 decimals)
 }
 
@@ -283,25 +317,37 @@ export interface SizeConfig {
 }
 ```
 
-### 3.1 Consolidated Product Record (`AppConfig.products`) — additive, not yet live
+### 3.1 Consolidated Product Record (`AppConfig.products`) — the live source of truth
 
-**Not read by any call site yet.** Session A of a multi-session fix for the
-drift risk of keeping one product code's data split across three
-independently-keyed structures above (`productCodes[]` /
-`productMatrixConfig` / `productProfileMap`) — a real corrupted-key
-incident on `productProfileMap` is documented in `CHANGELOG.md`. This new
-field consolidates all three, plus the six SKU dictionary attributes
-(previously discarded after composing the code string — see the Product
-Engine discovery report), into one per-code record. `productCodes` /
-`productMatrixConfig` / `productProfileMap` remain the live source of
-truth for every existing call site until a later session rewires reads
-onto `products` and removes them. Backend type source of truth:
-`backend/src/lib/productEntry.ts`.
+**`products` is now the sole read AND write target for the product registry.**
+It began (Session A) as an additive mirror of the three independently-keyed
+structures above (`productCodes[]` / `productMatrixConfig` /
+`productProfileMap`), which carried a real drift risk — a corrupted-key
+incident on `productProfileMap` is documented in `CHANGELOG.md`. It
+consolidates all three, plus the six SKU dictionary attributes (previously
+discarded after composing the code string), into one per-code record. Backend
+type source of truth: `backend/src/lib/productEntry.ts`.
+
+The cutover has since completed and this section previously described the
+superseded Session-A state:
+
+* **B3** — reads for the admin/config surface moved onto `products`.
+* **B4** — the GRADING engine (`resolveVerdict.ts`) moved onto it too, through
+  the same shared resolver (`resolveProductRegistry()` in
+  `lib/productEntry.ts`), so the admin UI and the verdict engine can never
+  disagree about what a code's matrix says.
+* **B6** — `products` became the only column written. The three legacy columns
+  are frozen at their B6-era values and are read by exactly one thing:
+  `resolveProductRegistry()`'s unmigrated-database fallback.
+
+The API contract is unchanged and is NOT a guide to storage: `PATCH
+/api/config` still accepts the three legacy field names, and `GET /api/config`
+still returns them — as projections derived from `products`.
 
 ```typescript
 export interface AppConfig {
   // ...all fields above, plus:
-  /** JSON: Record<productCode, ProductEntry> — see §3.1. Additive only, not yet consumed anywhere. */
+  /** JSON: Record<productCode, ProductEntry> — see §3.1. The live registry: sole read and write target. */
   products?: Record<string, ProductEntry>;
 }
 

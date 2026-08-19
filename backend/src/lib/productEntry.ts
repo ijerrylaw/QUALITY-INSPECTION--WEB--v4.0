@@ -5,9 +5,13 @@
  * three-way drift risk (see CHANGELOG.md's documented productProfileMap
  * corrupted-key incident, and the Product Engine discovery report §2/§5).
  *
- * Additive only: nothing reads AppConfig.products yet. The three structures
- * above remain the live source of truth for every current call site until a
- * later session rewires reads onto this one and removes them.
+ * NO LONGER ADDITIVE — this header described the Session-A state and was left
+ * behind by the cutover it predicted. AppConfig.products is now the sole read
+ * AND write target for the product registry: B3 moved the admin/config
+ * surface's reads onto it, B4 moved the grading engine's (both through
+ * resolveProductRegistry() below), and B6 made it the only column written.
+ * The three legacy columns are frozen and are read by exactly one thing —
+ * that resolver's unmigrated-database fallback.
  *
  * Mirrors DATA_SCHEMAS_AND_TYPES.md §3's ProductConfig/SizeConfig/
  * ProductDimensionDef shapes exactly — kept intentionally separate from
