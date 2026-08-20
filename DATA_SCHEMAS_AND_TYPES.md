@@ -194,6 +194,26 @@ export interface InspectionProfile {
 }
 ```
 
+**Defect name uniqueness (client-enforced, not a stored constraint):** a
+defect's `name` must be unique within its own `InspectionProfile` — the same
+name in a *different* profile is not a conflict. Enforced in
+`QualityRules.tsx` (`findDuplicateDefectName()`), case-insensitive with
+internal whitespace collapsed, applied on both Add and Rename. There is no
+corresponding backend check — `PATCH /api/config` treats
+`inspectionProfiles` as a serialize-passthrough JSON field with no
+validation of its own, so this constraint exists only in the admin UI.
+
+**Duplicate Profile always mints fresh ids.** `handleDuplicateProfile`
+(`QualityRules.tsx`) never copies the source profile's category/defect ids
+by reference — every `AQLCategory.id` and `DefectDefinition.id` in the copy
+is freshly generated (same slug-then-disambiguate shape as adding a
+category/defect normally), with defect ids checked for uniqueness across
+**every** profile, not just the copy's own, so a duplicated defect's
+unchanged name can't reproduce the source's exact id. Each defect's
+`categoryId` is remapped through an old-id→new-id map built during the same
+pass, so the copy's category/defect grouping is preserved exactly even
+though every id string changed. The source profile itself is never mutated.
+
 ---
 
 ## 3. PRODUCT & SKU ENGINE SCHEMAS
@@ -290,10 +310,11 @@ export interface ProductDimensionDef {
    * record-only — absent/undefined/true all grade, and the admin UI removes
    * the key rather than writing `true` when toggling back to Graded. This is
    * required, not cosmetic: PATCH /api/config rejects ANY change to a locked
-   * product code's matrix via a recursive deep diff (`diffValues`), and
-   * ProductEngine.tsx re-sends every code's matrix on every save, so writing a
-   * default onto existing defs would 409 every configuration save. The single
-   * source of the rule is `isDimensionGraded()`, declared in both
+   * product code's stored ProductEntry (matrix, attributes, AND profileId —
+   * see §3.1) via a recursive deep diff (`diffValues`), and ProductEngine.tsx
+   * re-sends every code's matrix on every save, so writing a default onto
+   * existing defs would 409 every configuration save. The single source of
+   * the rule is `isDimensionGraded()`, declared in both
    * `backend/src/engine/dimensionEvaluator.ts` and
    * `frontend/src/context/ConfigContext.tsx`.
    *
@@ -374,3 +395,20 @@ export interface ProductAttributes {
   texture: string | null;       // SkuOption.value from skuTextures
 }
 ```
+
+**Locked-code write protection covers the WHOLE `ProductEntry`.** A product
+code with ≥1 referencing `Submission` is "locked" (computed on demand by
+`getProductCodeUsage()`, not stored as a flag). Once locked, `matrix`,
+`attributes`, AND `profileId` are ALL frozen together — `PATCH /api/config`
+diffs the entire incoming `ProductEntry` against the stored one for every
+locked code and rejects (`409`) if any field differs (see
+`API_AND_INTEGRATION_SPEC.md` for the response shape). Originally (B6) this
+check covered only `matrix`; widened 2026-08-20 (commit `19cd645`) after
+confirming a locked SOURCE code's `attributes`/`profileId` could otherwise be
+silently overwritten as an incidental side effect of a request nominally
+about a different code. The check also iterates every locked code from
+`getProductCodeUsage()`, not just the codes a given payload's
+`productMatrixConfig` happens to mention — a payload that omits
+`productMatrixConfig` entirely (touching only `productAttributes`, say) is
+still caught. The only way to change a locked code's identity is Duplicate,
+which writes a brand-new code's record and never touches the source's.
