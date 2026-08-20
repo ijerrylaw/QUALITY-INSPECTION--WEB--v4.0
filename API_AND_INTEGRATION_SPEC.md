@@ -27,6 +27,9 @@
 * `PATCH /api/config`
   * **Role:** Partially updates the global `AppConfig`.
   * **Payload:** Accepts a partial `AppConfig` object. Any supplied key is merged and persisted.
+  * **Locked product codes:** a product code referenced by ≥1 `Submission` is "locked" (computed on demand, not stored). Two independent rejections guard it, both checked before any write:
+    - Removing a locked code from `productCodes[]` — **Response 409:** `{ error, lockedProductCodes: [{ productCode, submissionCount }] }`
+    - Changing ANY field of a locked code's stored record — `matrix`, `attributes`, OR `profileId` (see `DATA_SCHEMAS_AND_TYPES.md` §3.1's `ProductEntry`) — **Response 409:** `{ error, lockedProductCodes: [{ productCode, submissionCount, changedFields }] }`, where `changedFields` lists the dotted-path fields that differ from the stored record. Widened 2026-08-20 (commit `19cd645`) from a matrix-only check to cover the whole record, and from "codes present in the payload's `productMatrixConfig`" to every locked code — a payload that omits `productMatrixConfig` entirely no longer bypasses the check.
   * **Auth:** Requires `X-User-Role` header, Group A/B (`EXECUTIVE`, `MANAGER`, `ADMIN`) — see `NAVIGATION_AND_RBAC.md` §5.1.
 
 ---
