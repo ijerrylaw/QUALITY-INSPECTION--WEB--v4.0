@@ -14,6 +14,7 @@
 import { useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth, rolesInGroups } from '../../context/AuthContext';
+import { useConfig } from '../../context/ConfigContext';
 import { useWizardGuard } from '../../context/WizardGuardContext';
 import { useHistoryIndicator } from '../../context/HistoryIndicatorContext';
 import { PinChangeModal } from '../auth/PinChangeModal';
@@ -65,6 +66,9 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [showPinChange, setShowPinChange] = useState(false);
   const { user, logout } = useAuth();
+  const { config } = useConfig();
+  const companyName = config?.companyName?.trim() || 'ONE GLOVE GROUP';
+  const logoImage = config?.logoImage || null;
   const canChangePin = user?.loginMethod === 'PIN';
 
   // ── Discard-unsaved-wizard-work navigation guard ─────────────────────────
@@ -111,13 +115,17 @@ export function Sidebar() {
       <div>
         <div className="h-16 flex items-center justify-between px-4 border-b border-gray-800/60">
           <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-10 h-10 rounded-lg bg-brand-primary flex items-center justify-center shrink-0 shadow-sm">
-              <Factory className="w-5 h-5 text-white" strokeWidth={2} />
+            <div className="w-10 h-10 rounded-lg bg-brand-primary flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
+              {logoImage ? (
+                <img src={logoImage} alt={companyName} className="w-full h-full object-contain" />
+              ) : (
+                <Factory className="w-5 h-5 text-white" strokeWidth={2} />
+              )}
             </div>
             {!collapsed && (
               <div className="flex flex-col">
                 <span className="text-xs font-bold uppercase tracking-wider text-primary truncate">
-                  ONE GLOVE GROUP
+                  {companyName}
                 </span>
                 <span className="text-[10px] font-mono uppercase text-muted tracking-wide">
                   QI PLATFORM v4.0
