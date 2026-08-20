@@ -1,5 +1,6 @@
 import { SystemSettings } from '../components/system/SystemSettings';
 import { M365UserRolesPanel } from '../components/system/M365UserRolesPanel';
+import { CompanyBrandingPanel } from '../components/system/CompanyBrandingPanel';
 
 export function SystemPage() {
   return (
@@ -17,6 +18,10 @@ export function SystemPage() {
 
       <div className="pt-2">
         <M365UserRolesPanel />
+      </div>
+
+      <div className="pt-2">
+        <CompanyBrandingPanel />
       </div>
 
       <div className="pt-2">
