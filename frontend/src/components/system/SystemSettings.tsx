@@ -1,17 +1,47 @@
 import { useState } from 'react';
-import { Save, RefreshCw, Key, Cloud, Database, ShieldCheck } from 'lucide-react';
+import { Save, RefreshCw, Key, Cloud, Database, ShieldCheck, Eye, EyeOff } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { useToast } from '../ui/ToastProvider';
+
+// Standard 8-4-4-4-12 hex GUID/UUID format (Azure AD Tenant ID / Client ID).
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+interface AzureAdFieldErrors {
+  tenantId?: string;
+  clientId?: string;
+  clientSecret?: string;
+}
 
 export function SystemSettings() {
   const { addToast } = useToast();
   const [isTesting, setIsTesting] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
 
+  // Decorative today — no backend persists these (see NAVIGATION_AND_RBAC.md's
+  // note on this card). Converted from uncontrolled defaultValue inputs so the
+  // Client Secret reveal toggle and validation below have real state to work with.
+  const [tenantId, setTenantId] = useState('8f92a3b1-4f77-4a00-9112-9b8c7d6e5f4a');
+  const [clientId, setClientId] = useState('1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d');
+  const [clientSecret, setClientSecret] = useState('********************************');
+  const [showSecret, setShowSecret] = useState(false);
+  const [errors, setErrors] = useState<AzureAdFieldErrors>({});
+
+  const validateGuidField = (field: 'tenantId' | 'clientId', value: string) => {
+    if (!value.trim()) {
+      setErrors((prev) => ({ ...prev, [field]: 'This field is required.' }));
+      return;
+    }
+    if (!GUID_RE.test(value.trim())) {
+      setErrors((prev) => ({ ...prev, [field]: 'Must be a valid GUID (8-4-4-4-12 hex format).' }));
+      return;
+    }
+    setErrors((prev) => ({ ...prev, [field]: undefined }));
+  };
+
   const handleTestConnection = () => {
     setIsTesting(true);
     setConnectionStatus('testing');
-    
+
     // Mock API Call
     setTimeout(() => {
       setIsTesting(false);
@@ -21,6 +51,21 @@ export function SystemSettings() {
   };
 
   const handleSave = () => {
+    const nextErrors: AzureAdFieldErrors = {};
+    if (!tenantId.trim()) nextErrors.tenantId = 'This field is required.';
+    else if (!GUID_RE.test(tenantId.trim())) nextErrors.tenantId = 'Must be a valid GUID (8-4-4-4-12 hex format).';
+
+    if (!clientId.trim()) nextErrors.clientId = 'This field is required.';
+    else if (!GUID_RE.test(clientId.trim())) nextErrors.clientId = 'Must be a valid GUID (8-4-4-4-12 hex format).';
+
+    if (!clientSecret.trim()) nextErrors.clientSecret = 'This field is required.';
+
+    setErrors(nextErrors);
+    if (Object.values(nextErrors).some(Boolean)) {
+      addToast('error', 'Fix the highlighted Azure AD fields before saving.');
+      return;
+    }
+
     addToast('success', 'System configuration securely saved.');
   };
 
@@ -67,29 +112,57 @@ export function SystemSettings() {
           <div className="p-6 space-y-6">
             <div className="space-y-2">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted">Tenant ID</label>
-              <input 
-                type="text" 
-                defaultValue="8x92a3b1-4f77-4a00-9112-9b8c7d6e5f4a"
-                className="w-full bg-canvas border border-gray-700 text-sm font-mono text-primary rounded-lg px-4 py-2.5 focus:border-brand-primary outline-none"
+              <input
+                type="text"
+                value={tenantId}
+                onChange={(e) => setTenantId(e.target.value)}
+                onBlur={(e) => validateGuidField('tenantId', e.target.value)}
+                className={`w-full bg-canvas border text-sm font-mono text-primary rounded-lg px-4 py-2.5 outline-none ${
+                  errors.tenantId ? 'border-rose-500/50 focus:border-rose-500' : 'border-gray-700 focus:border-brand-primary'
+                }`}
               />
+              {errors.tenantId && <p className="text-xs text-danger">{errors.tenantId}</p>}
             </div>
-            
+
             <div className="space-y-2">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted">Client ID (Application ID)</label>
-              <input 
-                type="text" 
-                defaultValue="1a2b3c4d-5e6f-7g8h-9i0j-1k2l3m4n5o6p"
-                className="w-full bg-canvas border border-gray-700 text-sm font-mono text-primary rounded-lg px-4 py-2.5 focus:border-brand-primary outline-none"
+              <input
+                type="text"
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+                onBlur={(e) => validateGuidField('clientId', e.target.value)}
+                className={`w-full bg-canvas border text-sm font-mono text-primary rounded-lg px-4 py-2.5 outline-none ${
+                  errors.clientId ? 'border-rose-500/50 focus:border-rose-500' : 'border-gray-700 focus:border-brand-primary'
+                }`}
               />
+              {errors.clientId && <p className="text-xs text-danger">{errors.clientId}</p>}
             </div>
-            
+
             <div className="space-y-2">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted">Client Secret</label>
-              <input 
-                type="password" 
-                defaultValue="********************************"
-                className="w-full bg-canvas border border-gray-700 text-sm font-mono text-primary rounded-lg px-4 py-2.5 focus:border-brand-primary outline-none"
-              />
+              <div className="relative">
+                <input
+                  type={showSecret ? 'text' : 'password'}
+                  value={clientSecret}
+                  onChange={(e) => setClientSecret(e.target.value)}
+                  onBlur={() => {
+                    if (!clientSecret.trim()) setErrors((prev) => ({ ...prev, clientSecret: 'This field is required.' }));
+                    else setErrors((prev) => ({ ...prev, clientSecret: undefined }));
+                  }}
+                  className={`w-full bg-canvas border text-sm font-mono text-primary rounded-lg pl-4 pr-11 py-2.5 outline-none ${
+                    errors.clientSecret ? 'border-rose-500/50 focus:border-rose-500' : 'border-gray-700 focus:border-brand-primary'
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSecret((prev) => !prev)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-primary outline-none"
+                  title={showSecret ? 'Hide Client Secret' : 'Show Client Secret'}
+                >
+                  {showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              {errors.clientSecret && <p className="text-xs text-danger">{errors.clientSecret}</p>}
               <p className="text-xs text-muted mt-1">Stored securely in backend environment variables.</p>
             </div>
           </div>
