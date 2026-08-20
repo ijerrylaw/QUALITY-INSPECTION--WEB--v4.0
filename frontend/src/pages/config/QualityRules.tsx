@@ -132,17 +132,91 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
     triggerChange(updated);
   };
 
+  /**
+   * Duplicating a profile must give the COPY its own fresh category/defect
+   * ids — a plain shallow spread previously left the copy's aqlCategories/
+   * defectDefinitions pointing at the exact same id strings as the source
+   * (confirmed live: GLOBAL STANDARD and BACKUP share identical category ids
+   * AND/BARRIER and 47 defect ids). Currently harmless (every lookup site in
+   * the codebase scopes to one resolved profile before matching by id), but
+   * a latent risk for any future id-only lookup, and increasingly relevant
+   * heading toward multi-tenant use.
+   *
+   * Two things must both hold, not just "ids differ":
+   *   1. Every regenerated id must be genuinely fresh — never reused from
+   *      the SOURCE, and never colliding with another id minted in this same
+   *      batch.
+   *   2. The copy's internal wiring must be preserved exactly — a defect
+   *      that belonged to the source's "AND" category must belong to the
+   *      COPY's own new AND-equivalent category, not silently point at
+   *      nothing. QualityRules.tsx's own kanban board groups defects with a
+   *      strict `d.categoryId === cat.id` (no name fallback, unlike the
+   *      grading engine's currentClass===name-or-id leniency), so skipping
+   *      the remap would render every category in the copy empty even
+   *      though the defect data is technically still present.
+   */
   const handleDuplicateProfile = () => {
-    const newId = `prof_${Date.now()}`;
+    const newProfileId = `prof_${Date.now()}`;
+
+    // Fresh category ids — same generator family as saveAddCategory
+    // (`cat_${Date.now()}`), with an index suffix: saveAddCategory only ever
+    // mints ONE id per click, but Duplicate mints several in one synchronous
+    // tick, where Date.now() alone could repeat across categories in the
+    // same millisecond. categoryIdMap records old id -> new id so defects
+    // can be remapped below; everything else about each category (name,
+    // aql, evalMode, any display-only fields) is preserved verbatim.
+    const categoryIdMap = new Map<string, string>();
+    const newCategories = (activeProfile.aqlCategories || []).map((cat: any, i: number) => {
+      const newCatId = `cat_${Date.now()}_${i}`;
+      categoryIdMap.set(cat.id, newCatId);
+      return { ...cat, id: newCatId };
+    });
+
+    // Fresh defect ids — same slug-then-disambiguate shape as
+    // handleAddDefect, but the uniqueness check is deliberately wider than
+    // that function's own (which only checks the ACTIVE profile's defects):
+    // a duplicated defect's NAME is unchanged, so slugifying it again would
+    // reproduce the exact SAME id the source defect already has unless the
+    // check is forced to see that id too. Checking every profile's ids
+    // (not just the source's) costs nothing extra and leaves every minted
+    // id globally unique, not merely "different from the source." Each
+    // defect's categoryId is remapped through categoryIdMap so the copy's
+    // grouping matches the source exactly; a categoryId with no mapping
+    // (shouldn't happen — every defect's category exists in its own
+    // profile) falls back to the original value rather than silently
+    // becoming undefined, so an already-dangling reference stays exactly as
+    // dangling as it was, not newly broken by this change.
+    const allExistingDefectIds = new Set<string>(
+      profiles.flatMap((p: any) => (p.defectDefinitions || []).map((d: any) => d.id)),
+    );
+    const newDefects = (activeProfile.defectDefinitions || []).map((def: any) => {
+      const rawSlug = String(def.name ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      const baseId = rawSlug ? `def_${rawSlug}` : `def_${Date.now()}`;
+      let newDefId = baseId;
+      let counter = 1;
+      while (allExistingDefectIds.has(newDefId)) {
+        newDefId = `${baseId}_${counter}`;
+        counter++;
+      }
+      allExistingDefectIds.add(newDefId);
+      return {
+        ...def,
+        id: newDefId,
+        categoryId: categoryIdMap.get(def.categoryId) ?? def.categoryId,
+      };
+    });
+
     const newProfile = {
       ...activeProfile,
-      id: newId,
+      id: newProfileId,
       name: `${activeProfile.name} (COPY)`,
       isDefault: false,
+      aqlCategories: newCategories,
+      defectDefinitions: newDefects,
     };
     const updated = [...profiles, newProfile];
     setProfiles(updated);
-    setActiveProfileId(newId);
+    setActiveProfileId(newProfileId);
     triggerChange(updated);
   };
 
