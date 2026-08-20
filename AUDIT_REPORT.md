@@ -217,3 +217,31 @@ with its full original context, reasoning, and verification trail.
     to have graded, visible directly in the UI with zero indication the
     displayed breakdown may no longer match what was true at submission time.
 
+19. **Product Engine's multi-expand feature has never been live-clicked in a
+    real browser.** Implemented (commit `fc0983e`, "allow multiple Product
+    Engine rows expanded for side-by-side viewing") and passes typecheck/build,
+    but never exercised end-to-end in an actual browser session. No defect is
+    suspected — tracking-only, pending Jerry's manual check.
+
+20. **Approvals Queue "Load More" pagination + refresh-after-approve/reject
+    has never been live-clicked in a real browser.** Backend verified live via
+    direct API calls (`curl`/fetch against the running server); the frontend
+    UI interaction itself — clicking "Load More", approving/rejecting and
+    confirming the list refreshes correctly — has never been driven through
+    an actual browser session. Blocked the same way as items #21/#22 below:
+    the sandboxed Browser pane cannot complete the M365/MSAL popup OAuth flow
+    real Approvals Queue access requires (see item #9, Group A/B permission
+    gate). No defect is suspected — tracking-only, pending Jerry's manual
+    check.
+
+21. **The Graded/Record-only dimension toggle and the merged Edit/Rename
+    identity sub-panel have never been live-clicked as a combined flow.**
+    Both features (`CHANGELOG.md` §20, §21) are implemented and have been
+    logic-verified and API-verified across two sessions — typecheck clean,
+    production build succeeds, code paths traced by hand — but neither has
+    been driven through an actual browser click-through, individually or
+    together, in the real running app. Same MSAL/Group A-B sandboxed-browser
+    limitation as items #9/#20: the Browser pane cannot complete the popup
+    OAuth flow needed to reach these admin-only screens as a real user. No
+    defect is suspected — tracking-only, pending Jerry's manual check.
+

@@ -4290,3 +4290,169 @@ Never logged as an `AUDIT_REPORT.md` open item — found and fixed within the
 same investigation, never shipped as a known-open bug — but recorded here so
 it's part of the permanent record rather than living only in the commit
 message.
+
+## 20. Graded/Record-only Dimension Mode — Shipped 2026-08-19
+
+Per-dimension toggle letting an admin mark a measurement dimension as
+record-only (data still collected, never graded) instead of every configured
+dimension always contributing to the verdict. Four-commit build:
+
+- **`a1b20ca`** — the flag and the grading skip. `isGraded?: boolean` added
+  to all three `ProductDimensionDef` declarations (`ConfigContext.tsx`,
+  `productEntry.ts`, `dimensionEvaluator.ts` — three separate types, not one
+  shared shape). Default is deliberately **implicit**: only the literal
+  `false` means record-only; `undefined`/`true` all grade. Codified as
+  `isDimensionGraded()` in both engines rather than an inline `!== false`
+  check a future edit could drift from. Materializing an explicit default
+  onto existing defs was rejected outright — `PATCH /api/config`'s recursive
+  deep-diff lock check on a locked code's matrix would read `undefined ->
+  true` as a real change and 409 the whole config save. `evaluateDimensions()`
+  skips the threshold comparison entirely for a record-only dimension
+  (`fails` is all-false by construction, so it can never flip the verdict)
+  but still computes/reports min/max/avg and threshold/maxThreshold — nothing
+  about the stored config is cleared or zeroed. New `DimensionResult.isGraded`
+  lets a reader distinguish "not evaluated" from "evaluated and passed".
+  Honors the flag on globally-sourced defs (`AppConfig.dimensions`) the same
+  as product-specific ones. GLOVE LENGTH/PALM WIDTH (fixed dimensions,
+  synthesized inline) are structurally out of scope and always grade.
+- **`8578ee2`** — both wizards (which duplicate dimension logic independently,
+  confirmed sharing no helper) updated to honor record-only dimensions in
+  their own display/entry paths.
+- **`25613c5`** — the admin-facing toggle in Product Engine's dimension
+  config, plus a color-token correction on the wizard's RECORD-ONLY chip from
+  the previous commit.
+- **`e52443a`** — documentation: shape in `DATA_SCHEMAS_AND_TYPES.md`, grading
+  rule in `ISO2859_MATH_ENGINE.md` §5, plus two unrelated stale `products`
+  claims corrected in the same pass.
+
+Typecheck clean both sides on every sub-step.
+
+## 21. Merge Standalone Rename into the Inline Edit Flow — Shipped 2026-08-20
+
+Product Engine had two pencil icons per unlocked row — Edit (inline matrix
+editing) and Rename (jumped to the top REGISTRATION panel) — real UX
+confusion Jerry flagged directly, resolved via `/grill-me` as a merge rather
+than a cosmetic fix. Exactly one "Edit" action per unlocked row now.
+Commit `8750e12`, `frontend/src/pages/config/ProductEngine.tsx` only, zero
+backend changes.
+
+Removed: `renamingCode`/`confirmRename` state, all four rename handlers, the
+standalone Rename row button, the "Renaming X" top-panel banner, and the
+RENAME PRODUCT CODE submit branch. `isRenameNoOp`'s collision exception on
+the top panel is gone with it. `isComposing` simplified to
+`duplicatingFrom !== null` — Duplicate is now the only remaining top-panel
+composition state (editing another row was already independently frozen by
+`editingCode`, predating this change).
+
+Added: a collapsed-by-default identity sub-panel (`identityDraft` +
+`isIdentityExpanded`) inside the Edit row — a small toggle next to the code
+label reveals the same six SKU dropdowns the old top panel used, prefilled
+from the code's current attributes, rendered inline with no scroll and no
+jump. Save branches: an expanded sub-panel with a real, non-colliding
+identity change opens a confirmation modal; otherwise Save behaves exactly
+as plain matrix-only Save always did. On confirmed identity change, one
+PATCH moves the registry entry using the matrix **draft** (not the stored
+matrix), so any matrix edits made earlier in the same Edit session move
+with it rather than being silently dropped. `lastAmended` is stamped only
+if matrix content itself changed, matching old Rename's behavior.
+`productProfileMap`/`expandedCodes` migrate exactly as before.
+
+Edit's existing `isCodeLocked(code)` check is now the only gate on reaching
+identity editing at all — deleting standalone Rename removed its own lock
+check as dead code with nothing left orphaned. Typecheck clean both sides,
+production build succeeds.
+
+## 22. Close the Locked-code Attribute/profileId Write Gap — Shipped 2026-08-20
+
+Prior open item (B6) accepted as scope that the locked-code deep-diff check
+on `PATCH /api/config` covered only `productMatrixConfig` —
+`productAttributes` and `profileId` on a locked (submission-referenced) code
+could still be changed. Unreachable through the real UI (Edit is fully
+disabled on locked codes) but reachable via a direct API call. Commit
+`19cd645`.
+
+Two things made the real fix broader than "diff two more fields":
+`profileId` lives in the same JSON entry as `attributes`/`matrix`
+(`ProductEntry` in `productEntry.ts`), so one extended diff covers all
+three — but the existing check's **iteration scope**, not just its diff
+target, was the actual gap. It only walked
+`Object.keys(suppliedMatrix)` — codes present in the payload's
+`productMatrixConfig`. The real frontend always resends the whole matrix
+map so this went unnoticed, but a minimal bypass payload of just
+`{ productAttributes: { [lockedCode]: {...} } }` with no
+`productMatrixConfig` key at all would leave `suppliedMatrix` empty and skip
+the locked code entirely.
+
+Fix: replaced the matrix-only loop with one that diffs the whole incoming
+`ProductEntry` against the stored one, for every code
+`getProductCodeUsage()` reports as locked, gated on `incomingProducts`
+rather than `payload.productMatrixConfig` specifically. `buildProductsMap()`
+already reproduces an untouched locked code's attributes/profileId
+bit-for-bit from `existing`, so an honest full-config resend still diffs to
+zero `changedFields` — no false positives. Error message and response
+shape (`lockedProductCodes: [{ productCode, submissionCount, changedFields
+}]`) otherwise unchanged. Duplicate's write path (a new code's own record)
+is untouched — the check only fires on the source code's own entry.
+No frontend changes; confirmed during discovery this is a pure
+server-side gap the real UI cannot reach. Typecheck clean both sides.
+
+## 23. Reject Duplicate Defect Names Within a Profile — Shipped 2026-08-20
+
+`handleAddDefect` only ever checked its auto-generated id (slugified from
+the name) for uniqueness — the name itself was never compared, and on
+collision the id generator silently appended `_1` and let the add proceed.
+This is exactly how a real duplicate ("Wet Glove" / "Wet Glove" again) ended
+up in live data as two separate entries, one permanently unselectable and
+permanently reading zero. Commit `b3a26cd`.
+
+`saveEditDefect` (the separate defect-rename handler, sharing no code with
+`handleAddDefect`) had zero uniqueness checking of any kind — not even the
+weak id-based one Add had, since a rename never touches the id.
+
+Fix: one new comparison, `findDuplicateDefectName(name, excludeId?)` —
+case-insensitive, internal-whitespace-collapsed, scoped to the current
+profile's `activeDefects` only (the same name in a different profile is not
+a conflict). The id-slug generator was considered and rejected as the basis
+for this check since it strips all punctuation, not just whitespace
+("Wet-Glove" vs "Wet.Glove" would false-positive as duplicates).
+`excludeId` lets a rename check against every other defect without
+colliding with itself when its name is unchanged. Wired into both
+`handleAddDefect` and `saveEditDefect`; both reject via the existing
+`addToast('error', ...)` pattern and leave the inline editor open on
+rejection so an in-progress edit isn't lost. Validation only — no change to
+id generation, no cleanup of already-existing duplicate entries (out of
+scope). Typecheck clean, production build succeeds.
+
+## 24. Fresh Category/Defect IDs on Inspection Profile Duplicate — Shipped 2026-08-20
+
+`handleDuplicateProfile` was a shallow spread — `aqlCategories`/
+`defectDefinitions` were copied by reference, so the copy kept the exact
+same id strings as the source. Confirmed live: GLOBAL STANDARD and BACKUP
+shared identical category ids (`AND`, `BARRIER`) and 47 defect ids. Harmless
+today (every id-based lookup in the codebase scopes to one resolved profile
+first) but a latent risk for any future cross-profile id lookup, and more
+relevant heading toward multi-tenant use. Commit `7016c39`.
+
+The real complication: a defect links to its category only via
+`defectDefinitions[].categoryId` (`currentClass`/`defaultClass` are
+engine-normalized names computed on the fly by `resolveVerdict()`, never
+persisted). The grading engine tolerates a category lookup by name as well
+as id, so grading would likely still work without a remap — but
+`QualityRules.tsx`'s kanban board groups defects with a strict
+`d.categoryId === cat.id`, no name fallback. Skipping the remap would leave
+every category card in the duplicated profile's editor empty even though
+the defect data was technically present — worse than the bug being fixed.
+
+Fix keeps the existing slug-then-disambiguate shape but widens the
+uniqueness check beyond `handleAddDefect`'s single-profile scope to every
+profile's existing defect ids (Duplicate doesn't change the defect's name,
+so reapplying that generator naively would reproduce the source's exact
+id). Category ids extend `saveAddCategory`'s own `cat_${Date.now()}` pattern
+with an index suffix, since Duplicate mints several ids in one synchronous
+tick where `saveAddCategory` never risked a same-millisecond collision.
+`categoryIdMap` (old id → new) is built once and threaded through the
+defect remap so internal category/defect wiring is preserved exactly; only
+the id strings change. The source profile is never touched — every new id
+is written onto freshly mapped copies (`{ ...cat, id: ... }` /
+`{ ...def, id: ..., categoryId: ... }`). Typecheck clean, production build
+succeeds.
