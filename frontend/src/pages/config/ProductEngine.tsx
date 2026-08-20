@@ -94,36 +94,55 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
   const registrationPanelRef = useRef<HTMLDivElement>(null);
   const firstSelectRef = useRef<HTMLSelectElement>(null);
 
-  // Rename — reuses the same panel and pre-fill mechanism as Duplicate, but is
-  // a REPLACE (old key removed, new key added with the same attributes/matrix/
-  // profileId) rather than an independent new entry, requires a confirmation
-  // step before applying, and is only reachable on unlocked (zero-submission)
-  // codes. `renamingCode` and `duplicatingFrom` are deliberately mutually
-  // exclusive — entering one clears the other, so the panel only ever shows
-  // one mode's banner at a time. `confirmRename` holds the pending old/new
-  // pair between clicking submit and the user confirming in the modal.
-  const [renamingCode, setRenamingCode] = useState<string | null>(null);
-  const [confirmRename, setConfirmRename] = useState<{ oldCode: string; newCode: string } | null>(null);
+  // Identity editing — MERGED into the inline Edit flow (previously a
+  // standalone Rename button/banner/state machine, commit 45ef4a4; removed
+  // per the 2026-08-20 UX-confusion fix). `identityDraft` holds the six SKU
+  // dictionary VALUES (not the composed code string) for whichever code is
+  // currently being edited, pre-filled from that code's stored attributes
+  // the moment Edit is opened — same pre-fill logic Duplicate/old-Rename
+  // already used. The identity sub-panel itself is collapsed by default
+  // (`isIdentityExpanded`); expanding it does NOT create a new "composing"
+  // state distinct from the Edit session already in progress — see the
+  // isComposing comment below for why. `confirmIdentityChange` holds the
+  // pending old/new code pair between clicking Save (with a real identity
+  // change staged) and the user confirming in the modal — same mechanism
+  // old Rename's `confirmRename` used, renamed to reflect it now fires from
+  // within Edit's Save button rather than a dedicated Rename submit.
+  interface IdentityDraft {
+    material: string;
+    weight: string;
+    color: string;
+    innerSurface: string;
+    length: string;
+    texture: string;
+  }
+  const [identityDraft, setIdentityDraft] = useState<IdentityDraft | null>(null);
+  const [isIdentityExpanded, setIsIdentityExpanded] = useState(false);
+  const [confirmIdentityChange, setConfirmIdentityChange] = useState<{ oldCode: string; newCode: string } | null>(null);
 
-  // Which row (if any) is the source of an in-progress Duplicate/Rename
-  // composition — the two states are mutually exclusive, so at most one of
-  // them is ever non-null. Drives both the row highlight and the row-action
-  // freeze below: while a composition is pending, EVERY row's Move/Edit/
-  // Rename/Duplicate/Delete are disabled (including the source row's own —
-  // clicking a second action on the same row mid-composition doesn't make
-  // sense either), closing a gap that existed before this: those buttons
-  // previously only checked !!editingCode, which stays null for the entire
-  // pending-composition window (Duplicate only sets it AFTER a successful
-  // submit; Rename never sets it at all) — so clicking Edit/Delete on a
-  // DIFFERENT row while composing was previously unguarded. Move Up/Down
-  // were initially left unfrozen (reordering can't corrupt or conflict with
-  // a pending composition — the arrays are read fresh from state at actual
-  // submit time) but are now frozen too, for full consistency across every
-  // row action rather than a partial freeze. expand/collapse remains the
-  // one deliberate exception: it doesn't touch any state the composition
-  // depends on, so it stays interactive throughout.
-  const activeComposition = duplicatingFrom ?? renamingCode;
-  const isComposing = activeComposition !== null;
+  // Which row (if any) is the source of an in-progress Duplicate composition
+  // — drives both the row highlight and the row-action freeze below: while a
+  // composition is pending, EVERY row's Move/Edit/Duplicate/Delete are
+  // disabled (including the source row's own), closing a gap that would
+  // otherwise exist: those buttons only check !!editingCode elsewhere, which
+  // stays null for the entire pending-composition window (Duplicate only
+  // sets it AFTER a successful submit) — so clicking Edit/Delete on a
+  // DIFFERENT row while composing would otherwise be unguarded. Move Up/Down
+  // are frozen too, for full consistency across every row action rather than
+  // a partial freeze. expand/collapse remains the one deliberate exception:
+  // it doesn't touch any state the composition depends on, so it stays
+  // interactive throughout.
+  //
+  // Identity editing does NOT need this same mechanism, and deliberately
+  // doesn't get one: unlike old standalone Rename (which composed via the
+  // top panel BEFORE editingCode was ever set), the identity sub-panel only
+  // opens from INSIDE an already-active Edit session — editingCode is
+  // already non-null the instant it's reachable. Every other row's actions
+  // are already fully frozen by their own pre-existing `!!editingCode` check
+  // the moment Edit is clicked, matrix-only or identity-included, so
+  // expanding the identity sub-panel needs no additional freeze — it would
+  // be redundant with protection that already exists.
+  const isComposing = duplicatingFrom !== null;
 
   // ── Handlers ─────────────────────────────────────────────────────────────
   const triggerChange = (updates: any) => {
@@ -170,26 +189,36 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
 
   const derivedSKU = `${selMat}${selWgt}${selCol}-${selTrt}-${selLen}${selTex}`;
   const canBuildSKU = selMat && selWgt && selCol && selTrt && selLen && selTex;
-  // Renaming to the SAME code as the source (no dropdown changed) is the one
-  // case where derivedSKU is allowed to already exist in productCodes — it's
-  // the silent no-op case (see handleAddProduct), not a real collision.
-  // Every other mode (Add, Duplicate, or Rename onto a genuinely different,
-  // already-taken code) must still be blocked by the existing uniqueness
-  // check, unchanged from before this feature.
-  const isRenameNoOp = renamingCode !== null && derivedSKU === renamingCode;
-  const codeCollision = productCodes.includes(derivedSKU) && !isRenameNoOp;
-  // Blocks Add/Duplicate/Rename submission while another row is mid-edit —
-  // the same "only one code editable system-wide" invariant Move/Edit/Delete
-  // already enforce. This matters specifically because a successful
-  // Duplicate now lands the NEW code into edit mode immediately: without
-  // this guard, that would silently steal edit mode away from whatever row
-  // the user already had open, discarding its unsaved draft with no warning.
+  const codeCollision = productCodes.includes(derivedSKU);
+  // Blocks Add/Duplicate submission while another row is mid-edit — the same
+  // "only one code editable system-wide" invariant Move/Edit/Delete already
+  // enforce. This matters specifically because a successful Duplicate now
+  // lands the NEW code into edit mode immediately: without this guard, that
+  // would silently steal edit mode away from whatever row the user already
+  // had open, discarding its unsaved draft with no warning.
   const canSubmitRegistration = canBuildSKU && !codeCollision && !editingCode;
+
+  // ── Identity sub-panel derived values (merged Edit+Rename) ─────────────────
+  // Same shape as the top panel's derivedSKU/canBuildSKU/codeCollision above,
+  // computed from identityDraft instead of the top panel's sel* state — the
+  // two are deliberately independent so editing one row's identity can never
+  // bleed into the top Add/Duplicate panel's own in-progress selections.
+  const identityDerivedSKU = identityDraft
+    ? `${identityDraft.material}${identityDraft.weight}${identityDraft.color}-${identityDraft.innerSurface}-${identityDraft.length}${identityDraft.texture}`
+    : '';
+  const canBuildIdentity = !!identityDraft
+    && !!identityDraft.material && !!identityDraft.weight && !!identityDraft.color
+    && !!identityDraft.innerSurface && !!identityDraft.length && !!identityDraft.texture;
+  // The composed identity reproducing the code currently being edited is the
+  // "nothing actually changed" case — not a collision, and not something
+  // that should route through the confirmation modal. Any OTHER existing
+  // code is a real collision and must still block Save.
+  const isIdentityNoOp = editingCode !== null && identityDerivedSKU === editingCode;
+  const identityCollision = productCodes.includes(identityDerivedSKU) && !isIdentityNoOp;
 
   const resetRegistrationPanel = () => {
     setSelMat(''); setSelWgt(''); setSelCol(''); setSelTrt(''); setSelLen(''); setSelTex('');
     setDuplicatingFrom(null);
-    setRenamingCode(null);
   };
 
   // Pre-fills the six dropdowns from the source code's current attributes and
@@ -209,7 +238,6 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
     setSelTrt(attrs?.innerSurface ?? '');
     setSelLen(attrs?.length ?? '');
     setSelTex(attrs?.texture ?? '');
-    setRenamingCode(null); // mutually exclusive with Rename mode
     setDuplicatingFrom(code);
     registrationPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     firstSelectRef.current?.focus();
@@ -219,48 +247,8 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
     resetRegistrationPanel();
   };
 
-  // Same pre-fill/scroll/focus mechanism as Duplicate, switching the panel
-  // into "Renaming X" mode instead. Only ever called on an unlocked code —
-  // the row button itself is disabled on locked ones (unlike Duplicate,
-  // which is deliberately always enabled).
-  const handleRenameProduct = (code: string) => {
-    const attrs = config?.products?.[code]?.attributes;
-    setSelMat(attrs?.material ?? '');
-    setSelWgt(attrs?.weight ?? '');
-    setSelCol(attrs?.color ?? '');
-    setSelTrt(attrs?.innerSurface ?? '');
-    setSelLen(attrs?.length ?? '');
-    setSelTex(attrs?.texture ?? '');
-    setDuplicatingFrom(null); // mutually exclusive with Duplicate mode
-    setRenamingCode(code);
-    registrationPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    firstSelectRef.current?.focus();
-  };
-
-  const handleCancelRename = () => {
-    resetRegistrationPanel();
-  };
-
   const handleAddProduct = () => {
     if (!canSubmitRegistration) return;
-
-    // Rename mode branches off entirely before touching any Add/Duplicate
-    // logic below — it never appends a new registry entry, it moves an
-    // existing one.
-    if (renamingCode) {
-      if (isRenameNoOp) {
-        // No dropdown was changed from the pre-filled values: the derived
-        // code is identical to the source. Per design, this is a SILENT
-        // no-op — no confirmation dialog, no error, just close the panel.
-        resetRegistrationPanel();
-        return;
-      }
-      // A real rename: hand off to the confirmation modal rather than
-      // applying immediately (unlike Duplicate, which is instant) — the
-      // actual PATCH happens in handleConfirmRename() on explicit confirm.
-      setConfirmRename({ oldCode: renamingCode, newCode: derivedSKU });
-      return;
-    }
 
     const updatedCodes = [...productCodes, derivedSKU];
 
@@ -323,75 +311,6 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
     resetRegistrationPanel();
   };
 
-  // Executed only from the confirmation modal's Confirm button. Moves the
-  // registry entry from oldCode to newCode in a single PATCH — old key
-  // removed, new key added with the exact same matrix (deep-copied, so the
-  // old in-memory entry being deleted can't leave a dangling shared
-  // reference) and the exact same profileId. Attributes are rebuilt from
-  // the CURRENT six dropdown values rather than copied verbatim from the
-  // source: those dropdowns are what determine the code string itself, so
-  // wherever the user changed one to produce the new code, the attributes
-  // must track that change too — an unchanged dropdown reproduces the
-  // source's original value exactly, which is the common case, but a
-  // stored attribute that contradicted the new code string would be
-  // inconsistent. Same field/mechanism Duplicate already uses.
-  //
-  // productProfileMap is sent explicitly (full map, oldCode's entry moved
-  // to newCode) even though no live UI currently sets a product-level
-  // profileId — ProductEngine never writes productProfileMap today, so
-  // omitting it here would let the write-hook's fallback silently drop
-  // oldCode's profile link on rename for the one path (a future profile-
-  // linking UI, or already-migrated data) where a renameable code might
-  // have one.
-  const handleConfirmRename = () => {
-    if (!confirmRename) return;
-    const { oldCode, newCode } = confirmRename;
-
-    const sourceMatrix = productMatrixConfig[oldCode] || { dimensionDefs: [], sizes: {} };
-    const updatedMatrix = { ...productMatrixConfig };
-    delete updatedMatrix[oldCode];
-    updatedMatrix[newCode] = JSON.parse(JSON.stringify(sourceMatrix));
-
-    const updatedCodes = productCodes.map(c => (c === oldCode ? newCode : c));
-
-    const updatedProfileMap = { ...(config?.productProfileMap ?? {}) };
-    const sourceProfileId = config?.products?.[oldCode]?.profileId ?? null;
-    delete updatedProfileMap[oldCode];
-    if (sourceProfileId) updatedProfileMap[newCode] = sourceProfileId;
-
-    setProductCodes(updatedCodes);
-    setProductMatrixConfig(updatedMatrix);
-    triggerChange({
-      productCodes: updatedCodes,
-      productMatrixConfig: updatedMatrix,
-      productProfileMap: updatedProfileMap,
-      productAttributes: {
-        [newCode]: { material: selMat, weight: selWgt, color: selCol, innerSurface: selTrt, length: selLen, texture: selTex }
-      }
-    });
-
-    // Migrate expand state so the renamed row keeps its open/closed state
-    // under its new key rather than leaving a stale, now-unreachable old-
-    // code entry sitting in the Set. Every OTHER row's entry is left alone.
-    setExpandedCodes(prev => {
-      if (!prev.has(oldCode)) return prev;
-      const next = new Set(prev);
-      next.delete(oldCode);
-      next.add(newCode);
-      return next;
-    });
-
-    setConfirmRename(null);
-    resetRegistrationPanel();
-  };
-
-  // Closes only the confirmation modal — the panel stays in "Renaming X"
-  // mode (dropdowns and banner untouched) so the user can adjust and
-  // resubmit, or use the banner's own Cancel to fully back out.
-  const handleCancelRenameConfirm = () => {
-    setConfirmRename(null);
-  };
-
   const handleRemoveProduct = (code: string) => {
     if (isCodeLocked(code)) return; // defense-in-depth; UI already disables this path
     const updatedCodes = productCodes.filter(c => c !== code);
@@ -428,35 +347,159 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
     setEditingCode(code);
     setExpandedCodes(prev => new Set(prev).add(code)); // ensure the row is visibly expanded while editing
     setExpandedProductDraft(JSON.parse(JSON.stringify(productMatrixConfig[code] || { dimensionDefs: [], sizes: {} })));
+    // Pre-fill the identity sub-panel from the code's current attributes —
+    // same blank-for-null pre-fill Duplicate/old-Rename used — but leave it
+    // COLLAPSED by default (design point 2): opening Edit must look and
+    // behave exactly like today's matrix-only edit until the user
+    // deliberately asks to change identity.
+    const attrs = config?.products?.[code]?.attributes;
+    setIdentityDraft({
+      material: attrs?.material ?? '',
+      weight: attrs?.weight ?? '',
+      color: attrs?.color ?? '',
+      innerSurface: attrs?.innerSurface ?? '',
+      length: attrs?.length ?? '',
+      texture: attrs?.texture ?? '',
+    });
+    setIsIdentityExpanded(false);
+  };
+
+  const handleToggleIdentityPanel = () => {
+    setIsIdentityExpanded(prev => !prev);
+  };
+
+  // Discards the whole Edit session — matrix draft AND any staged identity
+  // change, whether or not the identity sub-panel was ever opened.
+  const resetEditSession = () => {
+    setEditingCode(null);
+    setExpandedProductDraft(null);
+    setIsIdentityExpanded(false);
+    setIdentityDraft(null);
   };
 
   const handleSaveProductConfig = (code: string) => {
-    // Only stamp a new lastAmended / push a change if something in the
-    // draft actually differs from what's stored — previously this ran
-    // unconditionally on every Save click, so opening a product to look at
-    // it and clicking the checkmark without editing anything still
-    // rewrote lastAmended and marked the whole config page dirty (same
-    // class of false-positive already fixed for the wizard in 8b116d8).
-    if (expandedProductDraft) {
-      const stored = productMatrixConfig[code] || { dimensionDefs: [], sizes: {} };
-      const actuallyChanged = JSON.stringify(expandedProductDraft) !== JSON.stringify(stored);
-      if (actuallyChanged) {
-        const draftWithTime = {
-          ...expandedProductDraft,
-          lastAmended: new Date().toISOString()
-        };
-        const updatedMatrix = { ...productMatrixConfig, [code]: draftWithTime };
-        setProductMatrixConfig(updatedMatrix);
-        triggerChange({ productMatrixConfig: updatedMatrix });
-      }
+    if (!expandedProductDraft) {
+      resetEditSession();
+      return;
     }
-    setEditingCode(null);
-    setExpandedProductDraft(null);
+
+    // A REAL identity change (sub-panel open, all six chosen, not a
+    // collision, and different from the code being edited) routes through
+    // the confirmation modal instead of saving immediately — matrix edits
+    // made in this same session ride along and are applied together with
+    // the identity move in handleConfirmIdentityChange(), never as two
+    // separate operations. This mirrors old Rename's confirm-before-apply
+    // step exactly; only the trigger point moved (Edit's Save button,
+    // rather than a dedicated Rename submit). The button itself is already
+    // disabled whenever this condition can't be satisfied (see the JSX),
+    // so this check is defense-in-depth, not the only gate.
+    if (isIdentityExpanded && canBuildIdentity && !identityCollision && !isIdentityNoOp) {
+      setConfirmIdentityChange({ oldCode: code, newCode: identityDerivedSKU });
+      return;
+    }
+
+    // No identity change (sub-panel never opened, or opened but left
+    // matching the current code) — proceed exactly as today's matrix-only
+    // edit does: instant save, no confirmation. Only stamp a new
+    // lastAmended / push a change if something in the draft actually
+    // differs from what's stored — previously this ran unconditionally on
+    // every Save click, so opening a product to look at it and clicking the
+    // checkmark without editing anything still rewrote lastAmended and
+    // marked the whole config page dirty (same class of false-positive
+    // already fixed for the wizard in 8b116d8).
+    const stored = productMatrixConfig[code] || { dimensionDefs: [], sizes: {} };
+    const actuallyChanged = JSON.stringify(expandedProductDraft) !== JSON.stringify(stored);
+    if (actuallyChanged) {
+      const draftWithTime = {
+        ...expandedProductDraft,
+        lastAmended: new Date().toISOString()
+      };
+      const updatedMatrix = { ...productMatrixConfig, [code]: draftWithTime };
+      setProductMatrixConfig(updatedMatrix);
+      triggerChange({ productMatrixConfig: updatedMatrix });
+    }
+    resetEditSession();
   };
 
   const handleCancelProductConfig = () => {
-    setEditingCode(null);
-    setExpandedProductDraft(null);
+    resetEditSession();
+  };
+
+  // Executed only from the confirmation modal's Confirm button. Moves the
+  // registry entry from oldCode to newCode in a single PATCH — old key
+  // removed, new key added, in ONE coherent update per design point 5:
+  //   - matrix: the DRAFT (expandedProductDraft), not the stored matrix, so
+  //     any edits made earlier in this same Edit session ride along with the
+  //     identity move rather than being silently dropped. lastAmended is
+  //     only stamped if the matrix content itself actually changed —
+  //     mirroring handleSaveProductConfig's own actuallyChanged check —
+  //     matching old Rename's behavior of NOT stamping when only the key
+  //     moved and nothing about the matrix content did.
+  //   - attributes: rebuilt from the CURRENT identityDraft values rather
+  //     than copied verbatim from the source, since those are what compose
+  //     the new code string itself — an unchanged dropdown reproduces the
+  //     source's original value exactly (the common case), but a stored
+  //     attribute that contradicted the new code string would be
+  //     inconsistent. Same field/mechanism Duplicate already uses.
+  //   - profileId: preserved via productProfileMap, sent explicitly (full
+  //     map, oldCode's entry moved to newCode) even though no live UI sets a
+  //     product-level profileId today — omitting it would let the write-
+  //     hook's fallback silently drop oldCode's profile link on the one path
+  //     (a future profile-linking UI, or already-migrated data) where a
+  //     renameable code might have one.
+  const handleConfirmIdentityChange = () => {
+    if (!confirmIdentityChange || !expandedProductDraft || !identityDraft) return;
+    const { oldCode, newCode } = confirmIdentityChange;
+
+    const stored = productMatrixConfig[oldCode] || { dimensionDefs: [], sizes: {} };
+    const matrixChanged = JSON.stringify(expandedProductDraft) !== JSON.stringify(stored);
+    const movedMatrix = matrixChanged
+      ? { ...expandedProductDraft, lastAmended: new Date().toISOString() }
+      : JSON.parse(JSON.stringify(stored));
+
+    const updatedMatrix = { ...productMatrixConfig };
+    delete updatedMatrix[oldCode];
+    updatedMatrix[newCode] = movedMatrix;
+
+    const updatedCodes = productCodes.map(c => (c === oldCode ? newCode : c));
+
+    const updatedProfileMap = { ...(config?.productProfileMap ?? {}) };
+    const sourceProfileId = config?.products?.[oldCode]?.profileId ?? null;
+    delete updatedProfileMap[oldCode];
+    if (sourceProfileId) updatedProfileMap[newCode] = sourceProfileId;
+
+    setProductCodes(updatedCodes);
+    setProductMatrixConfig(updatedMatrix);
+    triggerChange({
+      productCodes: updatedCodes,
+      productMatrixConfig: updatedMatrix,
+      productProfileMap: updatedProfileMap,
+      productAttributes: {
+        [newCode]: { ...identityDraft }
+      }
+    });
+
+    // Migrate expand state so the renamed row keeps its open/closed state
+    // under its new key rather than leaving a stale, now-unreachable old-
+    // code entry sitting in the Set. Every OTHER row's entry is left alone.
+    setExpandedCodes(prev => {
+      if (!prev.has(oldCode)) return prev;
+      const next = new Set(prev);
+      next.delete(oldCode);
+      next.add(newCode);
+      return next;
+    });
+
+    setConfirmIdentityChange(null);
+    resetEditSession();
+  };
+
+  // Closes only the confirmation modal — the Edit session stays open with
+  // the identity sub-panel still expanded (dropdowns untouched) so the user
+  // can adjust and resubmit, or use Cancel on the row itself to fully back
+  // out of the whole Edit session.
+  const handleCancelIdentityChangeConfirm = () => {
+    setConfirmIdentityChange(null);
   };
 
   // Check if a product's matrix is fully configured — mirrors the real
@@ -607,23 +650,6 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
           </div>
         )}
 
-        {renamingCode && (
-          <div className="px-4 py-2.5 bg-brand-secondary/5 border-b border-brand-secondary/20 flex items-center justify-between gap-3">
-            <span className="text-xs font-semibold uppercase tracking-wider text-brand-secondary flex items-center gap-2">
-              <PenLine className="w-3.5 h-3.5" strokeWidth={2} />
-              Renaming <span className="font-mono normal-case">{renamingCode}</span>
-            </span>
-            <button
-              onClick={handleCancelRename}
-              className="text-[10px] font-bold uppercase tracking-wider text-muted hover:text-white flex items-center gap-1 outline-none"
-              title="Cancel — back to normal Add mode"
-            >
-              <X className="w-3 h-3" strokeWidth={2} />
-              Cancel
-            </button>
-          </div>
-        )}
-
         <div className="p-4 bg-canvas flex flex-col gap-4">
           <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
             <select ref={firstSelectRef} value={selMat} onChange={e => setSelMat(e.target.value)} className="h-9 px-2 bg-canvas border border-gray-700 rounded-lg font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none">
@@ -664,9 +690,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
             >
               {duplicatingFrom
                 ? (<><Copy className="w-5 h-5" /> CREATE DUPLICATE</>)
-                : renamingCode
-                  ? (<><PenLine className="w-5 h-5" /> RENAME PRODUCT CODE</>)
-                  : (<><Plus className="w-5 h-5" /> ADD PRODUCT CODE</>)}
+                : (<><Plus className="w-5 h-5" /> ADD PRODUCT CODE</>)}
             </button>
           </div>
         </div>
@@ -691,17 +715,15 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
             return (
               <div key={code} className="border-b border-gray-800 last:border-b-0 group/prod">
                 {/* Row Header — highlighted in the same Cyan/Info tint as the
-                    "Duplicating from X"/"Renaming X" banner when this row IS
-                    that X, so the panel and the row it applies to read as
-                    visually connected rather than disconnected across a
-                    scroll. Expand/collapse stays fully interactive on this
-                    row (cursor-pointer preserved) — only the action buttons
-                    freeze, not the read-only accordion. The isExpanded/
-                    isEditingThis branch below is otherwise UNCHANGED from
-                    before this session — same classes, same conditions. */}
+                    "Duplicating from X" banner when this row IS that X, so
+                    the panel and the row it applies to read as visually
+                    connected rather than disconnected across a scroll.
+                    Expand/collapse stays fully interactive on this row
+                    (cursor-pointer preserved) — only the action buttons
+                    freeze, not the read-only accordion. */}
                 <div
                   className={`h-12 px-4 flex items-center justify-between transition-colors ${
-                    code === activeComposition
+                    code === duplicatingFrom
                       ? 'bg-brand-secondary/10 border-l-2 border-l-brand-secondary cursor-pointer hover:bg-brand-secondary/[0.15]'
                       : isExpanded && !isEditingThis ? 'bg-surface' : 'cursor-pointer hover:bg-surface-light'
                   }`}
@@ -710,6 +732,28 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                   <div className="flex items-center gap-3">
                     {isExpanded ? <ChevronDown className="w-4 h-4 text-brand-secondary" /> : <ChevronRight className="w-4 h-4 text-muted" />}
                     <span className="font-mono text-sm text-primary tracking-wide">{code}</span>
+                    {/* Identity-edit toggle — MERGED replacement for the old
+                        standalone Rename button (see the 2026-08-20 UX fix).
+                        Only ever shown while this row is the one being
+                        edited: identity editing is now part of Edit, not a
+                        separate action, so there is nothing to show/gate on
+                        any other row. stopPropagation keeps this click from
+                        also toggling row expand/collapse (this span, unlike
+                        the action-buttons container below, has no wrapper of
+                        its own to do that for it). */}
+                    {isEditingThis && (
+                      <button
+                        onClick={e => { e.stopPropagation(); handleToggleIdentityPanel(); }}
+                        className={`w-6 h-6 rounded flex items-center justify-center shrink-0 outline-none transition-colors ${
+                          isIdentityExpanded
+                            ? 'text-brand-secondary bg-brand-secondary/10'
+                            : 'text-muted hover:text-white hover:bg-gray-800'
+                        }`}
+                        title={isIdentityExpanded ? 'Hide identity editor' : 'Change product identity (rename)'}
+                      >
+                        <PenLine className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     {isCodeLocked(code) && (
                       <span
                         className="flex items-center gap-1 bg-sky-500/10 text-sky-400 border border-sky-500/30 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
@@ -737,7 +781,22 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                   <div className={`flex items-center gap-1 transition-opacity ${isEditingThis ? 'opacity-100' : 'opacity-0 group-hover/prod:opacity-100'}`} onClick={e => e.stopPropagation()}>
                     {isEditingThis ? (
                       <>
-                        <button onClick={() => handleSaveProductConfig(code)} className="w-7 h-7 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-500/20 outline-none" title="Save">
+                        <button
+                          onClick={() => handleSaveProductConfig(code)}
+                          disabled={isIdentityExpanded && (!canBuildIdentity || identityCollision)}
+                          className={`w-7 h-7 rounded flex items-center justify-center outline-none ${
+                            isIdentityExpanded && (!canBuildIdentity || identityCollision)
+                              ? 'text-gray-700 cursor-not-allowed'
+                              : 'text-emerald-400 hover:bg-emerald-500/20'
+                          }`}
+                          title={
+                            isIdentityExpanded && !canBuildIdentity
+                              ? 'Select all six identity components before saving'
+                              : isIdentityExpanded && identityCollision
+                                ? 'This code already exists — choose different identity components'
+                                : 'Save'
+                          }
+                        >
                           <Check className="w-4 h-4" />
                         </button>
                         <button onClick={() => handleCancelProductConfig()} className="w-7 h-7 rounded flex items-center justify-center text-rose-400 hover:bg-rose-500/20 outline-none" title="Cancel (Esc)">
@@ -750,7 +809,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                           onClick={() => moveProductCode(index, 'up')}
                           disabled={index === 0 || !!editingCode || isComposing}
                           className={`p-1.5 rounded-md transition-colors outline-none ${editingCode || index === 0 || isComposing ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
-                          title={isComposing ? 'Finish or cancel the pending rename/duplicate first' : 'Move Up'}
+                          title={isComposing ? 'Finish or cancel the pending duplicate first' : 'Move Up'}
                         >
                           <ArrowUp className="w-4 h-4" />
                         </button>
@@ -758,7 +817,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                           onClick={() => moveProductCode(index, 'down')}
                           disabled={index === productCodes.length - 1 || !!editingCode || isComposing}
                           className={`p-1.5 rounded-md transition-colors outline-none ${editingCode || index === productCodes.length - 1 || isComposing ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
-                          title={isComposing ? 'Finish or cancel the pending rename/duplicate first' : 'Move Down'}
+                          title={isComposing ? 'Finish or cancel the pending duplicate first' : 'Move Down'}
                         >
                           <ArrowDown className="w-4 h-4" />
                         </button>
@@ -768,7 +827,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                           className={`p-1.5 rounded-md transition-colors outline-none ${(editingCode || isCodeLocked(code) || isComposing) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
                           title={
                             isComposing
-                              ? 'Finish or cancel the pending rename/duplicate first'
+                              ? 'Finish or cancel the pending duplicate first'
                               : editingCode
                                 ? 'Save active edits first'
                                 : isCodeLocked(code)
@@ -777,28 +836,6 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                           }
                         >
                           <Edit2 className="w-4 h-4" />
-                        </button>
-                        {/* Rename — the opposite convention from Duplicate: gated
-                            on isCodeLocked(code) using the exact same predicate
-                            Edit/Delete already use, since a locked code's identity
-                            can never change (only Duplicate can produce an
-                            editable copy of one). Visible but disabled, same
-                            pattern as Edit/Delete on a locked row, not hidden. */}
-                        <button
-                          onClick={() => { if (!isCodeLocked(code)) handleRenameProduct(code); }}
-                          disabled={!!editingCode || isCodeLocked(code) || isComposing}
-                          className={`p-1.5 rounded-md transition-colors outline-none ${(editingCode || isCodeLocked(code) || isComposing) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
-                          title={
-                            isComposing
-                              ? 'Finish or cancel the pending rename/duplicate first'
-                              : editingCode
-                                ? 'Save active edits first'
-                                : isCodeLocked(code)
-                                  ? `Cannot rename — used by ${productCodeUsage[code]} submission${productCodeUsage[code] === 1 ? '' : 's'}`
-                                  : 'Rename Product Code'
-                          }
-                        >
-                          <PenLine className="w-4 h-4" />
                         </button>
                         {/* Duplicate — deliberately NOT gated on isCodeLocked(code).
                             This is the only way to change a locked code's specs:
@@ -817,7 +854,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                           className={`p-1.5 rounded-md transition-colors outline-none ${(editingCode || isComposing) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-white hover:bg-gray-800'}`}
                           title={
                             isComposing
-                              ? 'Finish or cancel the pending rename/duplicate first'
+                              ? 'Finish or cancel the pending duplicate first'
                               : editingCode
                                 ? 'Save active edits first'
                                 : `Duplicate — create an editable copy of ${code}`
@@ -831,7 +868,7 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                           className={`p-1.5 rounded-md transition-colors outline-none ${(editingCode || isCodeLocked(code) || isComposing) ? 'text-gray-700 cursor-not-allowed' : 'text-muted hover:text-rose-400 hover:bg-rose-500/10'}`}
                           title={
                             isComposing
-                              ? 'Finish or cancel the pending rename/duplicate first'
+                              ? 'Finish or cancel the pending duplicate first'
                               : editingCode
                                 ? 'Save active edits first'
                                 : isCodeLocked(code)
@@ -845,6 +882,63 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
                     )}
                   </div>
                 </div>
+
+                {/* Identity Sub-Panel — MERGED replacement for the old
+                    standalone Rename panel/banner. Collapsed by default (see
+                    handleStartEditProduct); expanding it reveals the same
+                    six dropdowns the top Add/Duplicate panel uses, pre-filled
+                    from this code's current attributes, edited entirely
+                    inline — no scroll, no jump to the top panel. Only ever
+                    rendered while isEditingThis (identity editing is now
+                    part of Edit, reachable no other way), which is also why
+                    no isComposing-style freeze is needed here — see the
+                    isComposing state comment above. */}
+                {isEditingThis && isIdentityExpanded && identityDraft && (
+                  <div className="px-4 py-3 bg-brand-secondary/5 border-t border-b border-brand-secondary/20 flex flex-col gap-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold uppercase tracking-wider text-brand-secondary flex items-center gap-2">
+                        <PenLine className="w-3.5 h-3.5" strokeWidth={2} />
+                        Change Product Identity
+                      </span>
+                      {identityCollision && (
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400">
+                          Code already exists
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+                      <select value={identityDraft.material} onChange={e => setIdentityDraft(prev => prev && ({ ...prev, material: e.target.value }))} className="h-9 px-2 bg-canvas border border-gray-700 rounded-lg font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none">
+                        <option value="">1. MATERIAL</option>
+                        {skuMaterials.map(o => <option key={o.value} value={o.value}>{o.value} - {o.label}</option>)}
+                      </select>
+                      <select value={identityDraft.weight} onChange={e => setIdentityDraft(prev => prev && ({ ...prev, weight: e.target.value }))} className="h-9 px-2 bg-canvas border border-gray-700 rounded-lg font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none">
+                        <option value="">2. GLOVE WEIGHT</option>
+                        {skuWeights.map(o => <option key={o.value} value={o.value}>{o.value} - {o.label}</option>)}
+                      </select>
+                      <select value={identityDraft.color} onChange={e => setIdentityDraft(prev => prev && ({ ...prev, color: e.target.value }))} className="h-9 px-2 bg-canvas border border-gray-700 rounded-lg font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none">
+                        <option value="">3. COLOR</option>
+                        {skuColors.map(o => <option key={o.value} value={o.value}>{o.value} - {o.label}</option>)}
+                      </select>
+                      <select value={identityDraft.innerSurface} onChange={e => setIdentityDraft(prev => prev && ({ ...prev, innerSurface: e.target.value }))} className="h-9 px-2 bg-canvas border border-gray-700 rounded-lg font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none">
+                        <option value="">4. INNER SURFACE</option>
+                        {skuTreatments.map(o => <option key={o.value} value={o.value}>{o.value} - {o.label}</option>)}
+                      </select>
+                      <select value={identityDraft.length} onChange={e => setIdentityDraft(prev => prev && ({ ...prev, length: e.target.value }))} className="h-9 px-2 bg-canvas border border-gray-700 rounded-lg font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none">
+                        <option value="">5. GLOVE LENGTH</option>
+                        {skuLengths.map(o => <option key={o.value} value={o.value}>{o.value} - {o.label}</option>)}
+                      </select>
+                      <select value={identityDraft.texture} onChange={e => setIdentityDraft(prev => prev && ({ ...prev, texture: e.target.value }))} className="h-9 px-2 bg-canvas border border-gray-700 rounded-lg font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none">
+                        <option value="">6. TEXTURE</option>
+                        {skuTextures.map(o => <option key={o.value} value={o.value}>{o.value} - {o.label}</option>)}
+                      </select>
+                    </div>
+                    <div className={`h-10 rounded-lg border flex items-center justify-center font-mono text-sm font-bold tracking-widest shadow-inner ${
+                      identityCollision ? 'bg-surface border-rose-500/50 text-rose-400' : 'bg-surface border-gray-700 text-brand-secondary'
+                    }`}>
+                      {canBuildIdentity ? identityDerivedSKU : <span className="text-muted opacity-50">___ ___ ___ - __ - __ __</span>}
+                    </div>
+                  </div>
+                )}
 
                 {/* Accordion Body */}
                 {isExpanded && (
@@ -900,8 +994,8 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
         </div>
       )}
 
-      {/* ── Rename Confirmation Modal ───────────────────────────────────────── */}
-      {confirmRename && (
+      {/* ── Identity Change Confirmation Modal ──────────────────────────────── */}
+      {confirmIdentityChange && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="bg-canvas border border-gray-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
             <div className="flex items-start gap-4 p-4 border-b border-gray-800">
@@ -910,32 +1004,32 @@ export function ProductEngine({ onDirty, onChange }: ProductEngineProps) {
               </div>
               <div>
                 <h3 className="text-lg font-bold uppercase tracking-wide text-primary mb-1">
-                  RENAME PRODUCT CODE?
+                  CHANGE PRODUCT IDENTITY?
                 </h3>
                 <p className="text-sm text-muted flex items-center flex-wrap gap-x-2">
-                  <span className="font-mono font-bold text-white">{confirmRename.oldCode}</span>
+                  <span className="font-mono font-bold text-white">{confirmIdentityChange.oldCode}</span>
                   <span className="text-muted">→</span>
-                  <span className="font-mono font-bold text-brand-secondary">{confirmRename.newCode}</span>
+                  <span className="font-mono font-bold text-brand-secondary">{confirmIdentityChange.newCode}</span>
                 </p>
                 <p className="text-sm text-muted mt-2">
-                  The dimension/size matrix moves unchanged to the new code. This takes effect once you save configuration, and cannot be undone.
+                  The dimension/size matrix — including any edits made in this session — moves to the new code. This takes effect once you save configuration, and cannot be undone.
                 </p>
               </div>
             </div>
             <div className="p-4 bg-surface flex items-center justify-end gap-3">
               <button
-                onClick={handleCancelRenameConfirm}
+                onClick={handleCancelIdentityChangeConfirm}
                 className="h-10 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-white font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none"
               >
                 <X className="w-4 h-4" strokeWidth={2} />
                 <span>CANCEL</span>
               </button>
               <button
-                onClick={handleConfirmRename}
+                onClick={handleConfirmIdentityChange}
                 className="h-10 px-5 rounded-lg bg-brand-secondary/20 text-brand-secondary hover:bg-brand-secondary/30 font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none border border-brand-secondary/50 shadow-sm"
               >
                 <PenLine className="w-4 h-4" strokeWidth={2} />
-                <span>CONFIRM RENAME</span>
+                <span>CONFIRM CHANGE</span>
               </button>
             </div>
           </div>
