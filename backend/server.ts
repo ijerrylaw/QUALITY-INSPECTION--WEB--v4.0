@@ -69,7 +69,7 @@ app.use((_req, res) => {
 });
 
 // ── Server Start ──────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`[QI Backend v4.0] Server running → http://localhost:${PORT}`);
   console.log(`  Health:      GET   http://localhost:${PORT}/api/health`);
   console.log(`  Config:      GET   http://localhost:${PORT}/api/config`);
