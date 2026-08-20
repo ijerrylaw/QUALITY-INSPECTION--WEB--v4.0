@@ -436,10 +436,14 @@ const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 
 /**
  * API base URL.
- * In development: falls back to http://localhost:4009
+ * In development: falls back to http://<the hostname the page was loaded from>:4009 —
+ * derived from window.location.hostname (not a hardcoded 'localhost') so a device
+ * loading the frontend from a LAN IP targets the backend at that same IP instead of
+ * its own machine's localhost.
  * In production: set VITE_API_URL in the frontend build environment.
  */
-export const API_BASE_URL = (import.meta.env['VITE_API_URL'] as string | undefined) ?? 'http://localhost:4009';
+export const API_BASE_URL =
+  (import.meta.env['VITE_API_URL'] as string | undefined) ?? `http://${window.location.hostname}:4009`;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PROVIDER
