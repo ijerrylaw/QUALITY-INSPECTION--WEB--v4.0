@@ -329,13 +329,49 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   };
 
   // CRUD Defects
+
+  // Case-insensitive, whitespace-normalized name comparison key — "Wet Glove",
+  // "wet glove", and "Wet  Glove" (extra internal spaces) all collapse to the
+  // same key. Deliberately separate from the id-slug generator below: the
+  // slug strips ALL punctuation (not just whitespace) for id-safety reasons,
+  // which is too aggressive a notion of "same name" — "Wet-Glove" and
+  // "Wet.Glove" are different names that happen to slug identically, so
+  // reusing that generator here would create false-positive rejections.
+  const normalizeDefectName = (name: string): string =>
+    name.trim().toLowerCase().replace(/\s+/g, ' ');
+
+  /**
+   * Finds an existing defect in the CURRENT profile only (never checks other
+   * profiles — a name may legitimately repeat across profiles) whose
+   * normalized name collides with `name`. `excludeId` lets a rename check
+   * against every OTHER defect without the defect being renamed always
+   * "colliding with itself" when its name is unchanged.
+   *
+   * Reads only from the live `activeDefects` array — a name freed by a
+   * delete-then-save is simply absent from that array, so nothing needs to
+   * track "previously used" names separately.
+   */
+  const findDuplicateDefectName = (name: string, excludeId?: string) => {
+    const target = normalizeDefectName(name);
+    return activeDefects.find((d: any) => d.id !== excludeId && normalizeDefectName(d.name) === target);
+  };
+
   const handleAddDefect = (categoryId: string) => {
     if (newDefectName.trim()) {
+      const conflict = findDuplicateDefectName(newDefectName);
+      if (conflict) {
+        addToast('error', `A defect named "${conflict.name}" already exists in this profile.`);
+        return;
+      }
+
       // Smart Slug Generator: "Pin Hole" -> "def_pin_hole" (renders as ID: DEF_PIN_HOLE)
       const rawSlug = newDefectName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
       const baseId = rawSlug ? `def_${rawSlug}` : `def_${Date.now()}`;
 
-      // Guarantee ID uniqueness across all profiles/defects
+      // Guarantee ID uniqueness within this profile's defects — the duplicate-
+      // NAME check above already rejects same-name adds, so this loop now
+      // only ever fires for genuinely different names that happen to slug to
+      // the same id (e.g. "Wet Glove!" vs "Wet Glove?").
       let newId = baseId;
       let counter = 1;
       while (activeDefects.some((d: any) => d.id === newId)) {
@@ -389,6 +425,15 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
 
   const saveEditDefect = (id: string) => {
     if (editDefectName.trim()) {
+      // excludeId=id so renaming a defect to its OWN current name (a no-op
+      // edit, or just re-saving unchanged) is never flagged as a conflict
+      // with itself — only a collision with a DIFFERENT defect rejects.
+      const conflict = findDuplicateDefectName(editDefectName, id);
+      if (conflict) {
+        addToast('error', `A defect named "${conflict.name}" already exists in this profile.`);
+        return; // leave the inline editor open so the user can fix the name
+      }
+
       const updatedDefs = activeDefects.map((d: any) => d.id === id ? { ...d, name: editDefectName.trim() } : d);
       const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, defectDefinitions: updatedDefs } : p);
       setProfiles(updatedProfiles);
