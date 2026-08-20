@@ -243,13 +243,14 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
           </div>
         </div>
 
-        <div className="p-4 overflow-x-auto">
+        <div className="p-4">
+          <div className="overflow-auto max-h-[322px]">
           <table className="w-full text-left border-collapse min-w-[500px]">
             <thead>
               <tr className="border-b border-gray-800">
-                <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted w-32">Line ID (Code)</th>
-                <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted flex-1">Display Name</th>
-                <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted text-right w-36">Actions</th>
+                <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted w-32 sticky top-0 bg-canvas z-10">Line ID (Code)</th>
+                <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted flex-1 sticky top-0 bg-canvas z-10">Display Name</th>
+                <th className="px-3 pb-3 text-xs font-semibold uppercase tracking-wider text-muted text-right w-36 sticky top-0 bg-canvas z-10">Actions</th>
               </tr>
             </thead>
             <tbody className="">
@@ -342,8 +343,9 @@ export function FactorySetup({ onDirty, onChange }: FactorySetupProps) {
               )}
             </tbody>
           </table>
-          
-          <button 
+          </div>
+
+          <button
             onClick={handleAddLine}
             className="w-full mt-4 h-10 rounded-md border border-dashed border-gray-700 bg-transparent text-muted hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 font-semibold text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all outline-none"
           >

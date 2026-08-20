@@ -67,7 +67,7 @@ export function DictionaryManager({
   };
 
   return (
-    <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm flex flex-col h-[320px]">
+    <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm flex flex-col h-[400px]">
       <div className="p-2 border-b border-gray-800 bg-surface">
         <h4 className="text-xs font-semibold uppercase tracking-wider text-muted">{title}</h4>
         <p className="text-[10px] text-muted mt-1 leading-tight font-normal normal-case">{description}</p>
