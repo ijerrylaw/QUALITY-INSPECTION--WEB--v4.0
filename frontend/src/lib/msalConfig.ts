@@ -3,8 +3,18 @@
  * @description Real MSAL.js configuration for Microsoft Entra ID SSO
  * (NAVIGATION_AND_RBAC.md §3.1). App Registration is a Single-Page
  * Application (no client secret). Redirect URI must exactly match what's
- * registered in Entra (dev: http://localhost:4001) or login fails with a
- * redirect-URI-mismatch error.
+ * registered in Entra or login fails with a redirect-URI-mismatch error —
+ * this is an Entra-side allowlist check, unaffected by how the client
+ * computes the value below, so each distinct address (localhost, a LAN IP,
+ * a future production domain) still needs to be added to the App
+ * Registration's Redirect URIs list separately.
+ *
+ * redirectUri falls back to window.location.origin (same pattern as
+ * ConfigContext.tsx's API_BASE_URL) rather than a hardcoded address, so the
+ * app self-registers the correct value for whatever address it was actually
+ * loaded from — safe here because this is a pure client-side SPA (no SSR)
+ * and this module only evaluates once the page (and window.location) is
+ * already live. VITE_MSAL_REDIRECT_URI still overrides it when explicitly set.
  *
  * cacheLocation is deliberately 'sessionStorage', not 'localStorage' — this
  * app runs on shared/kiosk-style machines (same reasoning as the PIN side's
@@ -17,7 +27,7 @@ import type { Configuration } from '@azure/msal-browser';
 
 const clientId = import.meta.env['VITE_MSAL_CLIENT_ID'] as string | undefined;
 const tenantId = import.meta.env['VITE_MSAL_TENANT_ID'] as string | undefined;
-const redirectUri = (import.meta.env['VITE_MSAL_REDIRECT_URI'] as string | undefined) ?? 'http://localhost:4001';
+const redirectUri = (import.meta.env['VITE_MSAL_REDIRECT_URI'] as string | undefined) ?? window.location.origin;
 
 if (!clientId || !tenantId) {
   // eslint-disable-next-line no-console
