@@ -409,40 +409,53 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
       }
     }
 
-    // Reject any change to a locked product code's dimension/size matrix.
-    // The productCodes-removal check above only guarded against deleting a
-    // locked code's registry entry — it did not stop editing that code's
-    // productMatrixConfig[code] in place, which is the same integrity hole
-    // (a LIVE submission's frozen grading context must never be able to
-    // drift from the config that produced it). Diffs against the currently
-    // stored entry rather than just checking presence, since a save of an
-    // unrelated (unlocked) product legitimately re-sends every product's
-    // unchanged entry in the same payload (see ProductEngine.tsx's
-    // triggerChange, which always sends the whole productMatrixConfig).
-    if (payload.productMatrixConfig !== undefined && typeof payload.productMatrixConfig === 'object' && incomingProducts) {
+    // Reject any change to a locked product code's stored record — matrix,
+    // attributes, AND profileId are ALL frozen together once a code is
+    // referenced by a live submission. Originally (B6) this checked only
+    // .matrix; attributes/profileId were a documented accepted gap, closed
+    // here (2026-08-20) because a locked SOURCE code's attributes could be
+    // silently overwritten as an incidental side effect of a request that
+    // was nominally about a DIFFERENT code (e.g. Duplicate's
+    // productAttributes payload, which is keyed by the NEW code but a
+    // hand-crafted request can add any code's key to that same object).
+    //
+    // Diffs the WHOLE incoming ProductEntry ({ attributes, matrix, profileId
+    // — see productEntry.ts}) against the currently stored one, rather than
+    // just .matrix, so a change reaching a locked code through ANY of the
+    // three fields is caught by the same check.
+    //
+    // Iterates every LOCKED code (from getProductCodeUsage()), not the set
+    // of codes the payload's productMatrixConfig happened to mention. That
+    // distinction is load-bearing: the old check's scope
+    // (Object.keys(suppliedMatrix)) only ever included a locked code because
+    // the real frontend always resends the FULL matrix map on every save. A
+    // minimal bypass payload of just `{ productAttributes: { [lockedCode]:
+    // {...} } }` — no productMatrixConfig key at all — would leave
+    // suppliedMatrix empty and skip the locked code entirely under the old
+    // scope, even though it demonstrably still writes to that code's stored
+    // record. Gated on incomingProducts (i.e. touchesProductStructures)
+    // rather than payload.productMatrixConfig specifically, for the same
+    // reason.
+    //
+    // No false-positive risk from widening: buildProductsMap() reproduces an
+    // untouched locked code's attributes/profileId bit-for-bit from
+    // `existing` (see its own docs), so an honest resend of unchanged data —
+    // the same pattern every save already relies on for unrelated codes'
+    // matrices — still diffs to zero changedFields here.
+    if (incomingProducts) {
       const usage = await getProductCodeUsage();
       const lockedChanges: { productCode: string; submissionCount: number; changedFields: string[] }[] = [];
 
-      // B6: both sides of the diff now come from `products` — the stored entry's
-      // .matrix vs the built entry's .matrix. Deliberately still iterating the
-      // codes the PAYLOAD supplied, not every code in `incomingProducts`, so the
-      // set of codes examined is byte-for-byte the same as before B6 (per this
-      // session's like-for-like scope decision). The `?? suppliedMatrix[...]`
-      // fallback covers a code present in the matrix payload but absent from
-      // productCodes[]: buildProductsMap() keys off productCodes[] and so would
-      // not carry such a code, and this keeps the compared value identical to
-      // what the pre-B6 check would have used.
-      for (const productCode of Object.keys(suppliedMatrix)) {
-        const submissionCount = usage[productCode] ?? 0;
+      for (const [productCode, submissionCount] of Object.entries(usage)) {
         if (submissionCount === 0) continue;
+        // Defensive, not load-bearing: the delete-safety check above already
+        // guarantees a locked code is never absent from incomingProducts —
+        // removing one from productCodes[] would have 409'd before this
+        // point is ever reached.
+        if (!(productCode in incomingProducts)) continue;
 
         const changedFields: string[] = [];
-        diffValues(
-          currentProducts[productCode]?.matrix,
-          incomingProducts[productCode]?.matrix ?? suppliedMatrix[productCode],
-          '',
-          changedFields,
-        );
+        diffValues(currentProducts[productCode], incomingProducts[productCode], '', changedFields);
         if (changedFields.length > 0) {
           lockedChanges.push({ productCode, submissionCount, changedFields });
         }
@@ -450,7 +463,7 @@ router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Requ
 
       if (lockedChanges.length > 0) {
         res.status(409).json({
-          error: 'Cannot modify dimension/size configuration for product code(s) referenced by existing submissions',
+          error: 'Cannot modify configuration for product code(s) referenced by existing submissions (dimensions/sizes, attributes, and inspection profile link are all locked)',
           lockedProductCodes: lockedChanges,
         });
         return;
