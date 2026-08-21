@@ -335,7 +335,7 @@ export function M365UserRolesPanel() {
                           ))}
                         </select>
                         <Button
-                          className="w-8 h-8 p-0"
+                          size="icon"
                           onClick={() => handleAssign(mu.id)}
                           disabled={savingId === mu.id || !pendingRoleById[mu.id]}
                           title="Save role assignment"
@@ -359,7 +359,7 @@ export function M365UserRolesPanel() {
                         {mu.isActive ? (
                           <Button
                             variant="danger"
-                            className="w-8 h-8 p-0"
+                            size="icon"
                             onClick={() => handleDeactivate(mu)}
                             disabled={isToggling}
                             title="Deactivate"
@@ -369,7 +369,7 @@ export function M365UserRolesPanel() {
                         ) : (
                           <Button
                             variant="secondary"
-                            className="w-8 h-8 p-0"
+                            size="icon"
                             onClick={() => handleReactivate(mu)}
                             disabled={isToggling}
                             title="Reactivate"
@@ -379,7 +379,7 @@ export function M365UserRolesPanel() {
                         )}
                         <Button
                           variant="danger"
-                          className="w-8 h-8 p-0"
+                          size="icon"
                           onClick={() => {
                             setDeleteError(null);
                             setConfirmDeleteId(mu.id);
