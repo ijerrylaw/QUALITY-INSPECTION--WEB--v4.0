@@ -116,11 +116,17 @@ export function Sidebar() {
       <div>
         <div className="h-16 flex items-center justify-between px-4 border-b border-gray-800/60">
           <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-10 h-10 rounded-lg bg-brand-primary flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
+            {/* Transparent, bordered container (not a colored fill) — mirrors
+                CompanyBrandingPanel.tsx's own logo-preview box exactly, so a
+                custom uploaded logo never sits inside a colored square that
+                fights with it, and the box still reads as an intentional
+                container (not a bare floating icon) regardless of the
+                current accent color. */}
+            <div className="w-10 h-10 rounded-lg bg-canvas border border-gray-700 flex items-center justify-center shrink-0 overflow-hidden">
               {logoImage ? (
                 <img src={logoImage} alt={companyName} className="w-full h-full object-contain" />
               ) : (
-                <Factory className="w-5 h-5 text-white" strokeWidth={2} />
+                <Factory className="w-5 h-5 text-muted" strokeWidth={2} />
               )}
             </div>
             {!collapsed && (
