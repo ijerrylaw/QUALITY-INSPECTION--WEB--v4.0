@@ -205,13 +205,13 @@ export function M365UserRolesPanel() {
           submit controls were squeezed into just 1/3 of the tab's width.
           Full-width top-to-bottom gives the form room without needing to
           widen the shared tab wrapper itself. */}
-      <div className="bg-surface border border-gray-800 rounded-xl shadow-sm overflow-hidden">
-        <div className="bg-canvas border-b border-gray-800 p-6 flex items-center gap-3">
-          <UserPlus className="w-5 h-5 text-brand-secondary" />
-          <h3 className="text-lg font-bold text-primary uppercase">Invite by Email</h3>
+      <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
+        <div className="bg-surface border-b border-gray-800 p-4 flex items-center gap-3">
+          <UserPlus className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
+          <h3 className="text-lg font-semibold uppercase text-primary">Invite by Email</h3>
         </div>
 
-        <form onSubmit={handleInvite} className="p-6 space-y-5">
+        <form onSubmit={handleInvite} className="p-4 space-y-4">
           <div className="space-y-2">
             <label className="text-xs font-semibold uppercase tracking-wider text-muted">
               Microsoft 365 Email
@@ -252,13 +252,13 @@ export function M365UserRolesPanel() {
       </div>
 
       {/* Roster List */}
-      <div className="bg-surface border border-gray-800 rounded-xl shadow-sm overflow-hidden">
-        <div className="bg-canvas border-b border-gray-800 p-6 flex items-center justify-between gap-3">
+      <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
+        <div className="bg-surface border-b border-gray-800 p-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <ShieldCheck className="w-5 h-5 text-brand-secondary" />
+            <ShieldCheck className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
             <div>
-              <h3 className="text-lg font-bold text-primary uppercase">Microsoft 365 Access</h3>
-              <p className="text-xs text-muted mt-0.5">
+              <h3 className="text-lg font-semibold uppercase text-primary">Microsoft 365 Access</h3>
+              <p className="text-xs text-muted mt-1 font-normal normal-case">
                 Assign ADMIN / EXECUTIVE / MANAGER to real Entra SSO logins.
               </p>
             </div>

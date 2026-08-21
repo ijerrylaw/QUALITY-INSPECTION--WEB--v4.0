@@ -73,7 +73,7 @@ export function SystemSettings() {
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       
       {/* Overview Card */}
-      <div className="bg-surface border border-gray-800 rounded-xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
+      <div className="bg-canvas border border-gray-800 rounded-xl p-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <h3 className="text-xl font-bold text-primary uppercase flex items-center gap-2">
             <Cloud className="w-6 h-6 text-brand-secondary" />
@@ -103,13 +103,13 @@ export function SystemSettings() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         
         {/* Azure AD Credentials Form */}
-        <div className="bg-surface border border-gray-800 rounded-xl shadow-sm overflow-hidden">
-          <div className="bg-canvas border-b border-gray-800 p-6 flex items-center gap-3">
-            <Key className="w-5 h-5 text-brand-primary" />
-            <h3 className="text-lg font-bold text-primary uppercase">Azure AD Authentication</h3>
+        <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
+          <div className="bg-surface border-b border-gray-800 p-4 flex items-center gap-3">
+            <Key className="w-4 h-4 text-brand-primary" strokeWidth={2} />
+            <h3 className="text-lg font-semibold uppercase text-primary">Azure AD Authentication</h3>
           </div>
-          
-          <div className="p-6 space-y-6">
+
+          <div className="p-4 space-y-4">
             <div className="space-y-2">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted">Tenant ID</label>
               <input
@@ -169,14 +169,14 @@ export function SystemSettings() {
         </div>
 
         {/* SharePoint Configuration Form */}
-        <div className="bg-surface border border-gray-800 rounded-xl shadow-sm overflow-hidden flex flex-col justify-between">
+        <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm flex flex-col justify-between">
           <div>
-            <div className="bg-canvas border-b border-gray-800 p-6 flex items-center gap-3">
-              <Database className="w-5 h-5 text-brand-secondary" />
-              <h3 className="text-lg font-bold text-primary uppercase">SharePoint Destination</h3>
+            <div className="bg-surface border-b border-gray-800 p-4 flex items-center gap-3">
+              <Database className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
+              <h3 className="text-lg font-semibold uppercase text-primary">SharePoint Destination</h3>
             </div>
-            
-            <div className="p-6 space-y-6">
+
+            <div className="p-4 space-y-4">
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-wider text-muted">SharePoint Site URL</label>
                 <input 
@@ -204,7 +204,7 @@ export function SystemSettings() {
             </div>
           </div>
 
-          <div className="p-6 bg-canvas/30 border-t border-gray-800 flex justify-end gap-4">
+          <div className="p-4 bg-surface border-t border-gray-800 flex justify-end gap-4">
             <Button 
               variant="secondary" 
               className="px-6 flex items-center gap-2"

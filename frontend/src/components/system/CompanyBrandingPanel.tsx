@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Building2, Upload, Palette } from 'lucide-react';
+import { Building2, Upload, Palette, Save } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { useToast } from '../ui/ToastProvider';
 import { useConfig, API_BASE_URL } from '../../context/ConfigContext';
@@ -78,18 +78,18 @@ export function CompanyBrandingPanel() {
   };
 
   return (
-    <div className="bg-surface border border-gray-800 rounded-xl shadow-sm overflow-hidden">
-      <div className="bg-canvas border-b border-gray-800 p-6 flex items-center gap-3">
-        <Building2 className="w-5 h-5 text-brand-secondary" />
+    <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
+      <div className="bg-surface border-b border-gray-800 p-4 flex items-center gap-3">
+        <Building2 className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
         <div>
-          <h3 className="text-lg font-bold text-primary uppercase">Company Branding</h3>
-          <p className="text-xs text-muted mt-0.5">
+          <h3 className="text-lg font-semibold uppercase text-primary">Company Branding</h3>
+          <p className="text-xs text-muted mt-1 font-normal normal-case">
             Name and logo shown in the top-left nav sidebar.
           </p>
         </div>
       </div>
 
-      <div className="p-6 space-y-6">
+      <div className="p-4 space-y-4">
         <div className="space-y-2">
           <label className="text-xs font-semibold uppercase tracking-wider text-muted">Company Name</label>
           <input
@@ -161,7 +161,8 @@ export function CompanyBrandingPanel() {
         </div>
 
         <div className="flex justify-end pt-2">
-          <Button className="px-8" onClick={handleSave} disabled={saving}>
+          <Button className="px-8 flex items-center gap-2" onClick={handleSave} disabled={saving}>
+            <Save className="w-4 h-4" strokeWidth={2} />
             {saving ? 'Saving...' : 'Save Branding'}
           </Button>
         </div>
