@@ -20,6 +20,13 @@ export type UserRole = 'OPERATOR' | 'LEADER' | 'SUPERVISOR' | 'EXECUTIVE' | 'MAN
  */
 export type PermissionGroup = 'A' | 'B' | 'C';
 
+/**
+ * Mirrors the backend's POST /api/auth/m365-login response envelope
+ * (backend/src/routes/m365Users.routes.ts). PIN logins are always 'active' —
+ * this status model only has meaning for M365/SSO logins.
+ */
+export type LoginStatus = 'active' | 'revoked' | 'invite-claimed' | 'bootstrap-eligible' | 'pending';
+
 export const PERMISSION_GROUPS: Record<UserRole, PermissionGroup> = {
   ADMIN: 'A',
   EXECUTIVE: 'B',
@@ -60,13 +67,16 @@ export interface User {
   facilityId: string;
   /** Which login path resolved this session — idle-expiry only applies to 'PIN' (shared floor tablets). */
   loginMethod: 'M365' | 'PIN';
+  /** Always 'active' for PIN logins — see LoginStatus's doc comment. */
+  status: LoginStatus;
 }
 
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
-  loginWithM365: () => Promise<void>;
+  loginWithM365: () => Promise<User>;
   loginWithPIN: (pin: string) => Promise<void>;
+  claimBootstrapAdmin: () => Promise<void>;
   logout: () => void;
 }
 
@@ -120,7 +130,7 @@ async function resolveM365User(account: AccountInfo): Promise<User> {
     throw new Error('Failed to resolve Microsoft 365 role assignment.');
   }
 
-  const { role } = (await res.json()) as { role: UserRole | null };
+  const { role, status } = (await res.json()) as { role: UserRole | null; status: LoginStatus };
 
   return {
     id: account.localAccountId,
@@ -131,6 +141,7 @@ async function resolveM365User(account: AccountInfo): Promise<User> {
     tenantId: account.tenantId ?? PIN_PLACEHOLDER_TENANT_ID,
     facilityId: 'GLOBAL',
     loginMethod: 'M365',
+    status,
   };
 }
 
@@ -165,7 +176,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error('Microsoft 365 login did not return an account.');
     }
     msalInstance.setActiveAccount(loginResponse.account);
-    setUser(await resolveM365User(loginResponse.account));
+    const resolvedUser = await resolveM365User(loginResponse.account);
+    setUser(resolvedUser);
+    return resolvedUser;
+  }, []);
+
+  // Confirms the 'bootstrap-eligible' status's "become the first Administrator"
+  // screen (BootstrapAdminPage). Only called with an active MSAL account
+  // already set (loginWithM365/silent-reauth ran first) — re-resolves the
+  // active account's identity fields rather than trusting cached state, same
+  // as resolveM365User does for the initial login call.
+  const claimBootstrapAdmin = useCallback(async () => {
+    const account = msalInstance.getActiveAccount();
+    if (!account) {
+      throw new Error('No active Microsoft 365 session.');
+    }
+
+    const res = await fetch(`${API_BASE_URL}/api/auth/claim-bootstrap-admin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        aadObjectId: account.localAccountId,
+        userPrincipalName: account.username,
+        displayName: account.name ?? account.username,
+      }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Failed to claim bootstrap admin.');
+    }
+
+    const { role, status } = (await res.json()) as { role: UserRole; status: LoginStatus };
+    setUser((prev) => (prev ? { ...prev, role, status } : prev));
   }, []);
 
   // Real PIN login — verified server-side against backend/src/routes/pinUsers.routes.ts's
@@ -191,6 +234,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       tenantId: PIN_PLACEHOLDER_TENANT_ID,
       facilityId: 'KLANG_PLANT',
       loginMethod: 'PIN',
+      status: 'active',
     });
   }, []);
 
@@ -211,6 +255,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         loginWithM365,
         loginWithPIN,
+        claimBootstrapAdmin,
         logout,
       }}
     >

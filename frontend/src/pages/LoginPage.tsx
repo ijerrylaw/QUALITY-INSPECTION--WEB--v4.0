@@ -14,14 +14,21 @@ export function LoginPage() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Handle M365 Login — real MSAL popup flow (AuthContext.tsx's
-  // loginWithM365). A role of null (pending admin assignment) still lands
-  // here successfully; App.tsx's ProtectedRoute shows PendingAccessPage in
-  // that case, so no branching is needed on this page.
+  // loginWithM365). A role of null (pending admin assignment, revoked, or
+  // bootstrap-eligible) still lands here successfully; App.tsx's
+  // ProtectedRoute shows the matching status screen in those cases, so no
+  // branching is needed on this page for them. 'invite-claimed' is the one
+  // status that proceeds straight into the app — it just gets a one-off
+  // welcome toast acknowledging the just-claimed role.
   const handleM365Login = async () => {
     try {
       setIsLoggingIn(true);
-      await loginWithM365();
-      addToast('success', 'Logged in successfully via Microsoft 365.');
+      const resolvedUser = await loginWithM365();
+      if (resolvedUser.status === 'invite-claimed') {
+        addToast('success', `Welcome! You've been invited as ${resolvedUser.role}.`);
+      } else {
+        addToast('success', 'Logged in successfully via Microsoft 365.');
+      }
       navigate('/wizard'); // Default page shall be entry wizard
     } catch (error) {
       addToast('error', 'Microsoft 365 Login failed.');

@@ -9,6 +9,8 @@ import { WizardGuardProvider } from './context/WizardGuardContext';
 import { HistoryIndicatorProvider } from './context/HistoryIndicatorContext';
 import { LoginPage } from './pages/LoginPage';
 import { PendingAccessPage } from './pages/PendingAccessPage';
+import { RevokedAccessPage } from './pages/RevokedAccessPage';
+import { BootstrapAdminPage } from './pages/BootstrapAdminPage';
 import { WizardPage } from './pages/WizardPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { ApprovalsPage } from './pages/ApprovalsPage';
@@ -35,8 +37,20 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   // An M365 login with no assigned role yet (auto-provisioned pending row,
   // see AuthContext.tsx's resolveM365User) gets no access at all — not even
   // Wizard/History — until a Group A admin assigns one via /system.
-  if (user?.loginMethod === 'M365' && user.role === null) {
+  if (user?.loginMethod === 'M365' && user.status === 'pending') {
     return <PendingAccessPage />;
+  }
+
+  // Had access (or an invite) and lost it — distinct messaging from 'pending'
+  // (never had access), see RevokedAccessPage.
+  if (user?.loginMethod === 'M365' && user.status === 'revoked') {
+    return <RevokedAccessPage />;
+  }
+
+  // Fresh install, M365UserRole table empty — offer the one-time bootstrap
+  // admin claim instead of falling into PendingAccessPage's dead end.
+  if (user?.loginMethod === 'M365' && user.status === 'bootstrap-eligible') {
+    return <BootstrapAdminPage />;
   }
 
   return (
