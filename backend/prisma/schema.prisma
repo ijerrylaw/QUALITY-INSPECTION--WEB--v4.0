@@ -261,27 +261,53 @@ model PinUser {
 // ============================================================
 // M365 USER ROLE
 // aadObjectId -> role mapping for real Entra ID SSO logins (Group A/B
-// only — ADMIN/EXECUTIVE/MANAGER). Auto-provisioned with role: null on a
-// user's first successful MSAL login (POST /api/auth/m365-login); an
-// admin (Group A, /system) later assigns a real role via PATCH
-// /api/m365-users/:id. Mirrors the PinUser pattern but for SSO users,
-// who have no PinUser row of their own.
+// only — ADMIN/EXECUTIVE/MANAGER). A row can now be created two ways:
+// auto-provisioned with role: null on a user's first successful MSAL
+// login (POST /api/auth/m365-login), or pre-registered by a Group A admin
+// via POST /api/m365-users/invite (role set, aadObjectId null, claimed on
+// that person's first login). An admin (Group A, /system) assigns/changes
+// a role via PATCH /api/m365-users/:id. Mirrors the PinUser pattern but
+// for SSO users, who have no PinUser row of their own.
+//
+// State model — (aadObjectId, role, isActive) fully and unambiguously
+// distinguish every reachable state, no separate status field needed:
+//   aadObjectId set,  role null,     isActive true  → pending (Access Pending screen)
+//   aadObjectId null, role set,      isActive true  → invited, not yet claimed
+//   aadObjectId null, role set,      isActive false → invite revoked before claim
+//   aadObjectId set,  role set,      isActive true  → fully active assigned user
+//   aadObjectId set,  role set,      isActive false → deactivated
+// (aadObjectId null + role null is never written by any code path.)
 // ============================================================
 model M365UserRole {
   id                String   @id @default(cuid())
-  aadObjectId       String   @unique
-  userPrincipalName String
+  /// Null for an invited-but-unclaimed row (pre-registered by email, no
+  /// login yet); set on that person's first login (claims the invite) or
+  /// immediately for a never-invited first-time login. SQLite/libsql permit
+  /// multiple NULLs under a UNIQUE index, so any number of unclaimed
+  /// invited rows can coexist without collision.
+  aadObjectId       String?  @unique
+  /// Globally unique — the one field that identifies a person before
+  /// they've ever logged in (invited row) as well as after.
+  userPrincipalName String   @unique
   displayName       String
 
-  /// null = pending assignment (no access yet). 'ADMIN' | 'EXECUTIVE' |
-  /// 'MANAGER' once an admin assigns one — enforced in route validation,
-  /// not the DB (same convention as PinUser.role).
+  /// null = pending assignment (no access yet, only reachable via a bare
+  /// first login, never via invite). 'ADMIN' | 'EXECUTIVE' | 'MANAGER'
+  /// once set — enforced in route validation, not the DB (same convention
+  /// as PinUser.role).
   role              String?
+
+  /// Mirrors PinUser.active. False = access revoked (a claimed user who
+  /// was deactivated) or an invite revoked before it was ever claimed.
+  /// Distinct from role: null ("never assigned yet") — isActive false
+  /// means "was/would-be granted a role, but access is off right now."
+  isActive          Boolean  @default(true)
 
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   @@index([role])
+  @@index([isActive])
 }
 
 // ============================================================
