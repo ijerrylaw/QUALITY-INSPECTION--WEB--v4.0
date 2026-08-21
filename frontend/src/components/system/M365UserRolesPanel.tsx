@@ -199,9 +199,13 @@ export function M365UserRolesPanel() {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      {/* Invite Form */}
-      <div className="lg:col-span-1 bg-surface border border-gray-800 rounded-xl shadow-sm overflow-hidden h-fit">
+    <div className="flex flex-col gap-8">
+      {/* Invite Form — stacked above the roster (not a side-by-side column):
+          at the 1:2 column split this used to have, the email + role +
+          submit controls were squeezed into just 1/3 of the tab's width.
+          Full-width top-to-bottom gives the form room without needing to
+          widen the shared tab wrapper itself. */}
+      <div className="bg-surface border border-gray-800 rounded-xl shadow-sm overflow-hidden">
         <div className="bg-canvas border-b border-gray-800 p-6 flex items-center gap-3">
           <UserPlus className="w-5 h-5 text-brand-secondary" />
           <h3 className="text-lg font-bold text-primary uppercase">Invite by Email</h3>
@@ -248,7 +252,7 @@ export function M365UserRolesPanel() {
       </div>
 
       {/* Roster List */}
-      <div className="lg:col-span-2 bg-surface border border-gray-800 rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-surface border border-gray-800 rounded-xl shadow-sm overflow-hidden">
         <div className="bg-canvas border-b border-gray-800 p-6 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <ShieldCheck className="w-5 h-5 text-brand-secondary" />
