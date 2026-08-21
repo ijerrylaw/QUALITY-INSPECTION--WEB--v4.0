@@ -351,8 +351,13 @@ model AppConfig {
   portalTitle         String   @default("QI Portal v4.0")
   /// Base64 or URL of corporate logo
   logoImage           String?
-  /// Primary accent colour token, e.g., 'emerald' | 'cobalt' | 'violet'
-  accentColor         String   @default("emerald")
+  /// Primary accent colour token — one of the 5 named presets in
+  /// frontend/src/lib/accentColors.ts: 'cobalt' | 'emerald' | 'violet' |
+  /// 'amber' | 'rose'. Default is 'cobalt', not 'emerald' — matches the
+  /// app's actual shipped visual identity (index.css's brand-primary/
+  /// -secondary @theme values), so a fresh install with this field never
+  /// explicitly set looks identical to today's app, not accidentally green.
+  accentColor         String   @default("cobalt")
 
   // --- SKU Builder Dictionaries (Blueprint Section 5 / Section 7) ---
   /// JSON: { value: string; label: string }[]

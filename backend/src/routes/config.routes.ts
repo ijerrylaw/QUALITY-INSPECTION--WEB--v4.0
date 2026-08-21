@@ -260,7 +260,7 @@ router.get('/', async (_req: Request, res: Response) => {
           id: '1',
           companyName: 'QUALITY INSPECTION',
           portalTitle: 'QI Portal v4.0',
-          accentColor: 'emerald',
+          accentColor: 'cobalt',
           sizes: JSON.stringify(['XS', 'S', 'M', 'L', 'XL']),
           sampleSizes: JSON.stringify([13, 20, 32, 50, 80, 125, 200, 315, 500]),
           shifts: JSON.stringify([
