@@ -283,9 +283,16 @@ export function M365UserRolesPanel() {
             <p className="text-xs text-danger">{inviteError}</p>
           )}
 
-          <Button type="submit" className="w-full" disabled={inviting}>
-            {inviting ? 'Sending Invite...' : 'Send Invite'}
-          </Button>
+          {/* Right-aligned, content-width — matches CompanyBrandingPanel.tsx's
+              "Save Branding" button sizing. Was full-width gradient before,
+              which read as visually heavy for a single-field form; still the
+              card's one primary action (variant="primary" unchanged), just
+              no longer spanning the whole card. */}
+          <div className="flex justify-end pt-2">
+            <Button type="submit" className="px-8" disabled={inviting}>
+              {inviting ? 'Sending Invite...' : 'Send Invite'}
+            </Button>
+          </div>
         </form>
       </div>
 
