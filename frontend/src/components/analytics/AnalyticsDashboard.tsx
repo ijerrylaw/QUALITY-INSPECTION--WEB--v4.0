@@ -86,9 +86,10 @@ export function AnalyticsDashboard() {
     brandPrimary: accentPair.primary,
     brandSecondary: accentPair.secondary,
   };
-  const SEVERITY_DATA = SEVERITY_DATA_BASE.map((item) =>
-    item.color === null ? { ...item, color: accentPair.secondary } : item
-  );
+  const SEVERITY_DATA = SEVERITY_DATA_BASE.map((item) => ({
+    ...item,
+    color: item.color ?? accentPair.secondary,
+  }));
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
