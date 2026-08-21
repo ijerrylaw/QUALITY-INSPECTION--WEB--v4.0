@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, ShieldCheck, UserPlus } from 'lucide-react';
+import { RefreshCw, ShieldCheck, UserPlus, UserX, RotateCcw, Trash2, AlertTriangle, X } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { API_BASE_URL } from '../../context/ConfigContext';
 import { useAuth, authHeader } from '../../context/AuthContext';
+import { useToast } from '../ui/ToastProvider';
 import type { UserRole } from '../../context/AuthContext';
 
 // M365-eligible roles only — matches backend/src/routes/m365Users.routes.ts's
@@ -36,6 +37,7 @@ interface M365User {
  */
 export function M365UserRolesPanel() {
   const { user } = useAuth();
+  const { addToast } = useToast();
   const [m365Users, setM365Users] = useState<M365User[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -45,6 +47,11 @@ export function M365UserRolesPanel() {
   const [inviteRole, setInviteRole] = useState<UserRole>('MANAGER');
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
+
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchM365Users = () => {
     setLoading(true);
@@ -116,6 +123,79 @@ export function M365UserRolesPanel() {
     } finally {
       setInviting(false);
     }
+  };
+
+  // No confirmation step for Deactivate — matches PinAdminPanel's roster
+  // convention (only Delete confirms there). Errors (e.g. the last-active-
+  // admin lockout 409) surface as a toast since there's no modal for this
+  // action to show an inline error in.
+  const handleDeactivate = async (mu: M365User) => {
+    setTogglingId(mu.id);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/m365-users/${mu.id}/deactivate`, {
+        method: 'PATCH',
+        headers: { ...authHeader(user) },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Server error: ${res.status}`);
+      }
+      fetchM365Users();
+    } catch (err) {
+      console.error('[M365UserRolesPanel] Deactivate failed:', err);
+      addToast('error', err instanceof Error ? err.message : 'Failed to deactivate.');
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  const handleReactivate = async (mu: M365User) => {
+    setTogglingId(mu.id);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/m365-users/${mu.id}/reactivate`, {
+        method: 'PATCH',
+        headers: { ...authHeader(user) },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Server error: ${res.status}`);
+      }
+      fetchM365Users();
+    } catch (err) {
+      console.error('[M365UserRolesPanel] Reactivate failed:', err);
+      addToast('error', err instanceof Error ? err.message : 'Failed to reactivate.');
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    setDeleting(true);
+    setDeleteError(null);
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE_URL}/api/m365-users/${id}`, {
+        method: 'DELETE',
+        headers: { ...authHeader(user) },
+      });
+    } catch (err) {
+      console.error('[M365UserRolesPanel] Delete failed (network):', err);
+      setDeleteError('Something went wrong — please try again.');
+      setDeleting(false);
+      return;
+    }
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      console.error('[M365UserRolesPanel] Delete failed:', res.status, data);
+      setDeleteError(data.error || 'Something went wrong — please try again.');
+      setDeleting(false);
+      return;
+    }
+
+    setConfirmDeleteId(null);
+    setDeleting(false);
+    fetchM365Users();
   };
 
   return (
@@ -191,13 +271,15 @@ export function M365UserRolesPanel() {
                 <th className="px-6 py-3">Name</th>
                 <th className="px-6 py-3">UPN</th>
                 <th className="px-6 py-3">Role</th>
+                <th className="px-6 py-3">Status</th>
                 <th className="px-6 py-3 text-right">Assign</th>
+                <th className="px-6 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {m365Users.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-muted">
+                  <td colSpan={6} className="px-6 py-8 text-center text-muted">
                     No Microsoft 365 logins yet. Rows appear here automatically the first time
                     someone signs in with Microsoft 365, or after you send an invite.
                   </td>
@@ -209,8 +291,12 @@ export function M365UserRolesPanel() {
                 // logged in. Distinct from a self-registered 'pending' row
                 // (role: null) — this row already has a role, just no login.
                 const isUnclaimedInvite = mu.aadObjectId === null;
+                const isToggling = togglingId === mu.id;
                 return (
-                  <tr key={mu.id} className="border-b border-gray-800/60 last:border-0">
+                  <tr
+                    key={mu.id}
+                    className={`border-b border-gray-800/60 last:border-0 ${!mu.isActive ? 'opacity-50' : ''}`}
+                  >
                     <td className="px-6 py-3 text-primary font-medium">{mu.displayName}</td>
                     <td className="px-6 py-3 text-muted">{mu.userPrincipalName}</td>
                     <td className="px-6 py-3">
@@ -224,6 +310,11 @@ export function M365UserRolesPanel() {
                       ) : (
                         <Badge variant="warning">Pending</Badge>
                       )}
+                    </td>
+                    <td className="px-6 py-3">
+                      <Badge variant={mu.isActive ? 'success' : 'danger'}>
+                        {mu.isActive ? 'Active' : 'Deactivated'}
+                      </Badge>
                     </td>
                     <td className="px-6 py-3">
                       <div className="flex items-center justify-end gap-2">
@@ -248,6 +339,39 @@ export function M365UserRolesPanel() {
                         </Button>
                       </div>
                     </td>
+                    <td className="px-6 py-3 text-right">
+                      <div className="inline-flex items-center gap-2">
+                        {mu.isActive ? (
+                          <Button
+                            variant="danger"
+                            className="px-3 h-8 inline-flex items-center gap-1.5"
+                            onClick={() => handleDeactivate(mu)}
+                            disabled={isToggling}
+                          >
+                            <UserX className="w-3.5 h-3.5" /> Deactivate
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="secondary"
+                            className="px-3 h-8 inline-flex items-center gap-1.5"
+                            onClick={() => handleReactivate(mu)}
+                            disabled={isToggling}
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" /> Reactivate
+                          </Button>
+                        )}
+                        <Button
+                          variant="danger"
+                          className="px-3 h-8 inline-flex items-center gap-1.5"
+                          onClick={() => {
+                            setDeleteError(null);
+                            setConfirmDeleteId(mu.id);
+                          }}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Delete
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -255,6 +379,58 @@ export function M365UserRolesPanel() {
           </table>
         </div>
       </div>
+
+      {/* ── Delete Confirmation Modal — matches PinAdminPanel.tsx's delete
+           modal pattern (bg-black/70 backdrop, bg-canvas card, rose
+           AlertTriangle icon, cancel/confirm pair) ── */}
+      {confirmDeleteId && (() => {
+        const target = m365Users.find((mu) => mu.id === confirmDeleteId);
+        return (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className="bg-canvas border border-gray-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
+              <div className="flex items-start gap-4 p-4 border-b border-gray-800">
+                <div className="w-12 h-12 rounded-full bg-rose-500/10 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-6 h-6 text-rose-400" strokeWidth={2} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold uppercase tracking-wide text-primary mb-1">
+                    DELETE M365 ACCESS?
+                  </h3>
+                  <p className="text-sm text-muted">
+                    Are you sure you want to permanently delete{' '}
+                    <span className="font-bold text-white uppercase">{target?.displayName}</span>? This
+                    cannot be undone.
+                  </p>
+                  {deleteError && (
+                    <p className="text-xs text-danger mt-2">{deleteError}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-4 bg-surface flex items-center justify-end gap-3">
+                <button
+                  onClick={() => {
+                    setConfirmDeleteId(null);
+                    setDeleteError(null);
+                  }}
+                  className="h-10 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-white font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none"
+                >
+                  <X className="w-4 h-4" strokeWidth={2} />
+                  <span>CANCEL</span>
+                </button>
+                <button
+                  onClick={() => confirmDeleteId && handleDelete(confirmDeleteId)}
+                  disabled={deleting}
+                  className="h-10 px-5 rounded-lg bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none border border-rose-500/50 shadow-sm disabled:opacity-50"
+                >
+                  <Trash2 className="w-4 h-4" strokeWidth={2} />
+                  <span>{deleting ? 'DELETING...' : 'CONFIRM DELETE'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
