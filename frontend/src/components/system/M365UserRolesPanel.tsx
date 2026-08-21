@@ -3,20 +3,49 @@ import { RefreshCw, ShieldCheck, UserPlus, UserX, RotateCcw, Trash2, AlertTriang
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { API_BASE_URL } from '../../context/ConfigContext';
-import { useAuth, authHeader } from '../../context/AuthContext';
+import { useAuth, authHeader, getPermissionGroup } from '../../context/AuthContext';
 import { useToast } from '../ui/ToastProvider';
 import type { UserRole } from '../../context/AuthContext';
 
 // M365-eligible roles only — matches backend/src/routes/m365Users.routes.ts's
 // M365_ELIGIBLE_ROLES. Real Entra SSO is restricted to Group A/B tier staff
-// (NAVIGATION_AND_RBAC.md §3.1) — Group C stays on PIN login.
+// (NAVIGATION_AND_RBAC.md §3.1) — Group C stays on PIN login, and is
+// structurally unreachable here: this list only ever contains these three
+// roles, so nothing below can ever render a Group C label.
+//
 // Company-hierarchy order (Manager outranks Executive here) — applied
 // everywhere these three roles are listed together as a sequence.
-const M365_ROLE_OPTIONS: { role: UserRole; label: string }[] = [
-  { role: 'ADMIN', label: 'Admin' },
-  { role: 'MANAGER', label: 'Manager' },
-  { role: 'EXECUTIVE', label: 'Executive' },
+//
+// `label` describes each role by CAPABILITY (Group A/B + what that group
+// can/can't do), not job title — portable phrasing that doesn't assume any
+// specific company's titles. Used for the invite form's <select>, which is
+// roomy (w-full, not a table cell) so the full phrase fits comfortably.
+// `shortLabel` (plain role name) is used by the per-row inline Assign
+// <select> instead — that one has no explicit width and sizes to its
+// selected option's text, so a long label there would reintroduce the
+// horizontal table overflow fixed in an earlier session.
+const M365_ROLE_OPTIONS: { role: UserRole; label: string; shortLabel: string }[] = [
+  { role: 'ADMIN', label: 'Group A — Full System Access (Admin)', shortLabel: 'Admin' },
+  { role: 'MANAGER', label: 'Group B — Operational Access (Manager)', shortLabel: 'Manager' },
+  { role: 'EXECUTIVE', label: 'Group B — Operational Access (Executive)', shortLabel: 'Executive' },
 ];
+
+/**
+ * Compact stacked role display for the roster table's ROLE column — role
+ * name on top, "Group A"/"Group B" beneath (UI_DESIGN_SYSTEM.md §4.2's
+ * Stacked Data Cells pattern). Deliberately NOT the long capability-phrase
+ * label used by the invite dropdown (M365_ROLE_OPTIONS's `label`) — this
+ * sits in a space-constrained table cell, not a roomy w-full <select>.
+ */
+function RoleCell({ role }: { role: UserRole }) {
+  const shortLabel = M365_ROLE_OPTIONS.find((opt) => opt.role === role)?.shortLabel ?? role;
+  return (
+    <div>
+      <div className="text-sm text-primary">{shortLabel}</div>
+      <div className="text-xs text-muted">Group {getPermissionGroup(role)}</div>
+    </div>
+  );
+}
 
 interface M365User {
   id: string;
@@ -320,11 +349,14 @@ export function M365UserRolesPanel() {
                     <td className="px-6 py-3">
                       {isUnclaimedInvite ? (
                         <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs uppercase text-muted">{mu.role}</span>
+                          {/* Unclaimed invites always have a role — backend's invite
+                              route requires one — but TS can't infer that from
+                              isUnclaimedInvite alone, hence the guard. */}
+                          {mu.role && <RoleCell role={mu.role} />}
                           <Badge variant="warning">Pending Invite</Badge>
                         </div>
                       ) : mu.role ? (
-                        <span className="font-mono text-xs uppercase text-muted">{mu.role}</span>
+                        <RoleCell role={mu.role} />
                       ) : (
                         <Badge variant="warning">Pending</Badge>
                       )}
@@ -345,7 +377,7 @@ export function M365UserRolesPanel() {
                         >
                           <option value="" disabled>Select role...</option>
                           {M365_ROLE_OPTIONS.map((opt) => (
-                            <option key={opt.role} value={opt.role}>{opt.label}</option>
+                            <option key={opt.role} value={opt.role}>{opt.shortLabel}</option>
                           ))}
                         </select>
                         <Button
