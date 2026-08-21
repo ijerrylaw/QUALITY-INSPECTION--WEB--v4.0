@@ -10,10 +10,12 @@ import type { UserRole } from '../../context/AuthContext';
 // M365-eligible roles only — matches backend/src/routes/m365Users.routes.ts's
 // M365_ELIGIBLE_ROLES. Real Entra SSO is restricted to Group A/B tier staff
 // (NAVIGATION_AND_RBAC.md §3.1) — Group C stays on PIN login.
+// Company-hierarchy order (Manager outranks Executive here) — applied
+// everywhere these three roles are listed together as a sequence.
 const M365_ROLE_OPTIONS: { role: UserRole; label: string }[] = [
   { role: 'ADMIN', label: 'Admin' },
-  { role: 'EXECUTIVE', label: 'Executive' },
   { role: 'MANAGER', label: 'Manager' },
+  { role: 'EXECUTIVE', label: 'Executive' },
 ];
 
 interface M365User {
@@ -259,7 +261,7 @@ export function M365UserRolesPanel() {
             <div>
               <h3 className="text-lg font-semibold uppercase text-primary">Microsoft 365 Access</h3>
               <p className="text-xs text-muted mt-1 font-normal normal-case">
-                Assign ADMIN / EXECUTIVE / MANAGER to real Entra SSO logins.
+                Assign ADMIN / MANAGER / EXECUTIVE to real Entra SSO logins.
               </p>
             </div>
           </div>
