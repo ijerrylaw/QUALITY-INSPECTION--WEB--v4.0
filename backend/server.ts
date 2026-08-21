@@ -16,6 +16,9 @@
  */
 
 import 'dotenv/config'; // Load .env before anything else (DATABASE_URL etc.)
+import https from 'node:https';
+import fs from 'node:fs';
+import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
 import prisma from './src/lib/prismaClient';
@@ -26,6 +29,18 @@ import { m365UsersRouter, m365AuthRouter } from './src/routes/m365Users.routes';
 
 const app = express();
 const PORT = process.env['PORT'] ? Number(process.env['PORT']) : 4009;
+
+// Same mkcert-generated, local-CA-trusted cert the frontend uses (see
+// frontend/vite.config.ts) — required because Entra ID only allows HTTPS
+// for any non-localhost redirect URI, and MSAL's redirectUri is derived
+// from the frontend page's own origin, not this server's. Read from
+// frontend/ via a relative path (backend and frontend are sibling folders)
+// rather than duplicating the files here, so there's a single source of
+// truth if Jerry ever has to regenerate them (e.g. the LAN IP changes).
+const httpsOptions = {
+  key: fs.readFileSync(path.resolve(__dirname, '../frontend/10.10.110.31+1-key.pem')),
+  cert: fs.readFileSync(path.resolve(__dirname, '../frontend/10.10.110.31+1.pem')),
+};
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors());
@@ -69,21 +84,21 @@ app.use((_req, res) => {
 });
 
 // ── Server Start ──────────────────────────────────────────────────────────────
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[QI Backend v4.0] Server running → http://localhost:${PORT}`);
-  console.log(`  Health:      GET   http://localhost:${PORT}/api/health`);
-  console.log(`  Config:      GET   http://localhost:${PORT}/api/config`);
-  console.log(`  Config:      PATCH http://localhost:${PORT}/api/config`);
-  console.log(`  Submissions: POST  http://localhost:${PORT}/api/submissions`);
-  console.log(`  Submissions: GET   http://localhost:${PORT}/api/submissions`);
-  console.log(`  Amendments:  GET   http://localhost:${PORT}/api/amendments/pending`);
-  console.log(`  Amendments:  POST  http://localhost:${PORT}/api/amendments/:id/approve`);
-  console.log(`  Amendments:  POST  http://localhost:${PORT}/api/amendments/:id/reject`);
-  console.log(`  Verdict:     POST  http://localhost:${PORT}/api/verdict/preview`);
-  console.log(`  PIN Users:   GET   http://localhost:${PORT}/api/pin-users`);
-  console.log(`  PIN Users:   POST  http://localhost:${PORT}/api/pin-users`);
-  console.log(`  PIN Login:   POST  http://localhost:${PORT}/api/auth/pin-login`);
-  console.log(`  M365 Users:  GET   http://localhost:${PORT}/api/m365-users`);
-  console.log(`  M365 Users:  PATCH http://localhost:${PORT}/api/m365-users/:id`);
-  console.log(`  M365 Login:  POST  http://localhost:${PORT}/api/auth/m365-login`);
+https.createServer(httpsOptions, app).listen(PORT, '0.0.0.0', () => {
+  console.log(`[QI Backend v4.0] Server running → https://localhost:${PORT}`);
+  console.log(`  Health:      GET   https://localhost:${PORT}/api/health`);
+  console.log(`  Config:      GET   https://localhost:${PORT}/api/config`);
+  console.log(`  Config:      PATCH https://localhost:${PORT}/api/config`);
+  console.log(`  Submissions: POST  https://localhost:${PORT}/api/submissions`);
+  console.log(`  Submissions: GET   https://localhost:${PORT}/api/submissions`);
+  console.log(`  Amendments:  GET   https://localhost:${PORT}/api/amendments/pending`);
+  console.log(`  Amendments:  POST  https://localhost:${PORT}/api/amendments/:id/approve`);
+  console.log(`  Amendments:  POST  https://localhost:${PORT}/api/amendments/:id/reject`);
+  console.log(`  Verdict:     POST  https://localhost:${PORT}/api/verdict/preview`);
+  console.log(`  PIN Users:   GET   https://localhost:${PORT}/api/pin-users`);
+  console.log(`  PIN Users:   POST  https://localhost:${PORT}/api/pin-users`);
+  console.log(`  PIN Login:   POST  https://localhost:${PORT}/api/auth/pin-login`);
+  console.log(`  M365 Users:  GET   https://localhost:${PORT}/api/m365-users`);
+  console.log(`  M365 Users:  PATCH https://localhost:${PORT}/api/m365-users/:id`);
+  console.log(`  M365 Login:  POST  https://localhost:${PORT}/api/auth/m365-login`);
 });
