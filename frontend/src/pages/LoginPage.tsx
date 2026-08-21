@@ -1,14 +1,24 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useConfig } from '../context/ConfigContext';
 import { useToast } from '../components/ui/ToastProvider';
 import { Button } from '../components/ui/Button';
 import { ShieldCheck, HardHat, Delete } from 'lucide-react';
 
 export function LoginPage() {
   const { loginWithM365, loginWithPIN } = useAuth();
+  const { config } = useConfig();
   const { addToast } = useToast();
   const navigate = useNavigate();
+
+  // Same fallback pattern as Sidebar.tsx — a device loading this page has
+  // never authenticated yet, so this is the one screen besides Sidebar
+  // itself that needs these fields, and needs the exact same "never
+  // configured" behavior (today's hardcoded look, byte-for-byte).
+  const companyName = config?.companyName?.trim() || 'ONE GLOVE GROUP';
+  const portalTitle = config?.portalTitle?.trim() || 'QI PLATFORM v4.0';
+  const logoImage = config?.logoImage || null;
 
   const [pin, setPin] = useState<string>('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -94,11 +104,20 @@ export function LoginPage() {
         
         <div className="max-w-md w-full space-y-8 relative z-10 text-center">
           <div className="flex justify-center mb-8">
-            <div className="w-16 h-16 rounded-2xl bg-brand-primary/20 text-brand-secondary flex items-center justify-center border border-brand-secondary/40 shadow-[0_0_20px_rgba(45,212,191,0.2)]">
-              <ShieldCheck size={32} />
+            <div className="w-16 h-16 rounded-2xl bg-brand-primary/20 text-brand-secondary flex items-center justify-center border border-brand-secondary/40 shadow-[0_0_20px_rgba(45,212,191,0.2)] overflow-hidden">
+              {logoImage ? (
+                <img src={logoImage} alt={companyName} className="w-full h-full object-contain" />
+              ) : (
+                <ShieldCheck size={32} />
+              )}
             </div>
           </div>
-          
+
+          <div className="-mt-4 mb-2">
+            <p className="text-xs font-bold uppercase tracking-wider text-primary truncate">{companyName}</p>
+            <p className="text-[10px] font-mono uppercase text-muted tracking-wide">{portalTitle}</p>
+          </div>
+
           <div>
             <h2 className="text-3xl font-bold tracking-tight">Management Access</h2>
             <p className="mt-3 text-muted text-lg">
@@ -130,10 +149,15 @@ export function LoginPage() {
         <div className="max-w-sm w-full space-y-8">
           <div className="text-center">
             <div className="flex justify-center mb-6">
-              <div className="w-14 h-14 rounded-2xl bg-gray-800 text-gray-300 flex items-center justify-center border border-gray-700">
-                <HardHat size={28} />
+              <div className="w-14 h-14 rounded-2xl bg-gray-800 text-gray-300 flex items-center justify-center border border-gray-700 overflow-hidden">
+                {logoImage ? (
+                  <img src={logoImage} alt={companyName} className="w-full h-full object-contain" />
+                ) : (
+                  <HardHat size={28} />
+                )}
               </div>
             </div>
+            <p className="text-xs font-bold uppercase tracking-wider text-primary truncate mb-1">{companyName}</p>
             <h2 className="text-2xl font-bold tracking-tight">Factory Floor Kiosk</h2>
             <p className="mt-2 text-muted">Enter your 6-digit PIN</p>
           </div>
