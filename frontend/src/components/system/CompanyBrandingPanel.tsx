@@ -24,6 +24,7 @@ export function CompanyBrandingPanel() {
   const { addToast } = useToast();
 
   const [companyName, setCompanyName] = useState('');
+  const [portalTitle, setPortalTitle] = useState('');
   const [logoImage, setLogoImage] = useState<string | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
   const [accentColor, setAccentColor] = useState<AccentFamily>(DEFAULT_ACCENT_FAMILY);
@@ -33,6 +34,7 @@ export function CompanyBrandingPanel() {
   useEffect(() => {
     if (config) {
       setCompanyName(config.companyName ?? '');
+      setPortalTitle(config.portalTitle ?? '');
       setLogoImage(config.logoImage ?? null);
       setAccentColor(isAccentFamily(config.accentColor) ? config.accentColor : DEFAULT_ACCENT_FAMILY);
     }
@@ -60,7 +62,7 @@ export function CompanyBrandingPanel() {
       const res = await fetch(`${API_BASE_URL}/api/config`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...authHeader(user) },
-        body: JSON.stringify({ companyName, logoImage, accentColor }),
+        body: JSON.stringify({ companyName, portalTitle, logoImage, accentColor }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -97,6 +99,20 @@ export function CompanyBrandingPanel() {
             placeholder="ONE GLOVE GROUP"
             className="w-full bg-canvas border border-gray-700 text-sm text-primary rounded-lg px-4 py-2.5 focus:border-brand-primary outline-none"
           />
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-xs font-semibold uppercase tracking-wider text-muted">Portal Title</label>
+          <input
+            type="text"
+            value={portalTitle}
+            onChange={(e) => setPortalTitle(e.target.value)}
+            placeholder="QI PLATFORM v4.0"
+            className="w-full bg-canvas border border-gray-700 text-sm text-primary rounded-lg px-4 py-2.5 focus:border-brand-primary outline-none"
+          />
+          <p className="text-xs text-muted mt-1">
+            Subtitle shown beneath the company name in the nav sidebar.
+          </p>
         </div>
 
         <div className="space-y-2">

@@ -69,6 +69,7 @@ export function Sidebar() {
   const { config } = useConfig();
   const companyName = config?.companyName?.trim() || 'ONE GLOVE GROUP';
   const logoImage = config?.logoImage || null;
+  const portalTitle = config?.portalTitle?.trim() || 'QI PLATFORM v4.0';
   const canChangePin = user?.loginMethod === 'PIN';
 
   // ── Discard-unsaved-wizard-work navigation guard ─────────────────────────
@@ -128,7 +129,7 @@ export function Sidebar() {
                   {companyName}
                 </span>
                 <span className="text-[10px] font-mono uppercase text-muted tracking-wide">
-                  QI PLATFORM v4.0
+                  {portalTitle}
                 </span>
               </div>
             )}
