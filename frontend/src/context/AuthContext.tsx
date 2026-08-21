@@ -123,6 +123,11 @@ async function resolveM365User(account: AccountInfo): Promise<User> {
       aadObjectId: account.localAccountId,
       userPrincipalName: account.username,
       displayName: account.name ?? account.username,
+      // '' when the Graph call above failed/returned none — the backend
+      // only overwrites a stored jobTitle when this is non-empty, so a
+      // transient Graph hiccup here never blanks out a previously
+      // captured value for this person (M365UserRolesPanel.tsx's table).
+      jobTitle,
     }),
   });
 

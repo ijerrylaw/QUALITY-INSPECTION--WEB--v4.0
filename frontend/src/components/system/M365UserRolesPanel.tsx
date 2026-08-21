@@ -23,6 +23,13 @@ interface M365User {
   aadObjectId: string | null;
   userPrincipalName: string;
   displayName: string;
+  /**
+   * Real job title from Microsoft Graph, captured/refreshed at login time
+   * (AuthContext.tsx's resolveM365User). Null for an unclaimed invite or
+   * if Graph never returned one. Display-only — NEVER used in any
+   * permission/access-control decision.
+   */
+  jobTitle: string | null;
   role: UserRole | null;
   isActive: boolean;
   createdAt: string;
@@ -303,7 +310,12 @@ export function M365UserRolesPanel() {
                     key={mu.id}
                     className={`border-b border-gray-800/60 last:border-0 ${!mu.isActive ? 'opacity-50' : ''}`}
                   >
-                    <td className="px-6 py-3 text-primary font-medium">{mu.displayName}</td>
+                    <td className="px-6 py-3">
+                      <div className="text-primary font-medium">{mu.displayName}</div>
+                      {mu.jobTitle && (
+                        <div className="text-xs text-muted mt-0.5">{mu.jobTitle}</div>
+                      )}
+                    </td>
                     <td className="px-6 py-3 text-muted">{mu.userPrincipalName}</td>
                     <td className="px-6 py-3">
                       {isUnclaimedInvite ? (
