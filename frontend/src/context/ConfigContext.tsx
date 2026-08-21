@@ -33,6 +33,7 @@ import {
   useMemo,
 } from 'react';
 import type { ReactNode } from 'react';
+import { resolveAccentPair } from '../lib/accentColors';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PRIMITIVE OPTION TYPES
@@ -533,6 +534,21 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void fetchConfig();
   }, [fetchConfig]);
+
+  // Runtime app-wide accent theming (accentColors.ts). Tailwind v4's @theme
+  // colors in index.css already compile to CSS custom properties, not baked
+  // hex — confirmed against the actual build output — so overriding these
+  // two variables on the root element retroactively re-themes every
+  // bg-/text-/border-/ring-brand-primary(-secondary) utility across the
+  // whole app, no rebuild needed. Runs with config === null (pre-fetch) too:
+  // resolveAccentPair(undefined) resolves to the Cobalt preset, which is
+  // byte-for-byte index.css's own hardcoded default, so there's no flash of
+  // a different color before the first fetch resolves.
+  useEffect(() => {
+    const pair = resolveAccentPair(config?.accentColor);
+    document.documentElement.style.setProperty('--color-brand-primary', pair.primary);
+    document.documentElement.style.setProperty('--color-brand-secondary', pair.secondary);
+  }, [config?.accentColor]);
 
   // ── Profile Resolution Logic ─────────────────────────────────────────────
   //

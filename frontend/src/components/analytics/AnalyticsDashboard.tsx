@@ -15,6 +15,8 @@ import {
   Cell
 } from 'recharts';
 import { TrendingDown, Activity, AlertOctagon } from 'lucide-react';
+import { useConfig } from '../../context/ConfigContext';
+import { resolveAccentPair } from '../../lib/accentColors';
 
 const PARETO_DATA = [
   { name: 'Weak Spot', count: 450, cumulative: 35 },
@@ -31,21 +33,30 @@ const PLANT_METRICS = [
   { name: 'Penang Plant', pass: 2800, fail: 90 },
 ];
 
-const SEVERITY_DATA = [
-  { name: 'Minor Visual', value: 600, color: '#08C8CD' }, // Brand Secondary
+// 'Minor Visual's color is filled in at render time from the live accent
+// choice (accentColors.ts) — see AnalyticsDashboard()'s severityData below.
+// Kept null here (not a hardcoded hex) so this module-level constant can't
+// silently drift from whatever color the brand-secondary swatch actually
+// resolves to.
+const SEVERITY_DATA_BASE = [
+  { name: 'Minor Visual', value: 600, color: null as string | null },
   { name: 'Major Visual', value: 400, color: '#F59E0B' }, // Amber
   { name: 'Critical', value: 200, color: '#EF4444' },     // Red
   { name: 'Zero Tolerance', value: 50, color: '#991B1B' } // Dark Red
 ];
 
-// Tailwind hex equivalents for recharts
-const COLORS = {
+// Tailwind hex equivalents for recharts (UI_DESIGN_SYSTEM.md §1.1's Chart
+// Library Exemption — Recharts takes literal fill/stroke color values, not
+// Tailwind classes, so these can't reference the CSS variables directly).
+// brandPrimary/brandSecondary are NOT included here — they're resolved
+// live inside AnalyticsDashboard() from the current accentColor, since this
+// object is otherwise a static module-level constant that would never pick
+// up a runtime accent change.
+const STATIC_COLORS = {
   canvas: '#0B0F19',
   surface: '#111827',
   muted: '#9CA3AF',
   primary: '#F3F4F6',
-  brandPrimary: '#3F48CC',
-  brandSecondary: '#08C8CD',
   emerald: '#10B981',
   rose: '#EF4444'
 };
@@ -68,6 +79,17 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export function AnalyticsDashboard() {
+  const { config } = useConfig();
+  const accentPair = resolveAccentPair(config?.accentColor);
+  const COLORS = {
+    ...STATIC_COLORS,
+    brandPrimary: accentPair.primary,
+    brandSecondary: accentPair.secondary,
+  };
+  const SEVERITY_DATA = SEVERITY_DATA_BASE.map((item) =>
+    item.color === null ? { ...item, color: accentPair.secondary } : item
+  );
+
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       

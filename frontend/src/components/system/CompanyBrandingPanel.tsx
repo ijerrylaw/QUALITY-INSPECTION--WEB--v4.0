@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Building2, Upload } from 'lucide-react';
+import { Building2, Upload, Palette } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { useToast } from '../ui/ToastProvider';
 import { useConfig, API_BASE_URL } from '../../context/ConfigContext';
 import { useAuth, authHeader } from '../../context/AuthContext';
+import { ACCENT_PRESETS, DEFAULT_ACCENT_FAMILY, isAccentFamily } from '../../lib/accentColors';
+import type { AccentFamily } from '../../lib/accentColors';
 
 const MAX_LOGO_BYTES = 500 * 1024; // 500KB
 
@@ -24,6 +26,7 @@ export function CompanyBrandingPanel() {
   const [companyName, setCompanyName] = useState('');
   const [logoImage, setLogoImage] = useState<string | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
+  const [accentColor, setAccentColor] = useState<AccentFamily>(DEFAULT_ACCENT_FAMILY);
   const [saving, setSaving] = useState(false);
 
   // Seed local editable state from the loaded config, once it arrives.
@@ -31,6 +34,7 @@ export function CompanyBrandingPanel() {
     if (config) {
       setCompanyName(config.companyName ?? '');
       setLogoImage(config.logoImage ?? null);
+      setAccentColor(isAccentFamily(config.accentColor) ? config.accentColor : DEFAULT_ACCENT_FAMILY);
     }
   }, [config]);
 
@@ -56,7 +60,7 @@ export function CompanyBrandingPanel() {
       const res = await fetch(`${API_BASE_URL}/api/config`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...authHeader(user) },
-        body: JSON.stringify({ companyName, logoImage }),
+        body: JSON.stringify({ companyName, logoImage, accentColor }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -113,6 +117,31 @@ export function CompanyBrandingPanel() {
           </div>
           {logoError && <p className="text-xs text-danger">{logoError}</p>}
           <p className="text-xs text-muted mt-1">PNG/JPG/SVG, under 500KB.</p>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-xs font-semibold uppercase tracking-wider text-muted flex items-center gap-1.5">
+            <Palette className="w-3 h-3" />
+            Accent Color
+          </label>
+          <div className="flex items-center gap-3">
+            <div
+              className="w-9 h-9 rounded-lg border border-gray-700 shrink-0"
+              style={{ backgroundColor: ACCENT_PRESETS[accentColor].primary }}
+            />
+            <select
+              value={accentColor}
+              onChange={(e) => setAccentColor(e.target.value as AccentFamily)}
+              className="w-full bg-canvas border border-gray-700 text-sm text-primary rounded-lg px-4 py-2.5 focus:border-brand-primary outline-none appearance-none"
+            >
+              {(Object.keys(ACCENT_PRESETS) as AccentFamily[]).map((family) => (
+                <option key={family} value={family}>{ACCENT_PRESETS[family].label}</option>
+              ))}
+            </select>
+          </div>
+          <p className="text-xs text-muted mt-1">
+            Applies app-wide — buttons, active tabs, badges, and highlights.
+          </p>
         </div>
 
         <div className="flex justify-end pt-2">
