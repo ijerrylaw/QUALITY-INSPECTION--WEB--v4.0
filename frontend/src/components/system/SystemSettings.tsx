@@ -105,7 +105,7 @@ export function SystemSettings() {
         {/* Azure AD Credentials Form */}
         <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
           <div className="bg-surface border-b border-gray-800 p-4 flex items-center gap-3">
-            <Key className="w-4 h-4 text-brand-primary" strokeWidth={2} />
+            <Key className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
             <h3 className="text-lg font-semibold uppercase text-primary">Azure AD Authentication</h3>
           </div>
 
@@ -118,7 +118,7 @@ export function SystemSettings() {
                 onChange={(e) => setTenantId(e.target.value)}
                 onBlur={(e) => validateGuidField('tenantId', e.target.value)}
                 className={`w-full bg-canvas border text-sm font-mono text-primary rounded-lg px-4 py-2.5 outline-none ${
-                  errors.tenantId ? 'border-rose-500/50 focus:border-rose-500' : 'border-gray-700 focus:border-brand-primary'
+                  errors.tenantId ? 'border-rose-500/50 focus:border-rose-500' : 'border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary'
                 }`}
               />
               {errors.tenantId && <p className="text-xs text-danger">{errors.tenantId}</p>}
@@ -132,7 +132,7 @@ export function SystemSettings() {
                 onChange={(e) => setClientId(e.target.value)}
                 onBlur={(e) => validateGuidField('clientId', e.target.value)}
                 className={`w-full bg-canvas border text-sm font-mono text-primary rounded-lg px-4 py-2.5 outline-none ${
-                  errors.clientId ? 'border-rose-500/50 focus:border-rose-500' : 'border-gray-700 focus:border-brand-primary'
+                  errors.clientId ? 'border-rose-500/50 focus:border-rose-500' : 'border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary'
                 }`}
               />
               {errors.clientId && <p className="text-xs text-danger">{errors.clientId}</p>}
@@ -150,7 +150,7 @@ export function SystemSettings() {
                     else setErrors((prev) => ({ ...prev, clientSecret: undefined }));
                   }}
                   className={`w-full bg-canvas border text-sm font-mono text-primary rounded-lg pl-4 pr-11 py-2.5 outline-none ${
-                    errors.clientSecret ? 'border-rose-500/50 focus:border-rose-500' : 'border-gray-700 focus:border-brand-primary'
+                    errors.clientSecret ? 'border-rose-500/50 focus:border-rose-500' : 'border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary'
                   }`}
                 />
                 <button
