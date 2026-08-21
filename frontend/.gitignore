@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# mkcert-generated local dev cert/key + the CA tool binary itself — both are
+# machine-specific security artifacts (tied to this laptop's trusted local
+# CA and static LAN IP), never to be committed. See vite.config.ts.
+*.pem
+mkcert.exe
