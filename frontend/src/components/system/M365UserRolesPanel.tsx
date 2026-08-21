@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, ShieldCheck, UserPlus, UserX, RotateCcw, Trash2, AlertTriangle, X } from 'lucide-react';
+import { RefreshCw, ShieldCheck, UserPlus, UserX, RotateCcw, Trash2, AlertTriangle, X, Check } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { API_BASE_URL } from '../../context/ConfigContext';
@@ -335,44 +335,58 @@ export function M365UserRolesPanel() {
                           ))}
                         </select>
                         <Button
-                          className="px-4 h-8"
+                          className="w-8 h-8 p-0"
                           onClick={() => handleAssign(mu.id)}
                           disabled={savingId === mu.id || !pendingRoleById[mu.id]}
+                          title="Save role assignment"
                         >
-                          {savingId === mu.id ? 'Saving...' : 'Save'}
+                          {savingId === mu.id ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Check className="w-3.5 h-3.5" strokeWidth={2} />
+                          )}
                         </Button>
                       </div>
                     </td>
                     <td className="px-6 py-3 text-right">
+                      {/* Icon-only + title tooltip (matches FactorySetup.tsx's
+                          inline-edit Save/Cancel and SystemSettings.tsx's
+                          show/hide-secret toggle) — full-text buttons here
+                          pushed this column, combined with Assign, past the
+                          card's width and forced the table into horizontal
+                          scroll. */}
                       <div className="inline-flex items-center gap-2">
                         {mu.isActive ? (
                           <Button
                             variant="danger"
-                            className="px-3 h-8 inline-flex items-center gap-1.5"
+                            className="w-8 h-8 p-0"
                             onClick={() => handleDeactivate(mu)}
                             disabled={isToggling}
+                            title="Deactivate"
                           >
-                            <UserX className="w-3.5 h-3.5" /> Deactivate
+                            <UserX className="w-3.5 h-3.5" />
                           </Button>
                         ) : (
                           <Button
                             variant="secondary"
-                            className="px-3 h-8 inline-flex items-center gap-1.5"
+                            className="w-8 h-8 p-0"
                             onClick={() => handleReactivate(mu)}
                             disabled={isToggling}
+                            title="Reactivate"
                           >
-                            <RotateCcw className="w-3.5 h-3.5" /> Reactivate
+                            <RotateCcw className="w-3.5 h-3.5" />
                           </Button>
                         )}
                         <Button
                           variant="danger"
-                          className="px-3 h-8 inline-flex items-center gap-1.5"
+                          className="w-8 h-8 p-0"
                           onClick={() => {
                             setDeleteError(null);
                             setConfirmDeleteId(mu.id);
                           }}
+                          title="Delete"
                         >
-                          <Trash2 className="w-3.5 h-3.5" /> Delete
+                          <Trash2 className="w-3.5 h-3.5" />
                         </Button>
                       </div>
                     </td>
