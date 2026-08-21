@@ -63,6 +63,7 @@ function toPublicM365User(u: {
   aadObjectId: string | null;
   userPrincipalName: string;
   displayName: string;
+  jobTitle: string | null;
   role: string | null;
   isActive: boolean;
   createdAt: Date;
@@ -73,6 +74,7 @@ function toPublicM365User(u: {
     aadObjectId: u.aadObjectId,
     userPrincipalName: u.userPrincipalName,
     displayName: u.displayName,
+    jobTitle: u.jobTitle,
     role: u.role,
     isActive: u.isActive,
     createdAt: u.createdAt,
@@ -330,11 +332,18 @@ m365AuthRouter.post('/m365-login', async (req: Request, res: Response) => {
       aadObjectId?: string;
       userPrincipalName?: string;
       displayName?: string;
+      jobTitle?: string;
     };
 
     const aadObjectId = (body.aadObjectId ?? '').trim();
     const userPrincipalName = (body.userPrincipalName ?? '').trim();
     const displayName = (body.displayName ?? '').trim();
+    const jobTitle = (body.jobTitle ?? '').trim();
+    // Only overwrite a stored jobTitle when this login actually supplied
+    // one — a transient Graph failure (frontend sends '' when its own
+    // Graph call failed) must never blank out a previously captured value.
+    // Spread into every data/update/create object below.
+    const jobTitleUpdate = jobTitle ? { jobTitle } : {};
 
     if (!aadObjectId || !userPrincipalName || !displayName) {
       res.status(400).json({ error: 'aadObjectId, userPrincipalName, and displayName are required' });
@@ -350,7 +359,7 @@ m365AuthRouter.post('/m365-login', async (req: Request, res: Response) => {
       }
       await prisma.m365UserRole.update({
         where: { aadObjectId },
-        data: { userPrincipalName, displayName },
+        data: { userPrincipalName, displayName, ...jobTitleUpdate },
       });
       res.json({ role: byAad.role, status: 'active' });
       return;
@@ -368,7 +377,7 @@ m365AuthRouter.post('/m365-login', async (req: Request, res: Response) => {
       }
       const claimed = await prisma.m365UserRole.update({
         where: { id: invited.id },
-        data: { aadObjectId, displayName },
+        data: { aadObjectId, displayName, ...jobTitleUpdate },
       });
       res.json({ role: claimed.role, status: 'invite-claimed' });
       return;
@@ -386,8 +395,8 @@ m365AuthRouter.post('/m365-login', async (req: Request, res: Response) => {
     // e: existing behavior, unchanged.
     const created = await prisma.m365UserRole.upsert({
       where: { aadObjectId },
-      update: { userPrincipalName, displayName },
-      create: { aadObjectId, userPrincipalName, displayName, role: null },
+      update: { userPrincipalName, displayName, ...jobTitleUpdate },
+      create: { aadObjectId, userPrincipalName, displayName, role: null, ...jobTitleUpdate },
     });
     res.json({ role: created.role, status: 'pending' });
   } catch (error) {
@@ -407,11 +416,13 @@ m365AuthRouter.post('/claim-bootstrap-admin', async (req: Request, res: Response
       aadObjectId?: string;
       userPrincipalName?: string;
       displayName?: string;
+      jobTitle?: string;
     };
 
     const aadObjectId = (body.aadObjectId ?? '').trim();
     const userPrincipalName = (body.userPrincipalName ?? '').trim();
     const displayName = (body.displayName ?? '').trim();
+    const jobTitle = (body.jobTitle ?? '').trim();
 
     if (!aadObjectId || !userPrincipalName || !displayName) {
       res.status(400).json({ error: 'aadObjectId, userPrincipalName, and displayName are required' });
@@ -433,6 +444,7 @@ m365AuthRouter.post('/claim-bootstrap-admin', async (req: Request, res: Response
           displayName,
           role: 'ADMIN',
           isActive: true,
+          ...(jobTitle ? { jobTitle } : {}),
         },
       });
       res.status(201).json({ role: created.role, status: 'active' });

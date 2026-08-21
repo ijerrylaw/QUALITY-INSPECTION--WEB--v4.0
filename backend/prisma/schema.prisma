@@ -290,6 +290,15 @@ model M365UserRole {
   /// they've ever logged in (invited row) as well as after.
   userPrincipalName String   @unique
   displayName       String
+  /// Real job title from Microsoft Graph (GET /v1.0/me?$select=jobTitle),
+  /// captured/refreshed on every login the same way displayName already
+  /// is — display/audit only, NEVER read by any permission check (same
+  /// rule as PinUser.jobTitle, NAVIGATION_AND_RBAC.md). Null for an
+  /// unclaimed invite (never logged in yet, no Graph data) or if Graph
+  /// genuinely never returned one; a transient Graph failure on a later
+  /// login never blanks out a previously captured value — the route only
+  /// overwrites this field when the incoming login actually supplies one.
+  jobTitle          String?
 
   /// null = pending assignment (no access yet, only reachable via a bare
   /// first login, never via invite). 'ADMIN' | 'EXECUTIVE' | 'MANAGER'
