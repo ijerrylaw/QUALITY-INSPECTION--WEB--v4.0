@@ -15,8 +15,7 @@ const MAX_LOGO_BYTES = 500 * 1024; // 500KB
  * schema/API ("Blueprint Section 8: Dynamic White-Label") but had no
  * frontend reader or writer until now. Self-contained fetch/PATCH, same
  * shape as M365UserRolesPanel.tsx (the "Microsoft 365 Access" card this
- * sits next to) rather than SystemSettings.tsx's decorative mock cards —
- * this one is real, persisted config.
+ * sits next to) — real, persisted config.
  */
 export function CompanyBrandingPanel() {
   const { user } = useAuth();

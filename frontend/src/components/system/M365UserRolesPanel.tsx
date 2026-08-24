@@ -403,8 +403,7 @@ export function M365UserRolesPanel() {
                     </td>
                     <td className="px-6 py-3 text-right">
                       {/* Icon-only + title tooltip (matches FactorySetup.tsx's
-                          inline-edit Save/Cancel and SystemSettings.tsx's
-                          show/hide-secret toggle) — full-text buttons here
+                          inline-edit Save/Cancel) — full-text buttons here
                           pushed this column, combined with Assign, past the
                           card's width and forced the table into horizontal
                           scroll. */}
