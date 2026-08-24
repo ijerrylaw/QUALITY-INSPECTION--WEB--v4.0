@@ -38,6 +38,7 @@ import { Ruler, CheckCircle2, AlertTriangle, AlertCircle, Info } from 'lucide-re
 import { useToast } from '../../components/ui/ToastProvider';
 import { useConfig, hasUsableProductMatrix, resolveProductMatrix, isDimensionGraded } from '../../context/ConfigContext';
 import { OriginalValueNote, hasFieldChanged } from '../../utils/fieldDiff';
+import { FIXED_DIM_LENGTH, FIXED_DIM_PALM, FIXED_DIMENSION_LABELS } from '../../lib/fixedDimensions';
 import type { ProductDimensionDef } from '../../context/ConfigContext';
 
 export interface StepDimensionsProps {
@@ -50,10 +51,6 @@ export interface StepDimensionsProps {
 
 /** 5 measurement slots per dimension */
 const SLOTS_PER_DIM = 5;
-
-/** Sentinel IDs for the two always-visible fixed-row dimensions */
-const FIXED_DIM_LENGTH   = '__fixed_length__';
-const FIXED_DIM_PALM     = '__fixed_palm__';
 
 export function StepDimensions({
   onNext,
@@ -91,14 +88,14 @@ export function StepDimensions({
     return [
       {
         id:       FIXED_DIM_LENGTH,
-        name:     'GLOVE LENGTH',
+        name:     FIXED_DIMENSION_LABELS[FIXED_DIM_LENGTH],
         unit:     'mm',
         isMin:    false,
         decimals: matrixEntry?.lengthDecimals ?? 0,
       },
       {
         id:       FIXED_DIM_PALM,
-        name:     'PALM WIDTH',
+        name:     FIXED_DIMENSION_LABELS[FIXED_DIM_PALM],
         unit:     'mm',
         isMin:    false,
         decimals: matrixEntry?.palmWidthDecimals ?? 0,
