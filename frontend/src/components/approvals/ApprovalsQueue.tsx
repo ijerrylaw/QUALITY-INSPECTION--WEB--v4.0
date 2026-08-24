@@ -1,10 +1,15 @@
 import { useState, useEffect } from 'react';
-import { ShieldAlert, Check, X, ArrowRight, User, RefreshCw, ChevronRight, ChevronDown } from 'lucide-react';
+import { ShieldAlert, X, User, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/Button';
-import { JsonViewer, DiffJsonViewer } from '../ui/JsonViewer';
-import { buildDiffTree, collectUnchanged } from '../../lib/diffTree';
-import { API_BASE_URL } from '../../context/ConfigContext';
+import { AmendmentDiffView } from './AmendmentDiffView';
+import { buildDiffTree } from '../../lib/diffTree';
+import { API_BASE_URL, useConfig } from '../../context/ConfigContext';
 import { useAuth, authHeader, authIdentity } from '../../context/AuthContext';
+import {
+  buildDimensionLabelMap,
+  resolveDefectLabelContext,
+  resolveProfileDisplayValue,
+} from '../../lib/amendmentDiffLabels';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -35,6 +40,7 @@ const PAGE_SIZE = 50;
 
 export function ApprovalsQueue() {
   const { user } = useAuth();
+  const { config } = useConfig();
   const [amendments, setAmendments] = useState<PendingAmendment[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -42,7 +48,6 @@ export function ApprovalsQueue() {
   const [hasMore, setHasMore] = useState(true);
   const [selectedAmend, setSelectedAmend] = useState<PendingAmendment | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
-  const [showUnchanged, setShowUnchanged] = useState(false);
 
   // ── Fetch pending amendments from real backend ────────────────────────────
   // `replace: true` (mount, and after approve/reject) re-fetches page 1 at
@@ -188,7 +193,7 @@ export function ApprovalsQueue() {
                     </span>
                   </td>
                   <td className="py-3.5 px-4 text-sm border-b border-gray-800/50 text-right">
-                    <Button variant="primary" onClick={() => { setSelectedAmend(amend); setShowUnchanged(false); }}>
+                    <Button variant="primary" onClick={() => setSelectedAmend(amend)}>
                       Review Diff
                     </Button>
                   </td>
@@ -214,8 +219,23 @@ export function ApprovalsQueue() {
         const proposedValues = parseJSON(log?.newValues);
         const diffTree = buildDiffTree(originalValues, proposedValues);
         const hasDiff = diffTree.status !== 'unchanged';
-        const unchangedEntries = collectUnchanged(diffTree);
-        const unchangedCount = unchangedEntries.length;
+
+        // Proposed side is the amendment's forward-looking state, so it takes
+        // priority for resolving which product/profile's labels apply; the
+        // original side covers the (effectively never happening) case where
+        // the amendment clears the field entirely.
+        const contextProductCode =
+          (proposedValues['productCode'] as string | undefined) ??
+          (originalValues['productCode'] as string | undefined) ??
+          null;
+        const contextProfileId =
+          (proposedValues['profileId'] as string | null | undefined) ??
+          (originalValues['profileId'] as string | null | undefined) ??
+          null;
+
+        const dimensionLabels = buildDimensionLabelMap(config, contextProductCode);
+        const defectLabelContext = resolveDefectLabelContext(config, contextProfileId);
+        const resolveProfileValue = (raw: unknown) => resolveProfileDisplayValue(config, raw);
 
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
@@ -256,62 +276,12 @@ export function ApprovalsQueue() {
                     No field differences detected between original and proposed values.
                   </div>
                 ) : (
-                  <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 rounded-lg border border-gray-800 overflow-hidden">
-
-                      {/* Original */}
-                      <div className="p-6 bg-canvas/50 relative border-b md:border-b-0 md:border-r border-gray-800">
-                        <h4 className="text-xs font-bold text-rose-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                          <X className="w-4 h-4" strokeWidth={2} /> Original Submission
-                        </h4>
-                        <DiffJsonViewer tree={diffTree} side="original" />
-                      </div>
-
-                      {/* Proposed */}
-                      <div className="p-6 bg-canvas/50 relative">
-                        <h4 className="text-xs font-bold text-emerald-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                          <Check className="w-4 h-4" strokeWidth={2} /> Proposed Amendment
-                        </h4>
-                        <div className="absolute top-1/2 -left-3 md:-left-4 -translate-y-1/2 w-6 h-6 md:w-8 md:h-8 rounded-full bg-surface border border-gray-800 flex items-center justify-center z-10 shadow-lg hidden md:flex">
-                          <ArrowRight className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
-                        </div>
-                        <DiffJsonViewer tree={diffTree} side="proposed" />
-                      </div>
-
-                    </div>
-
-                    {/* Unchanged fields — hidden by default, expandable for audit transparency */}
-                    {unchangedCount > 0 && (
-                      <div className="border border-gray-800 rounded-lg overflow-hidden">
-                        <button
-                          type="button"
-                          onClick={() => setShowUnchanged((v) => !v)}
-                          className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-muted uppercase tracking-wider hover:bg-white/5 transition-colors outline-none"
-                        >
-                          {showUnchanged ? (
-                            <ChevronDown className="w-3.5 h-3.5" strokeWidth={2.5} />
-                          ) : (
-                            <ChevronRight className="w-3.5 h-3.5" strokeWidth={2.5} />
-                          )}
-                          {unchangedCount} unchanged field{unchangedCount === 1 ? '' : 's'} not shown
-                        </button>
-                        {showUnchanged && (
-                          <div className="px-4 pb-4 space-y-1.5 border-t border-gray-800 bg-canvas/30">
-                            {unchangedEntries.map(({ path, value }) => (
-                              <div key={path} className="pt-3 first:pt-3">
-                                <span className="block text-[10px] font-bold text-muted uppercase mb-1">{path}</span>
-                                {value !== null && typeof value === 'object' ? (
-                                  <JsonViewer data={value} />
-                                ) : (
-                                  <span className="text-sm font-mono text-muted">{String(value ?? '—')}</span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </>
+                  <AmendmentDiffView
+                    tree={diffTree}
+                    dimensionLabels={dimensionLabels}
+                    defectLabelContext={defectLabelContext}
+                    resolveProfileValue={resolveProfileValue}
+                  />
                 )}
 
               </div>
