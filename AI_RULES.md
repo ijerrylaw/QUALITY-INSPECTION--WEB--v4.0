@@ -54,4 +54,4 @@ Model selection is controlled at the **Claude Code app level** (model picker in 
 
 * **Pre-Refactor Commit Reminders:** Proactively remind the user to execute a Git commit (`git commit`) prior to performing cross-file deletions or major architectural refactoring.
 * **Zero Silent Breaking Changes:** Do not rename, remove, or modify existing exported types, interfaces, or API signatures unless explicitly instructed.
-* **Core Tech Stack Guardrail:** Rely strictly on `React 19`, `Vite`, `Tailwind v4`, `Lucide Icons`, and `Framer Motion`. Do not install unapproved third-party NPM packages.
+* **Core Tech Stack Guardrail:** Rely strictly on `React 19`, `Vite`, `Tailwind v4`, and `Lucide Icons`. Do not install unapproved third-party NPM packages.
