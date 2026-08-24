@@ -1,7 +1,7 @@
 # API Endpoints & Enterprise Integrations Spec
 
 **Project:** QUALITY INSPECTION (WEB) v4.0  
-**Purpose:** Defines REST API contracts, authentication endpoints (PIN login, mocked M365), and Microsoft Graph / SharePoint syncing.  
+**Purpose:** Defines REST API contracts, authentication endpoints (PIN login, live M365 SSO), and Microsoft Graph / SharePoint syncing.  
 *(Note: JSON payload schemas referenced here are defined in `DATA_SCHEMAS_AND_TYPES.md`.)*
 
 ---
@@ -125,13 +125,24 @@
   * **Auth:** Requires `X-User-Role` header, Group A/B.
 
 * `POST /api/pin-users`
-  * **Role:** Creates a new PIN login for floor staff. Validates `role` against the PIN-eligible allow-list (`OPERATOR`, `LEADER`, `SUPERVISOR`), requires an exactly-6-digit PIN, and rejects (`409`) a PIN already in use by another *active* user.
-  * **Payload:** `{ name: string, jobTitle: string, role: 'OPERATOR' | 'LEADER' | 'SUPERVISOR', pin: string }`
+  * **Role:** Creates a new PIN login for floor staff. Validates `role` against the PIN-eligible allow-list (`OPERATOR`, `LEADER`, `SUPERVISOR`, `INTERN`), requires an exactly-6-digit PIN, and rejects (`409`) a PIN already in use by another *active* user.
+  * **Payload:** `{ name: string, jobTitle: string, role: 'OPERATOR' | 'LEADER' | 'SUPERVISOR' | 'INTERN', pin: string }`
   * **Response 201:** The created `PinUser` (no `pinHash`/`pinSalt`).
   * **Auth:** Requires `X-User-Role` header, Group A/B.
 
 * `PATCH /api/pin-users/:id/deactivate`
   * **Role:** Soft-deletes a PIN login. The row is kept for audit history; its PIN becomes free for reuse by a new active user.
+  * **Auth:** Requires `X-User-Role` header, Group A/B.
+
+* `PATCH /api/pin-users/:id`
+  * **Role:** Edits a PIN user's `employeeId` only — the sole exception to `PinUser`'s otherwise deliberate no-edit-after-creation rule. A request body containing `name`, `jobTitle`, or `role` is rejected outright (`400`) rather than silently ignored.
+  * **Payload:** `{ employeeId: string }` — normalized to uppercase server-side; uniqueness is checked across ALL rows, not just active ones.
+  * **Response 200:** The updated `PinUser` (no `pinHash`/`pinSalt`). **Response 409:** `{ error: 'This Employee ID is already in use.' }` on a collision.
+  * **Auth:** Requires `X-User-Role` header, Group A/B.
+
+* `DELETE /api/pin-users/:id`
+  * **Role:** Hard-deletes a PIN user, but only when they have zero attributable history — checked across `Submission.pinUserId`, `AmendmentLog.requestedByPinUserId`, and `AmendmentLog.reviewedByPinUserId`.
+  * **Response 200:** `{ success: true }`. **Response 409:** `{ error: 'This user has submission history — use Deactivate instead.' }`.
   * **Auth:** Requires `X-User-Role` header, Group A/B.
 
 * `POST /api/auth/pin-login`
@@ -154,13 +165,14 @@ Full RBAC/session detail (permission groups, idle expiry, dev-gating mechanics) 
 
 * **Server-side role gate:** Every mutating REST endpoint above requires an `X-User-Role` request header (client-claimed, not a cryptographic token) checked by `requireRole()`/`requireGroup()` — see `NAVIGATION_AND_RBAC.md` §5.1 for the full endpoint-by-endpoint table. This is unrelated to the two login flows below and applies regardless of which one authenticated the caller.
 
-* **Microsoft 365 / Azure AD — mocked in dev, real integration pending:**
-  - **Intended flow (not yet implemented):** MSAL popup authenticates against Microsoft 365; the JWT is parsed to extract `aadObjectId`/`userPrincipalName` for stamping on submissions. Blocked on Jerry's IT manager providing real Azure credentials (Tenant ID, Client ID, Client Secret).
-  - **Current dev-only mock:** `frontend/src/context/AuthContext.tsx`'s `loginWithM365(mockIdentityId)` resolves one of 5 hardcoded mock identities spanning all three permission groups — no network call, no real token. `aadObjectId`/`userPrincipalName` on submission payloads are hardcoded mock values until real Azure AD wiring lands. Stripped from production bundles via an `import.meta.env.DEV` gate (build-verified — see `NAVIGATION_AND_RBAC.md` §3.1).
+* **Microsoft 365 / Azure AD — live MSAL popup + backend role resolution:**
+  - `AuthContext.tsx`'s `loginWithM365()` runs a real `msalInstance.loginPopup()`, then resolves the signed-in user's role via `POST /api/auth/m365-login` (`backend/src/routes/m365Users.routes.ts`) — no mock identities, no dev/prod gating. The full endpoint list, the five-status login lifecycle (`active`/`revoked`/`invite-claimed`/`bootstrap-eligible`/`pending`), and the bootstrap-admin claim flow are documented in `NAVIGATION_AND_RBAC.md` §3.1.
+  - `aadObjectId`/`userPrincipalName`/`displayName` are real values read from the MSAL account object (`account.localAccountId`/`account.username`/`account.name`), sent to the backend, and stamped onto `Submission`/`AmendmentLog` rows via `authIdentity()` (`AuthContext.tsx`) — see `DATA_SCHEMAS_AND_TYPES.md` §1's `Submission` interface for the current nullable identity field shape.
+  - Credentials (Tenant ID, Client ID — no Client Secret needed for this SPA app registration) have been wired since 2026-08-12; `npm run setup` (`scripts/setup.mjs`) is a day-zero CLI wizard for a new install that prompts for both, validates the Tenant ID against Microsoft's live OpenID discovery endpoint, and writes `frontend/.env.local`.
 
 * **PIN login — real, not mocked:**
-  - `POST /api/auth/pin-login` (payload/response documented under "PIN User Administration" above) verifies against a real `PinUser` table (scrypt-hashed PINs). Restricted to the three PIN-eligible roles (`OPERATOR`/`LEADER`/`SUPERVISOR`).
-  - Managed via `GET/POST /api/pin-users` and `PATCH /api/pin-users/:id/deactivate` (Group A/B only — see above).
+  - `POST /api/auth/pin-login` (payload/response documented under "PIN User Administration" above) verifies against a real `PinUser` table (scrypt-hashed PINs). Restricted to the four PIN-eligible roles (`OPERATOR`/`LEADER`/`SUPERVISOR`/`INTERN`).
+  - Managed via `GET/POST/PATCH/DELETE /api/pin-users` and `PATCH /api/pin-users/:id/deactivate` (Group A/B only — see above).
   - `POST /api/auth/pin-change` (documented above) lets any PIN-logged-in user change their own PIN — no Group A/B auth needed, since the correct current PIN is itself the identity check.
 
 ---
