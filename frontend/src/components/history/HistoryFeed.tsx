@@ -441,7 +441,14 @@ function DefectBreakdownPanel({
 
   return (
     <td colSpan={10} className="p-0 border-b border-gray-700/50 bg-canvas shadow-inner">
-      <div className="px-3 py-4 space-y-3">
+      {/* whitespace-normal overrides the table's own whitespace-nowrap (§4.2,
+          needed so Lot Number/Date/etc. don't wrap in the collapsed rows) —
+          that nowrap is inherited by every descendant, including this panel,
+          where it fights the flex-wrap rows below: a flex item holding
+          nowrap text can't reflow to a new line, only shrink, so under
+          space pressure it gets squeezed and its nowrap text overflows past
+          the panel's own overflow-hidden edge instead of wrapping. */}
+      <div className="px-3 py-4 space-y-3 whitespace-normal">
 
         {/* ── §5.3 Info/Cyan alert — legacy row, no frozen snapshot ──────────── */}
         {/* AUDIT_REPORT.md #18: predates gradingSnapshot, deliberately not
@@ -512,7 +519,7 @@ function DefectBreakdownPanel({
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               {/* ISO bracket note */}
               <span className="text-[10px] font-mono text-muted">
                 n={sub.sampleSize} → ISO n={snappedBracket}
@@ -711,7 +718,7 @@ function DefectBreakdownPanel({
               </span>
             </div>
           ) : (
-            <div className="flex justify-end items-center gap-3">
+            <div className="flex flex-wrap justify-end items-center gap-3">
               {approvedAmendmentCount > 0 && (
                 <span className="text-[10px] font-mono text-muted">
                   {approvedAmendmentCount} of {MAX_APPROVED_AMENDMENTS} amendments used
@@ -720,7 +727,7 @@ function DefectBreakdownPanel({
               <button
                 type="button"
                 onClick={() => onAmend(sub.id)}
-                className="h-9 px-4 rounded-lg bg-canvas border border-brand-primary/50 text-brand-secondary hover:bg-brand-primary/10 hover:border-brand-primary font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none"
+                className="h-9 px-4 rounded-lg bg-canvas border border-brand-primary/50 text-brand-secondary hover:bg-brand-primary/10 hover:border-brand-primary font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0"
               >
                 <Edit2 className="w-3.5 h-3.5" strokeWidth={2} />
                 AMEND RECORD
