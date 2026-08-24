@@ -55,6 +55,8 @@ app.get('/api/health', async (_req, res) => {
       status: 'ok',
       service: 'QI Backend v4.0',
       database: 'connected',
+      port: PORT,
+      protocol: 'https',
       timestamp: new Date().toISOString(),
     });
   } catch (err) {

@@ -25,8 +25,8 @@
 import { PublicClientApplication } from '@azure/msal-browser';
 import type { Configuration } from '@azure/msal-browser';
 
-const clientId = import.meta.env['VITE_MSAL_CLIENT_ID'] as string | undefined;
-const tenantId = import.meta.env['VITE_MSAL_TENANT_ID'] as string | undefined;
+export const clientId = import.meta.env['VITE_MSAL_CLIENT_ID'] as string | undefined;
+export const tenantId = import.meta.env['VITE_MSAL_TENANT_ID'] as string | undefined;
 const redirectUri = (import.meta.env['VITE_MSAL_REDIRECT_URI'] as string | undefined) ?? window.location.origin;
 
 if (!clientId || !tenantId) {
