@@ -114,49 +114,51 @@ export function CompanyBrandingPanel() {
           </p>
         </div>
 
-        <div className="space-y-2">
-          <label className="text-xs font-semibold uppercase tracking-wider text-muted">Logo</label>
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-lg bg-canvas border border-gray-700 flex items-center justify-center shrink-0 overflow-hidden">
-              {logoImage ? (
-                <img src={logoImage} alt="Logo preview" className="w-full h-full object-contain" />
-              ) : (
-                <Building2 className="w-6 h-6 text-muted" />
-              )}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted">Logo</label>
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-lg bg-canvas border border-gray-700 flex items-center justify-center shrink-0 overflow-hidden">
+                {logoImage ? (
+                  <img src={logoImage} alt="Logo preview" className="w-full h-full object-contain" />
+                ) : (
+                  <Building2 className="w-6 h-6 text-muted" />
+                )}
+              </div>
+              <label className="flex items-center gap-2 px-4 h-10 rounded-lg bg-canvas border border-gray-700 text-xs font-semibold uppercase tracking-wider text-muted hover:text-primary hover:border-gray-500 cursor-pointer transition-colors">
+                <Upload className="w-4 h-4" />
+                Upload Logo
+                <input type="file" accept="image/*" className="hidden" onChange={handleLogoChange} />
+              </label>
             </div>
-            <label className="flex items-center gap-2 px-4 h-10 rounded-lg bg-canvas border border-gray-700 text-xs font-semibold uppercase tracking-wider text-muted hover:text-primary hover:border-gray-500 cursor-pointer transition-colors">
-              <Upload className="w-4 h-4" />
-              Upload Logo
-              <input type="file" accept="image/*" className="hidden" onChange={handleLogoChange} />
-            </label>
+            {logoError && <p className="text-xs text-danger">{logoError}</p>}
+            <p className="text-xs text-muted mt-1">PNG/JPG/SVG, under 500KB.</p>
           </div>
-          {logoError && <p className="text-xs text-danger">{logoError}</p>}
-          <p className="text-xs text-muted mt-1">PNG/JPG/SVG, under 500KB.</p>
-        </div>
 
-        <div className="space-y-2">
-          <label className="text-xs font-semibold uppercase tracking-wider text-muted flex items-center gap-1.5">
-            <Palette className="w-3 h-3" />
-            Accent Color
-          </label>
-          <div className="flex items-center gap-3">
-            <div
-              className="w-9 h-9 rounded-lg border border-gray-700 shrink-0"
-              style={{ backgroundColor: ACCENT_PRESETS[accentColor].primary }}
-            />
-            <select
-              value={accentColor}
-              onChange={(e) => setAccentColor(e.target.value as AccentFamily)}
-              className="w-full bg-canvas border border-gray-700 text-sm text-primary rounded-lg px-4 py-2.5 focus:border-brand-primary outline-none appearance-none"
-            >
-              {(Object.keys(ACCENT_PRESETS) as AccentFamily[]).map((family) => (
-                <option key={family} value={family}>{ACCENT_PRESETS[family].label}</option>
-              ))}
-            </select>
+          <div className="space-y-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted flex items-center gap-1.5">
+              <Palette className="w-3 h-3" />
+              Accent Color
+            </label>
+            <div className="flex items-center gap-3">
+              <div
+                className="w-9 h-9 rounded-lg border border-gray-700 shrink-0"
+                style={{ backgroundColor: ACCENT_PRESETS[accentColor].primary }}
+              />
+              <select
+                value={accentColor}
+                onChange={(e) => setAccentColor(e.target.value as AccentFamily)}
+                className="w-full bg-canvas border border-gray-700 text-sm text-primary rounded-lg px-4 py-2.5 focus:border-brand-primary outline-none appearance-none"
+              >
+                {(Object.keys(ACCENT_PRESETS) as AccentFamily[]).map((family) => (
+                  <option key={family} value={family}>{ACCENT_PRESETS[family].label}</option>
+                ))}
+              </select>
+            </div>
+            <p className="text-xs text-muted mt-1">
+              Applies app-wide — buttons, active tabs, badges, and highlights.
+            </p>
           </div>
-          <p className="text-xs text-muted mt-1">
-            Applies app-wide — buttons, active tabs, badges, and highlights.
-          </p>
         </div>
 
         <div className="flex justify-end pt-2">
