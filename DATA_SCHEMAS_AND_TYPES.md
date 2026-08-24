@@ -47,8 +47,23 @@ export interface Submission {
   dimensionMins: DimensionStats;
   defects: Record<string, number>;     // Record<DefectDefinition.id, count>
   verdict: 'PASSED' | 'FAILED';
-  aadObjectId: string;                 // Azure AD object ID of the submitting user
-  userPrincipalName: string;           // UPN of the submitting user
+  /**
+   * Submitting-user identity — a mixed model (backend/prisma/schema.prisma's
+   * Submission model): exactly ONE side is populated per row, decided by the
+   * login method that created it. A PIN login sets `pinUserId` (a real FK to
+   * PinUser); an M365/SSO login sets `aadObjectId`/`userPrincipalName`/
+   * `displayName` instead. All four fields below are nullable because
+   * neither side applies universally. Rows created before this model existed
+   * have the SSO string fields populated with hardcoded placeholder literals
+   * and `pinUserId` null — deliberately left untouched, not backfilled
+   * (CHANGELOG.md §5.17).
+   */
+  aadObjectId: string | null;          // Azure AD object ID from the MS365 token — SSO-originated rows only
+  userPrincipalName: string | null;    // UPN (email) from the MS365 token — SSO-originated rows only
+  /** Human-readable name of the SSO user, captured at submit time. SSO-originated rows only — for PIN rows the name comes from PinUser.name. */
+  displayName: string | null;
+  /** FK to the PinUser who submitted — PIN-originated rows only. */
+  pinUserId: string | null;
   amendmentStatus: AmendmentStatus;
   totalCarton?: number;
   gloveWeight?: number;
@@ -438,7 +453,7 @@ export interface PinUser {
    */
   employeeId: string;
   jobTitle: string;       // Free-text real title, display/audit only — never read by any permission check
-  role: 'OPERATOR' | 'LEADER' | 'SUPERVISOR';  // Enforced server-side, not the DB
+  role: 'OPERATOR' | 'LEADER' | 'SUPERVISOR' | 'INTERN';  // Enforced server-side, not the DB
   active: boolean;        // Soft-delete — deactivated rows are kept for audit history, PIN becomes free for reuse
   createdAt: string;
   updatedAt: string;
