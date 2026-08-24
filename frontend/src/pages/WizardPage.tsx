@@ -98,6 +98,27 @@ function safeParseJSON<T>(raw: unknown, fallback: T): T {
 /** Inverse of StepDefects.tsx's QUALITATIVE_ENCODING (0=NIL, 1=PASS, 2=FAIL). */
 const QUALITATIVE_DECODING: Record<number, 'PASS' | 'FAIL' | 'NIL'> = { 0: 'NIL', 1: 'PASS', 2: 'FAIL' };
 
+/**
+ * The 7 fields RETAIN CONTEXT FOR NEXT BATCH carries forward (StepReviewSubmit.tsx),
+ * mapped to their localStorage keys — single source of truth for BOTH the
+ * same-session "next lot" path (setInspectionData below) and the across-
+ * reload path (StepMetadata.tsx's init-state localStorage fallback reads).
+ * Previously StepMetadata.tsx wrote 5 of these to localStorage unconditionally
+ * on every keystroke, independent of this checkbox — consolidated here so the
+ * checkbox is the one real switch for both paths, and so that the two full
+ * field lists (7) don't drift out of sync with each other, only 5 of which
+ * were ever localStorage-backed.
+ */
+const RETAINED_CONTEXT_FIELDS: Record<string, string> = {
+  profileId:   'wizard_profileId',
+  productCode: 'wizard_productCode',
+  size:        'wizard_size',
+  lineId:      'wizard_lineId',
+  side:        'wizard_side',
+  sampleSize:  'wizard_sampleSize',
+  gloveWeight: 'wizard_gloveWeight',
+};
+
 export function WizardPage() {
   const { config, getResolvedProfile } = useConfig();
   const { user } = useAuth();
@@ -455,20 +476,29 @@ export function WizardPage() {
       addToast('error', `Submission failed: ${msg}`);
     }
 
-    // Reset wizard, optionally retaining Step 1 context fields
+    // Reset wizard, optionally retaining Step 1 context fields — mirrored
+    // into localStorage under the same checkbox gate (RETAINED_CONTEXT_FIELDS)
+    // so a reload lands on the same 7 fields as the same-session "next lot"
+    // path, instead of the two diverging.
     if (retainContext) {
-      const retained = {
-        profileId:   inspectionData.profileId,
-        productCode: inspectionData.productCode,
-        size:        inspectionData.size,
-        lineId:      inspectionData.lineId,
-        side:        inspectionData.side,
-        sampleSize:  inspectionData.sampleSize,
-        gloveWeight: inspectionData.gloveWeight,
-      };
+      const retained: Record<string, unknown> = {};
+      for (const field of Object.keys(RETAINED_CONTEXT_FIELDS)) {
+        retained[field] = inspectionData[field];
+      }
       setInspectionData(retained);
+      for (const [field, storageKey] of Object.entries(RETAINED_CONTEXT_FIELDS)) {
+        const value = retained[field];
+        if (value !== undefined && value !== null && value !== '') {
+          localStorage.setItem(storageKey, String(value));
+        } else {
+          localStorage.removeItem(storageKey);
+        }
+      }
     } else {
       setInspectionData({});
+      for (const storageKey of Object.values(RETAINED_CONTEXT_FIELDS)) {
+        localStorage.removeItem(storageKey);
+      }
     }
     setCurrentStep(1);
     } finally {

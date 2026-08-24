@@ -444,7 +444,7 @@ export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpd
       <div className="flex justify-end pt-6 border-t border-gray-800">
         <label
           className="h-10 w-full md:w-auto px-4 rounded-lg bg-surface border border-gray-800 flex items-center justify-center gap-3 cursor-pointer select-none hover:bg-surface-light transition-all"
-          title="When enabled, Line, Shift, and Product Code are preserved for the next batch."
+          title="When enabled, Inspection Profile, Product Code, Size, Line, Side, Sample Size, and Glove Weight are preserved for the next batch. Shift is not retained — it's recalculated from the new entry's time."
         >
           <input
             type="checkbox"

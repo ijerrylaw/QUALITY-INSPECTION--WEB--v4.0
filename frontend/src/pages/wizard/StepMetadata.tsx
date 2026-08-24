@@ -79,7 +79,15 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
       : 'bg-canvas border border-gray-700';
 
   // ── Form State ───────────────────────────────────────────────────────────
-  const [profileId, setProfileId] = useState<string>(initialData?.profileId || '');
+  // localStorage fallbacks here are the "retained context" carry-forward
+  // (RETAIN CONTEXT FOR NEXT BATCH, StepReviewSubmit.tsx/WizardPage.tsx) —
+  // WizardPage.tsx writes/clears these keys at submit time, checkbox-gated;
+  // this file only reads them, it doesn't write them (see the removed
+  // per-keystroke write effect below, and RETAINED_CONTEXT_FIELDS in
+  // WizardPage.tsx for the single source of truth on which 7 fields these are).
+  const [profileId, setProfileId] = useState<string>(
+    initialData?.profileId || localStorage.getItem('wizard_profileId') || ''
+  );
 
   // ── Zero-usable-dimension entry gate ────────────────────────────────────
   // Raw lookup (not getResolvedProfile()) — see hasUsableCategories() docstring
@@ -115,10 +123,16 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
     initialData?.sampleSize?.toString() || localStorage.getItem('wizard_sampleSize') || ''
   );
   const [gloveWeight, setGloveWeight] = useState<string>(() => {
-    if (initialData?.gloveWeight !== undefined && initialData?.gloveWeight !== null && initialData?.gloveWeight !== '') {
-      const num = parseFloat(initialData.gloveWeight.toString());
+    const hasInitial = initialData?.gloveWeight !== undefined && initialData?.gloveWeight !== null && initialData?.gloveWeight !== '';
+    const raw = hasInitial ? initialData!.gloveWeight : localStorage.getItem('wizard_gloveWeight');
+    if (raw !== null && raw !== undefined && raw !== '') {
+      const num = parseFloat(raw.toString());
       if (!isNaN(num)) {
-        const dec = config?.productMatrixConfig?.[initialData.productCode || '']?.weightDecimals ?? 0;
+        // Uses the already-resolved `productCode` (initialData, falling back
+        // to localStorage — see that state's own init above) rather than
+        // `initialData.productCode` directly, so the localStorage-retained
+        // case still finds the right product's decimal precision.
+        const dec = config?.productMatrixConfig?.[productCode || '']?.weightDecimals ?? 0;
         return num.toFixed(dec);
       }
     }
@@ -157,9 +171,15 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
   }, [config]);
 
   // ── Auto-populate Glove Weight from Product Engine size setup ────────────────
-  const lastPopulatedRef = useRef<{ productCode: string; size: string }>({ 
-    productCode: initialData?.gloveWeight ? (initialData.productCode ?? '') : '', 
-    size: initialData?.gloveWeight ? (initialData.size ?? '') : '' 
+  // `hasPrefilledGloveWeight` also covers the localStorage-retained case
+  // (gloveWeight's own init state above) — without this, a retained
+  // gloveWeight would be immediately overwritten by this effect on mount,
+  // since the ref would otherwise start empty and treat productCode/size as
+  // "never auto-populated yet."
+  const hasPrefilledGloveWeight = Boolean(initialData?.gloveWeight) || Boolean(localStorage.getItem('wizard_gloveWeight'));
+  const lastPopulatedRef = useRef<{ productCode: string; size: string }>({
+    productCode: hasPrefilledGloveWeight ? (initialData?.productCode || productCode) : '',
+    size: hasPrefilledGloveWeight ? (initialData?.size || size) : '',
   });
 
   useEffect(() => {
@@ -205,14 +225,31 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
     }
   }, [availableLines]);
 
-  // Cache selections to localStorage for session persistence
+  // ── Retained-context staleness guard ──────────────────────────────────────
+  // A retained productCode/profileId (RETAIN CONTEXT FOR NEXT BATCH,
+  // WizardPage.tsx) can go stale if it's deleted/renamed in Product Engine or
+  // Quality Rules between submissions — previously this failed silently (the
+  // field stayed set to a value with no matching dropdown option, rendering
+  // blank). Line/Side already self-correct silently via the two effects
+  // above (an existing, unrelated convention this doesn't change); this adds
+  // a visible warning + reset for productCode/profileId specifically, since
+  // those are the two fields actually deletable via the admin config
+  // surfaces. `size` isn't covered — it's sourced from AppConfig.sizes (a
+  // flat global list, not a per-product record), which is far less likely to
+  // go stale between lots; flagged here as a known remaining gap rather than
+  // silently left unaddressed.
   useEffect(() => {
-    if (productCode) localStorage.setItem('wizard_productCode', productCode);
-    if (size) localStorage.setItem('wizard_size', size);
-    if (lineId) localStorage.setItem('wizard_lineId', lineId);
-    if (side) localStorage.setItem('wizard_side', side);
-    if (sampleSize) localStorage.setItem('wizard_sampleSize', sampleSize);
-  }, [productCode, size, lineId, side, sampleSize]);
+    if (!config) return;
+    if (productCode && config.productCodes && !config.productCodes.includes(productCode)) {
+      addToast('error', `Retained product code "${productCode}" no longer exists — please reselect.`);
+      setProductCode('');
+    }
+    if (profileId && config.inspectionProfiles && !config.inspectionProfiles.some((p) => p.id === profileId)) {
+      addToast('error', 'Retained inspection profile no longer exists — please reselect.');
+      setProfileId('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config]);
 
   // ── ISO2859_MATH_ENGINE.md §4: Shift + Julian Date + Lot Assembly ─────────
   // effectiveDate/activeShift/lot4Digit depend only on `timestamp` (already
