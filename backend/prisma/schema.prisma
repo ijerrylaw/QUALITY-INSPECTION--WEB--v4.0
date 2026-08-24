@@ -243,7 +243,7 @@ model PinUser {
   /// reaches this route).
   employeeId String  @unique
   jobTitle  String
-  /// 'OPERATOR' | 'LEADER' | 'SUPERVISOR' — enforced in route validation, not the DB
+  /// 'OPERATOR' | 'LEADER' | 'SUPERVISOR' | 'INTERN' — enforced in route validation, not the DB
   role      String
 
   /// scrypt hash of the 6-digit PIN — see backend/src/lib/pin.ts
