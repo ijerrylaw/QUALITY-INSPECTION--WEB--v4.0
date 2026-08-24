@@ -7,6 +7,7 @@ import { API_BASE_URL, useConfig } from '../../context/ConfigContext';
 import { useAuth, authHeader, authIdentity } from '../../context/AuthContext';
 import {
   buildDimensionLabelMap,
+  buildDimensionDecimalsMap,
   resolveDefectLabelContext,
   resolveProfileDisplayValue,
 } from '../../lib/amendmentDiffLabels';
@@ -234,6 +235,7 @@ export function ApprovalsQueue() {
           null;
 
         const dimensionLabels = buildDimensionLabelMap(config, contextProductCode);
+        const dimensionDecimals = buildDimensionDecimalsMap(config, contextProductCode);
         const defectLabelContext = resolveDefectLabelContext(config, contextProfileId);
         const resolveProfileValue = (raw: unknown) => resolveProfileDisplayValue(config, raw);
 
@@ -279,6 +281,7 @@ export function ApprovalsQueue() {
                   <AmendmentDiffView
                     tree={diffTree}
                     dimensionLabels={dimensionLabels}
+                    dimensionDecimals={dimensionDecimals}
                     defectLabelContext={defectLabelContext}
                     resolveProfileValue={resolveProfileValue}
                   />

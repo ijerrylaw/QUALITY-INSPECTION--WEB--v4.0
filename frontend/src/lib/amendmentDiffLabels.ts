@@ -15,7 +15,7 @@
 
 import type { AppConfig, InspectionProfile } from '../context/ConfigContext';
 import { resolveProductMatrix } from '../context/ConfigContext';
-import { FIXED_DIMENSION_LABELS } from './fixedDimensions';
+import { FIXED_DIMENSION_LABELS, FIXED_DIM_LENGTH, FIXED_DIM_PALM } from './fixedDimensions';
 
 // ── Section grouping ──────────────────────────────────────────────────────
 // Every substantive (non-excluded, see diffTree.ts's NON_SUBSTANTIVE_DIFF_
@@ -61,6 +61,30 @@ export const AMENDMENT_DIFF_SECTIONS: SectionDef[] = [
 
 export const OTHER_SECTION_ID: SectionId = 'other';
 export const OTHER_SECTION_TITLE = 'Other Fields';
+
+// ── Raw vs. derived classification ────────────────────────────────────────
+// Which top-level Submission fields hold operator-entered/selected data
+// ("raw") vs. server/client-computed results ("derived"), for
+// AmendmentDiffView.tsx's raw-first/calculated-below sub-grouping.
+//
+// `dimensionMins` — StepDimensions.tsx computes it client-side FROM
+// `dimensions` at measurement time (min/max/avg/pass-fail per slot); nothing
+// about it is operator-typed (DATA_SCHEMAS_AND_TYPES.md §1's field comment).
+// `verdict` — always server-recomputed via resolveVerdict() on approval;
+// handleAction()/the approve route never trusts a client-supplied verdict
+// (submissions.routes.ts, confirmed in the original diff-modal discovery
+// pass) — so it's derived regardless of which section it's grouped under.
+//
+// Every other substantive field (productCode, profileId, batchNumber, size,
+// sampleSize, totalCarton, gloveWeight, `dimensions` itself, `defects`) is
+// directly operator-entered/selected — `defects` in particular is inspector-
+// COUNTED, not computed (Record<DefectDefinition.id, count>, DATA_SCHEMAS_
+// AND_TYPES.md §1) — so none of those need a derived sub-group.
+export const DERIVED_TOP_LEVEL_FIELDS = new Set<string>(['dimensionMins', 'verdict']);
+
+export function isDerivedTopLevelField(field: string): boolean {
+  return DERIVED_TOP_LEVEL_FIELDS.has(field);
+}
 
 // ── Static field labels (Batch Setup + Verdict) ───────────────────────────
 
@@ -112,6 +136,32 @@ export function buildDimensionLabelMap(
     ? matrixEntry.dimensionDefs
     : (config?.dimensions ?? []);
   for (const d of defs) map[d.id] = d.name;
+  return map;
+}
+
+/**
+ * Builds a `dimId -> decimal places` map for the same product code/source
+ * order as `buildDimensionLabelMap`, so `dimensionMins` numeric stats
+ * (min/max/avg/threshold/maxThreshold — computed via division/reduce in
+ * StepDimensions.tsx and prone to floating-point artifacts, e.g.
+ * `0.052000000000000005`) render at the same precision the wizard already
+ * uses for that dimension's raw measurement inputs, instead of the raw
+ * unrounded float. Unmapped/fixed-row ids default to 0 decimals — same
+ * default as `ProductDimensionDef.decimals` and `matrixEntry.lengthDecimals`/
+ * `palmWidthDecimals` (ConfigContext.tsx).
+ */
+export function buildDimensionDecimalsMap(
+  config: AppConfig | null,
+  productCode: string | null | undefined,
+): Record<string, number> {
+  const map: Record<string, number> = {};
+  const matrixEntry = resolveProductMatrix(config, productCode);
+  map[FIXED_DIM_LENGTH] = matrixEntry?.lengthDecimals ?? 0;
+  map[FIXED_DIM_PALM] = matrixEntry?.palmWidthDecimals ?? 0;
+  const defs = matrixEntry?.dimensionDefs && matrixEntry.dimensionDefs.length > 0
+    ? matrixEntry.dimensionDefs
+    : (config?.dimensions ?? []);
+  for (const d of defs) map[d.id] = d.decimals ?? 0;
   return map;
 }
 
