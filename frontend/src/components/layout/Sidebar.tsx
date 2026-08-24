@@ -206,7 +206,7 @@ export function Sidebar() {
           <div className="h-12 px-3 rounded-lg bg-surface border border-gray-800 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 overflow-hidden">
               <div className={`w-8 h-8 rounded-lg font-mono font-bold text-xs flex items-center justify-center shrink-0 ${
-                user.role === 'OPERATOR' || user.role === 'LEADER' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                user.role === 'OPERATOR' || user.role === 'LEADER' || user.role === 'INTERN' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
                 user.role === 'SUPERVISOR' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
                 'bg-brand-primary/20 text-brand-secondary border border-brand-secondary/30'
               }`}>
@@ -218,7 +218,7 @@ export function Sidebar() {
                     {user.name}
                   </span>
                   <span className={`text-[10px] uppercase font-mono tracking-wider truncate ${
-                    user.role === 'OPERATOR' || user.role === 'LEADER' ? 'text-emerald-400' :
+                    user.role === 'OPERATOR' || user.role === 'LEADER' || user.role === 'INTERN' ? 'text-emerald-400' :
                     user.role === 'SUPERVISOR' ? 'text-amber-400' :
                     'text-brand-secondary'
                   }`}>

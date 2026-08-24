@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { UserPlus, UserX, RefreshCw, Eye, EyeOff, Trash2, AlertTriangle, X } from 'lucide-react';
+import { UserPlus, UserX, RefreshCw, Eye, EyeOff, Trash2, AlertTriangle, X, Check, Pencil } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { API_BASE_URL } from '../../context/ConfigContext';
@@ -11,6 +11,7 @@ import type { UserRole } from '../../context/AuthContext';
 interface PinUser {
   id: string;
   name: string;
+  employeeId: string;
   jobTitle: string;
   role: UserRole;
   active: boolean;
@@ -19,12 +20,20 @@ interface PinUser {
 
 // PIN-eligible roles only (AUDIT_REPORT.md §11) — the "no email" / "PIN
 // fallback" roles per NAVIGATION_AND_RBAC.md §2. Matches the same allow-list
-// enforced server-side in backend/src/routes/pinUsers.routes.ts.
+// enforced server-side in backend/src/routes/pinUsers.routes.ts. Labels are
+// deliberately plain role names (not descriptive phrases) — single source of
+// truth for both the create-form dropdown and the roster table's ROLE column
+// (via ROLE_LABELS below), so the two surfaces can never drift apart.
 const PIN_ROLE_OPTIONS: { role: UserRole; label: string }[] = [
-  { role: 'OPERATOR', label: 'General Worker / Operator' },
-  { role: 'LEADER', label: 'Line Leader' },
-  { role: 'SUPERVISOR', label: 'Shift Supervisor (PIN Fallback)' },
+  { role: 'OPERATOR', label: 'Operator' },
+  { role: 'LEADER', label: 'Leader' },
+  { role: 'SUPERVISOR', label: 'Supervisor' },
+  { role: 'INTERN', label: 'Intern' },
 ];
+
+const ROLE_LABELS: Record<string, string> = Object.fromEntries(
+  PIN_ROLE_OPTIONS.map((opt) => [opt.role, opt.label])
+);
 
 // ── PinAdminPanel ─────────────────────────────────────────────────────────────
 
@@ -42,9 +51,17 @@ export function PinAdminPanel() {
   const visibleUsers = showDeactivated ? pinUsers : pinUsers.filter((pu) => pu.active);
 
   const [name, setName] = useState('');
+  const [employeeId, setEmployeeId] = useState('');
   const [jobTitle, setJobTitle] = useState('');
   const [role, setRole] = useState<UserRole>('OPERATOR');
   const [pin, setPin] = useState('');
+
+  // Inline Editing State (Employee ID only — the sole PinUser field editable
+  // after creation, per the scoped PATCH /api/pin-users/:id endpoint).
+  const [editingEmployeeIdFor, setEditingEmployeeIdFor] = useState<string | null>(null);
+  const [editEmployeeIdValue, setEditEmployeeIdValue] = useState('');
+  const [editEmployeeIdError, setEditEmployeeIdError] = useState<string | null>(null);
+  const [savingEmployeeId, setSavingEmployeeId] = useState(false);
 
   const fetchPinUsers = () => {
     setLoading(true);
@@ -79,7 +96,7 @@ export function PinAdminPanel() {
       const res = await fetch(`${API_BASE_URL}/api/pin-users`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeader(user) },
-        body: JSON.stringify({ name, jobTitle, role, pin }),
+        body: JSON.stringify({ name, employeeId, jobTitle, role, pin }),
       });
 
       if (!res.ok) {
@@ -88,6 +105,7 @@ export function PinAdminPanel() {
       }
 
       setName('');
+      setEmployeeId('');
       setJobTitle('');
       setRole('OPERATOR');
       setPin('');
@@ -109,6 +127,39 @@ export function PinAdminPanel() {
       fetchPinUsers();
     } catch (err) {
       console.error('[PinAdminPanel] Deactivate failed:', err);
+    }
+  };
+
+  const startEditingEmployeeId = (pu: PinUser) => {
+    setEditingEmployeeIdFor(pu.id);
+    setEditEmployeeIdValue(pu.employeeId);
+    setEditEmployeeIdError(null);
+  };
+
+  const cancelEditingEmployeeId = () => {
+    setEditingEmployeeIdFor(null);
+    setEditEmployeeIdError(null);
+  };
+
+  const saveEditingEmployeeId = async (id: string) => {
+    setEditEmployeeIdError(null);
+    setSavingEmployeeId(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/pin-users/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...authHeader(user) },
+        body: JSON.stringify({ employeeId: editEmployeeIdValue }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Server error: ${res.status}`);
+      }
+      setEditingEmployeeIdFor(null);
+      fetchPinUsers();
+    } catch (err) {
+      setEditEmployeeIdError(err instanceof Error ? err.message : 'Failed to update Employee ID.');
+    } finally {
+      setSavingEmployeeId(false);
     }
   };
 
@@ -160,6 +211,18 @@ export function PinAdminPanel() {
               onChange={(e) => setName(e.target.value)}
               className="w-full bg-canvas border border-gray-700 text-sm text-primary rounded-lg px-4 py-2.5 focus:border-brand-primary outline-none"
               placeholder="e.g. Ahmad Razak"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted">Employee ID</label>
+            <input
+              type="text"
+              required
+              value={employeeId}
+              onChange={(e) => setEmployeeId(e.target.value.toUpperCase())}
+              className="w-full bg-canvas border border-gray-700 text-sm font-mono uppercase text-primary rounded-lg px-4 py-2.5 focus:border-brand-primary outline-none"
+              placeholder="e.g. EMP-00123"
             />
           </div>
 
@@ -236,6 +299,7 @@ export function PinAdminPanel() {
             <thead>
               <tr className="text-left text-xs font-semibold uppercase tracking-wider text-muted border-b border-gray-800">
                 <th className="px-6 py-3">Name</th>
+                <th className="px-6 py-3">Employee ID</th>
                 <th className="px-6 py-3">Job Title</th>
                 <th className="px-6 py-3">Role</th>
                 <th className="px-6 py-3">Status</th>
@@ -245,7 +309,7 @@ export function PinAdminPanel() {
             <tbody>
               {visibleUsers.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-muted">
+                  <td colSpan={6} className="px-6 py-8 text-center text-muted">
                     {pinUsers.length === 0
                       ? 'No staff PIN logins yet.'
                       : 'No active staff. Toggle "Show Deactivated" to view deactivated staff.'}
@@ -258,8 +322,56 @@ export function PinAdminPanel() {
                   className={`border-b border-gray-800/60 last:border-0 ${!pu.active ? 'opacity-50' : ''}`}
                 >
                   <td className="px-6 py-3 text-primary font-medium">{pu.name}</td>
+                  <td className="px-6 py-3">
+                    {editingEmployeeIdFor === pu.id ? (
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            autoFocus
+                            value={editEmployeeIdValue}
+                            onChange={(e) => setEditEmployeeIdValue(e.target.value.toUpperCase())}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') saveEditingEmployeeId(pu.id);
+                              if (e.key === 'Escape') cancelEditingEmployeeId();
+                            }}
+                            className="w-32 h-8 px-2 bg-canvas border border-gray-700 rounded font-mono text-xs uppercase text-primary focus:border-brand-primary outline-none"
+                          />
+                          <button
+                            onClick={() => saveEditingEmployeeId(pu.id)}
+                            disabled={savingEmployeeId}
+                            className="p-1.5 rounded-md text-emerald-400 hover:bg-emerald-500/20 transition-colors outline-none disabled:opacity-50"
+                            title="Save (Enter)"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={cancelEditingEmployeeId}
+                            className="p-1.5 rounded-md text-rose-400 hover:bg-rose-500/20 transition-colors outline-none"
+                            title="Cancel (Esc)"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        {editEmployeeIdError && (
+                          <p className="text-[10px] text-danger">{editEmployeeIdError}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 group/eid">
+                        <span className="font-mono text-xs uppercase text-muted">{pu.employeeId}</span>
+                        <button
+                          onClick={() => startEditingEmployeeId(pu)}
+                          className="p-1 rounded text-muted hover:text-white hover:bg-gray-800 opacity-0 group-hover/eid:opacity-100 transition-opacity outline-none"
+                          title="Edit Employee ID"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                  </td>
                   <td className="px-6 py-3 text-muted">{pu.jobTitle}</td>
-                  <td className="px-6 py-3 text-muted font-mono text-xs uppercase">{pu.role}</td>
+                  <td className="px-6 py-3 text-muted text-xs">{ROLE_LABELS[pu.role] ?? pu.role}</td>
                   <td className="px-6 py-3">
                     <Badge variant={pu.active ? 'success' : 'danger'}>
                       {pu.active ? 'Active' : 'Deactivated'}

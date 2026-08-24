@@ -230,6 +230,18 @@ model AmendmentLog {
 model PinUser {
   id        String   @id @default(cuid())
   name      String
+  /// Company-assigned employee ID — a second identity key alongside `id`,
+  /// required + globally unique (@unique enforced at the DB level, mirrors
+  /// Submission.batchNumber's two-layer pattern: app-level findFirst
+  /// pre-check backed by this constraint as the atomic race-condition
+  /// backstop — see pinUsers.routes.ts). Always stored uppercase (no
+  /// enforced format/pattern — different customers use different employee
+  /// ID schemes). Editable after creation by Group A/B via PATCH
+  /// /api/pin-users/:id — the sole exception to PinUser's otherwise
+  /// deliberate no-edit rule (NAVIGATION_AND_RBAC.md); never editable by
+  /// the PIN user themselves (they have no authenticated session that
+  /// reaches this route).
+  employeeId String  @unique
   jobTitle  String
   /// 'OPERATOR' | 'LEADER' | 'SUPERVISOR' — enforced in route validation, not the DB
   role      String

@@ -34,17 +34,31 @@ import prisma from '../lib/prismaClient';
 import { requireGroup } from '../middleware/auth';
 import { hashPin, verifyPin, isValidSixDigitPin } from '../lib/pin';
 
-const PIN_ELIGIBLE_ROLES = ['OPERATOR', 'LEADER', 'SUPERVISOR'] as const;
+/// True if `err` is a Prisma unique-constraint violation (code P2002) on the
+/// given column — mirrors submissions.routes.ts's isUniqueConstraintViolation,
+/// translating a race-condition collision (the pre-update/pre-insert findFirst
+/// check below is not atomic) into the same clean, specific error response.
+function isUniqueConstraintViolation(err: unknown, field: string): boolean {
+  return (
+    typeof err === 'object' && err !== null &&
+    'code' in err && (err as { code?: unknown }).code === 'P2002' &&
+    Array.isArray((err as { meta?: { target?: unknown } }).meta?.target) &&
+    ((err as { meta?: { target?: unknown[] } }).meta?.target ?? []).includes(field)
+  );
+}
+
+const PIN_ELIGIBLE_ROLES = ['OPERATOR', 'LEADER', 'SUPERVISOR', 'INTERN'] as const;
 type PinEligibleRole = (typeof PIN_ELIGIBLE_ROLES)[number];
 
 function isPinEligibleRole(value: unknown): value is PinEligibleRole {
   return typeof value === 'string' && (PIN_ELIGIBLE_ROLES as readonly string[]).includes(value);
 }
 
-function toPublicPinUser(u: { id: string; name: string; jobTitle: string; role: string; active: boolean; createdAt: Date; updatedAt: Date }) {
+function toPublicPinUser(u: { id: string; name: string; employeeId: string; jobTitle: string; role: string; active: boolean; createdAt: Date; updatedAt: Date }) {
   return {
     id: u.id,
     name: u.name,
+    employeeId: u.employeeId,
     jobTitle: u.jobTitle,
     role: u.role,
     active: u.active,
@@ -70,12 +84,17 @@ pinUsersRouter.get('/', requireGroup('A', 'B'), async (_req: Request, res: Respo
 // POST /api/pin-users
 pinUsersRouter.post('/', requireGroup('A', 'B'), async (req: Request, res: Response) => {
   try {
-    const body = req.body as { name?: string; jobTitle?: string; role?: string; pin?: string };
+    const body = req.body as { name?: string; employeeId?: string; jobTitle?: string; role?: string; pin?: string };
     const name = (body.name ?? '').trim();
+    const employeeId = (body.employeeId ?? '').trim().toUpperCase();
     const jobTitle = (body.jobTitle ?? '').trim();
 
     if (!name) {
       res.status(400).json({ error: 'name is required' });
+      return;
+    }
+    if (!employeeId) {
+      res.status(400).json({ error: 'employeeId is required' });
       return;
     }
     if (!jobTitle) {
@@ -91,6 +110,18 @@ pinUsersRouter.post('/', requireGroup('A', 'B'), async (req: Request, res: Respo
       return;
     }
 
+    // employeeId uniqueness — pre-check for a friendly error; the DB's own
+    // @unique constraint (schema.prisma) is the atomic backstop against a
+    // race between this check and the insert below. Unlike PIN uniqueness
+    // (below), this is checked across ALL rows, not just active ones —
+    // employeeId is a permanent real-world identity key, not a reusable
+    // credential like a PIN.
+    const existingEmployeeId = await prisma.pinUser.findFirst({ where: { employeeId } });
+    if (existingEmployeeId) {
+      res.status(409).json({ error: 'This Employee ID is already in use.' });
+      return;
+    }
+
     // PIN uniqueness is only enforced among active rows — deactivating a
     // person frees their PIN for reuse.
     const activeUsers = await prisma.pinUser.findMany({ where: { active: true } });
@@ -101,9 +132,18 @@ pinUsersRouter.post('/', requireGroup('A', 'B'), async (req: Request, res: Respo
     }
 
     const { pinHash, pinSalt } = hashPin(body.pin as string);
-    const created = await prisma.pinUser.create({
-      data: { name, jobTitle, role: body.role, pinHash, pinSalt },
-    });
+    let created;
+    try {
+      created = await prisma.pinUser.create({
+        data: { name, employeeId, jobTitle, role: body.role, pinHash, pinSalt },
+      });
+    } catch (err) {
+      if (isUniqueConstraintViolation(err, 'employeeId')) {
+        res.status(409).json({ error: 'This Employee ID is already in use.' });
+        return;
+      }
+      throw err;
+    }
 
     res.status(201).json(toPublicPinUser(created));
   } catch (error) {
@@ -131,6 +171,59 @@ pinUsersRouter.patch('/:id/deactivate', requireGroup('A', 'B'), async (req: Requ
   } catch (error) {
     console.error('[PATCH /api/pin-users/:id/deactivate] Error:', error);
     res.status(500).json({ error: 'Failed to deactivate PIN user' });
+  }
+});
+
+// PATCH /api/pin-users/:id — SCOPED to employeeId only. This is a deliberate,
+// narrow exception to PinUser's otherwise deliberate no-edit rule
+// (NAVIGATION_AND_RBAC.md) — name/jobTitle/role remain uneditable. A request
+// body containing any of those is rejected outright rather than silently
+// ignored, so callers never assume this endpoint does more than it does.
+pinUsersRouter.patch('/:id', requireGroup('A', 'B'), async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params['id']);
+    const body = req.body as Record<string, unknown>;
+
+    const disallowedKeys = ['name', 'jobTitle', 'role'].filter((k) => k in body);
+    if (disallowedKeys.length > 0) {
+      res.status(400).json({ error: `This endpoint only supports editing employeeId. Remove: ${disallowedKeys.join(', ')}` });
+      return;
+    }
+
+    const employeeId = typeof body['employeeId'] === 'string' ? body['employeeId'].trim().toUpperCase() : '';
+    if (!employeeId) {
+      res.status(400).json({ error: 'employeeId is required' });
+      return;
+    }
+
+    const existing = await prisma.pinUser.findUnique({ where: { id } });
+    if (!existing) {
+      res.status(404).json({ error: 'PIN user not found' });
+      return;
+    }
+
+    // Uniqueness pre-check, excluding this row's own current value.
+    const collision = await prisma.pinUser.findFirst({ where: { employeeId, id: { not: id } } });
+    if (collision) {
+      res.status(409).json({ error: 'This Employee ID is already in use.' });
+      return;
+    }
+
+    let updated;
+    try {
+      updated = await prisma.pinUser.update({ where: { id }, data: { employeeId } });
+    } catch (err) {
+      if (isUniqueConstraintViolation(err, 'employeeId')) {
+        res.status(409).json({ error: 'This Employee ID is already in use.' });
+        return;
+      }
+      throw err;
+    }
+
+    res.json(toPublicPinUser(updated));
+  } catch (error) {
+    console.error('[PATCH /api/pin-users/:id] Error:', error);
+    res.status(500).json({ error: 'Failed to update PIN user' });
   }
 });
 

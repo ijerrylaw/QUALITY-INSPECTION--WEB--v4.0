@@ -8,7 +8,7 @@ import { msalInstance, loginRequest, graphRequest, GRAPH_ME_ENDPOINT } from '../
 // EXECUTIVE was merged into MANAGER (confirmed via discovery: zero
 // behavioral differences anywhere, zero existing rows to migrate, no
 // schema change needed — both always mapped to Group B identically).
-export type UserRole = 'OPERATOR' | 'LEADER' | 'SUPERVISOR' | 'MANAGER' | 'ADMIN';
+export type UserRole = 'OPERATOR' | 'LEADER' | 'SUPERVISOR' | 'INTERN' | 'MANAGER' | 'ADMIN';
 
 /**
  * Permission GROUPS (AUDIT_REPORT.md §11) — a coarser layer on top of the
@@ -36,6 +36,7 @@ export const PERMISSION_GROUPS: Record<UserRole, PermissionGroup> = {
   SUPERVISOR: 'C',
   LEADER: 'C',
   OPERATOR: 'C',
+  INTERN: 'C',
 };
 
 export function getPermissionGroup(role: UserRole): PermissionGroup {
