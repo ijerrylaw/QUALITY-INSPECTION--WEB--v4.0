@@ -441,7 +441,7 @@ function DefectBreakdownPanel({
 
   return (
     <td colSpan={10} className="p-0 border-b border-gray-700/50 bg-canvas shadow-inner">
-      <div className="px-6 py-4 space-y-3">
+      <div className="px-3 py-4 space-y-3">
 
         {/* ── §5.3 Info/Cyan alert — legacy row, no frozen snapshot ──────────── */}
         {/* AUDIT_REPORT.md #18: predates gradingSnapshot, deliberately not
