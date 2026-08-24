@@ -19,13 +19,13 @@ Consistent with that model, there is **no formal `Tenant`/`Facility`/`Line`/`Mac
 
 ## 2. ROLES & PERMISSION GROUPS
 
-Six roles exist, unchanged from the original design. On top of them sits a coarser **permission group** layer (A/B/C) that most access checks actually gate on. Group is always **derived** from `role` via a pure lookup (`PERMISSION_GROUPS` — `backend/src/middleware/auth.ts`, mirrored in `frontend/src/context/AuthContext.tsx`, kept in sync by convention across the two runtimes, not shared code). Group is never stored on a user record, so it cannot drift independently of role.
+Five roles exist. `EXECUTIVE` was merged into `MANAGER` (2026-08-24) — confirmed via a dedicated discovery pass that the two were behaviorally identical everywhere in the codebase (both always mapped to Group B, no code branched on the specific string, zero existing DB rows, no schema change required). On top of the roles sits a coarser **permission group** layer (A/B/C) that most access checks actually gate on. Group is always **derived** from `role` via a pure lookup (`PERMISSION_GROUPS` — `backend/src/middleware/auth.ts`, mirrored in `frontend/src/context/AuthContext.tsx`, kept in sync by convention across the two runtimes, not shared code). Group is never stored on a user record, so it cannot drift independently of role.
 
 | Group | Roles | Real job titles (per Jerry) | Auth Method | Access |
 | :---: | :--- | :--- | :--- | :--- |
 | **A** | `ADMIN` | IT Admin, C-Suite, Directors | M365 SSO only | Full, including System Admin |
-| **B** | `EXECUTIVE`, `MANAGER` | Department Managers, Executives (a level below Manager) | M365 SSO only | Full, except System Admin |
-| **C** | `SUPERVISOR`, `LEADER`, `OPERATOR` | Supervisors, Operators, Leaders/General Workers | PIN or M365 SSO | Wizard + Inspection Records only |
+| **B** | `MANAGER` | Department Managers (covers Executives too — see merge note above) | M365 SSO only | Full, except System Admin |
+| **C** | `SUPERVISOR`, `LEADER`, `OPERATOR` | Supervisors, Operators, Leaders/General Workers | PIN or M365 SSO (M365 for `SUPERVISOR` only — see §3.1) | Wizard + Inspection Records only |
 
 `role` is still the thing every check actually inspects (`requireRole`/`X-User-Role` server-side, `user.role` client-side) — `requireGroup(...)`/`rolesInGroups(...)` are additive conveniences that expand a group list to its equivalent role list, not a replacement system.
 
@@ -48,8 +48,8 @@ Six roles exist, unchanged from the original design. On top of them sits a coars
 * **jobTitle is NOT available as an ID token claim** in this tenant's Entra configuration — it must be fetched via a separate `User.Read` call to Microsoft Graph after sign-in, not read directly from the ID token.
 
 **Access control (Entra scope):**
-* SSO is restricted to users in a dedicated Entra ID security group containing only Manager/Executive/Admin-tier staff (Group A and Group B in this app — corresponding to `ADMIN`, `EXECUTIVE`, `MANAGER` roles).
-* Supervisors and below (Group C: `SUPERVISOR`, `LEADER`, `OPERATOR`) continue using PIN login exclusively. SSO does not need to, and will not, cover floor-tier roles.
+* SSO app-level eligibility now spans Group A/B/C, but only as far as `SUPERVISOR` within Group C — `ADMIN`, `MANAGER`, `SUPERVISOR` are the three roles `M365UserRolesPanel.tsx` can invite/assign (`backend/src/routes/m365Users.routes.ts`'s `M365_ELIGIBLE_ROLES`). `LEADER` and `OPERATOR` remain PIN-only by deliberate decision, with no M365 path.
+* **Entra-side dependency, not yet confirmed:** this app-level eligibility only controls what role an admin can *assign* once someone reaches the login screen — it does not by itself change who can complete the Entra security group's login gate. If that Entra-side security group is still scoped to Manager/Admin-tier staff only, a newly-invited Supervisor won't be able to complete the MSAL popup until that group's membership is updated too (an IT-side step, outside this codebase).
 
 **Current state in code:**
 * **Dev-only mock** (`frontend/src/context/AuthContext.tsx`'s `MOCK_M365_IDENTITIES`) — 5 identities deliberately spanning all three permission groups (2× Group A, 2× Group B, 1× Group C via a Supervisor identity), so every group is reachable through this login path for testing. The old mock always resolved to `ADMIN` regardless of which name was picked.
@@ -61,7 +61,7 @@ Six roles exist, unchanged from the original design. On top of them sits a coars
 **When MSAL.js wiring is implemented**, the isolated swap will be: replace `loginWithM365`'s body with real MSAL popup/redirect flow that:
 * Exchanges an authorization code for an ID token (containing `openid`, `profile`, `email` claims plus any app-specific claims).
 * Fetches `jobTitle` via a separate `User.Read` call to Microsoft Graph (not from the token).
-* Resolves the authenticated user's role by checking their Entra ID group membership against the configured security group, then maps that to `role` (`ADMIN` / `EXECUTIVE` / `MANAGER` only — others remain in `role: 'SUPERVISOR'` and get PIN login instead).
+* Resolves the authenticated user's role by checking their Entra ID group membership against the configured security group, then maps that to `role` (`ADMIN` / `MANAGER` / `SUPERVISOR` — `LEADER`/`OPERATOR` are never resolved this way and get PIN login instead).
 * Remove the dev gate. Nothing else on this page — `requireGroup`, `X-User-Role`, `RoleRoute`, `Sidebar`, the PIN system — needs to change; all of it is independent of *how* a role was obtained.
 
 ### 3.2 PIN Login — real, not mocked
@@ -102,7 +102,7 @@ Every mutating backend route is gated by `requireRole(...)`/`requireGroup(...)` 
 
 | Endpoint | Required access |
 | :--- | :--- |
-| `PATCH /api/config` | Group A/B (`EXECUTIVE`, `MANAGER`, `ADMIN`) |
+| `PATCH /api/config` | Group A/B (`MANAGER`, `ADMIN`) |
 | `POST /api/submissions` | Any authenticated role |
 | `POST /api/submissions/:id/amendments` | Any authenticated role |
 | `POST /api/submissions/mark-history-viewed` | Any authenticated role |

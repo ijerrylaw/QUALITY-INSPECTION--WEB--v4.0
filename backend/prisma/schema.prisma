@@ -260,8 +260,8 @@ model PinUser {
 
 // ============================================================
 // M365 USER ROLE
-// aadObjectId -> role mapping for real Entra ID SSO logins (Group A/B
-// only — ADMIN/EXECUTIVE/MANAGER). A row can now be created two ways:
+// aadObjectId -> role mapping for real Entra ID SSO logins (Group A/B/C —
+// ADMIN/MANAGER/SUPERVISOR). A row can now be created two ways:
 // auto-provisioned with role: null on a user's first successful MSAL
 // login (POST /api/auth/m365-login), or pre-registered by a Group A admin
 // via POST /api/m365-users/invite (role set, aadObjectId null, claimed on
@@ -301,7 +301,7 @@ model M365UserRole {
   jobTitle          String?
 
   /// null = pending assignment (no access yet, only reachable via a bare
-  /// first login, never via invite). 'ADMIN' | 'EXECUTIVE' | 'MANAGER'
+  /// first login, never via invite). 'ADMIN' | 'MANAGER' | 'SUPERVISOR'
   /// once set — enforced in route validation, not the DB (same convention
   /// as PinUser.role).
   role              String?

@@ -4,19 +4,22 @@ import type { AccountInfo } from '@azure/msal-browser';
 import { API_BASE_URL } from './ConfigContext';
 import { msalInstance, loginRequest, graphRequest, GRAPH_ME_ENDPOINT } from '../lib/msalConfig';
 
-// Define the valid roles in the system
-export type UserRole = 'OPERATOR' | 'LEADER' | 'SUPERVISOR' | 'EXECUTIVE' | 'MANAGER' | 'ADMIN';
+// Define the valid roles in the system.
+// EXECUTIVE was merged into MANAGER (confirmed via discovery: zero
+// behavioral differences anywhere, zero existing rows to migrate, no
+// schema change needed — both always mapped to Group B identically).
+export type UserRole = 'OPERATOR' | 'LEADER' | 'SUPERVISOR' | 'MANAGER' | 'ADMIN';
 
 /**
- * Permission GROUPS (AUDIT_REPORT.md §11) — a coarser layer on top of the six
- * real-job-title-mapped roles above, independent of login method (a
+ * Permission GROUPS (AUDIT_REPORT.md §11) — a coarser layer on top of the
+ * five real-job-title-mapped roles above, independent of login method (a
  * Supervisor logs in via M365 like Group B does, but sits in Group C for
  * access purposes). Keep in sync with backend/src/middleware/auth.ts's
  * PERMISSION_GROUPS.
  *
- *   Group A — IT Admin, C-Suite, Directors     — full access incl. System Admin
- *   Group B — department Managers, Executives  — full access except System Admin
- *   Group C — Supervisors, Operators, Leaders   — Wizard + Inspection Records only
+ *   Group A — IT Admin, C-Suite, Directors  — full access incl. System Admin
+ *   Group B — department Managers           — full access except System Admin
+ *   Group C — Supervisors, Operators, Leaders — Wizard + Inspection Records only
  */
 export type PermissionGroup = 'A' | 'B' | 'C';
 
@@ -29,7 +32,6 @@ export type LoginStatus = 'active' | 'revoked' | 'invite-claimed' | 'bootstrap-e
 
 export const PERMISSION_GROUPS: Record<UserRole, PermissionGroup> = {
   ADMIN: 'A',
-  EXECUTIVE: 'B',
   MANAGER: 'B',
   SUPERVISOR: 'C',
   LEADER: 'C',

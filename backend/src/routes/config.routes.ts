@@ -296,7 +296,7 @@ router.get('/', async (_req: Request, res: Response) => {
  * Updates system configuration parameters in the AppConfig singleton.
  * Automatically serializes arrays and objects into JSON strings before DB save.
  */
-router.patch('/', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Request, res: Response) => {
+router.patch('/', requireRole('MANAGER', 'ADMIN'), async (req: Request, res: Response) => {
   try {
     const payload = req.body || {};
     const updateData: Record<string, any> = {};

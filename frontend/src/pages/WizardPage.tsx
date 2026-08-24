@@ -20,7 +20,7 @@
  * - On final submit, calls POST /api/submissions/:id/amendments instead of the
  *   standard POST /api/submissions, including a mandatory `reason` field.
  * - Amendment sets record status to PENDING_APPROVAL, auto-routed to /approvals
- *   (EXECUTIVE, MANAGER, ADMIN per NAVIGATION_AND_RBAC.md §2).
+ *   (MANAGER, ADMIN per NAVIGATION_AND_RBAC.md §2).
  * - Submit button label and page header change to reflect amendment mode.
  * - Retain Context toggle is hidden in amendment mode (not applicable).
  *

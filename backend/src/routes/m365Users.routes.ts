@@ -2,12 +2,23 @@
  * @file m365Users.routes.ts
  * @description Real MSAL/Entra ID SSO role assignment (NAVIGATION_AND_RBAC.md §3.1).
  *
- * The granted Entra security group covers Group A+B (ADMIN/EXECUTIVE/MANAGER)
- * as a single group — nothing in Entra itself distinguishes which of the
- * three roles a given member should get, and the granted Graph permissions
- * (openid, profile, email, User.Read) don't include group-membership-detail
- * scopes. This file owns the resulting aadObjectId -> role mapping, mirroring
- * the PinUser pattern but for SSO users (who have no PinUser row).
+ * The granted Entra security group previously covered only Group A/B
+ * (ADMIN/MANAGER) staff — nothing in Entra itself distinguishes which role a
+ * given member should get, and the granted Graph permissions (openid,
+ * profile, email, User.Read) don't include group-membership-detail scopes.
+ * This file owns the resulting aadObjectId -> role mapping, mirroring the
+ * PinUser pattern but for SSO users (who have no PinUser row).
+ *
+ * SUPERVISOR is now also M365-eligible (app-level: this file's
+ * M365_ELIGIBLE_ROLES). NOTE: this only controls what role an admin can
+ * *assign* once someone reaches this app's login screen — if the Entra-side
+ * security group gating who can complete the MSAL popup at all is still
+ * scoped to Group A/B only, a newly-invited Supervisor won't be able to log
+ * in until that Entra group membership is updated too (an IT-side step,
+ * outside this codebase).
+ *
+ * EXECUTIVE was merged into MANAGER (zero behavioral differences, zero
+ * existing rows) — LEADER stays PIN-only, deliberately never added here.
  *
  * State model — see schema.prisma's M365UserRole doc comment for the full
  * (aadObjectId, role, isActive) truth table.
@@ -15,7 +26,7 @@
  * Endpoints:
  *
  *  GET    /api/m365-users                    List all M365 role mappings.
- *  POST   /api/m365-users/invite              Pre-register a future admin/exec/manager by email.
+ *  POST   /api/m365-users/invite              Pre-register a future admin/manager/supervisor by email.
  *  PATCH  /api/m365-users/:id                 Assign/change a role.
  *  PATCH  /api/m365-users/:id/deactivate      Revoke access (or an unclaimed invite).
  *  PATCH  /api/m365-users/:id/reactivate      Restore access.
@@ -51,7 +62,7 @@ import { Router, Request, Response } from 'express';
 import prisma from '../lib/prismaClient';
 import { requireGroup } from '../middleware/auth';
 
-const M365_ELIGIBLE_ROLES = ['ADMIN', 'EXECUTIVE', 'MANAGER'] as const;
+const M365_ELIGIBLE_ROLES = ['ADMIN', 'MANAGER', 'SUPERVISOR'] as const;
 type M365EligibleRole = (typeof M365_ELIGIBLE_ROLES)[number];
 
 function isM365EligibleRole(value: unknown): value is M365EligibleRole {
@@ -126,9 +137,10 @@ m365UsersRouter.get('/', requireGroup('A'), async (_req: Request, res: Response)
   }
 });
 
-// POST /api/m365-users/invite — pre-register a future admin/exec/manager by
-// email, before they've ever logged in. Claimed automatically on their first
-// real MSAL login (see m365AuthRouter's /m365-login branch c below).
+// POST /api/m365-users/invite — pre-register a future admin/manager/
+// supervisor by email, before they've ever logged in. Claimed automatically
+// on their first real MSAL login (see m365AuthRouter's /m365-login branch c
+// below).
 m365UsersRouter.post('/invite', requireGroup('A'), async (req: Request, res: Response) => {
   try {
     const body = req.body as { userPrincipalName?: string; displayName?: string; role?: string };

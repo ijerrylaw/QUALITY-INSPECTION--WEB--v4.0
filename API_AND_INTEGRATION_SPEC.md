@@ -30,7 +30,7 @@
   * **Locked product codes:** a product code referenced by ≥1 `Submission` is "locked" (computed on demand, not stored). Two independent rejections guard it, both checked before any write:
     - Removing a locked code from `productCodes[]` — **Response 409:** `{ error, lockedProductCodes: [{ productCode, submissionCount }] }`
     - Changing ANY field of a locked code's stored record — `matrix`, `attributes`, OR `profileId` (see `DATA_SCHEMAS_AND_TYPES.md` §3.1's `ProductEntry`) — **Response 409:** `{ error, lockedProductCodes: [{ productCode, submissionCount, changedFields }] }`, where `changedFields` lists the dotted-path fields that differ from the stored record. Widened 2026-08-20 (commit `19cd645`) from a matrix-only check to cover the whole record, and from "codes present in the payload's `productMatrixConfig`" to every locked code — a payload that omits `productMatrixConfig` entirely no longer bypasses the check.
-  * **Auth:** Requires `X-User-Role` header, Group A/B (`EXECUTIVE`, `MANAGER`, `ADMIN`) — see `NAVIGATION_AND_RBAC.md` §5.1.
+  * **Auth:** Requires `X-User-Role` header, Group A/B (`MANAGER`, `ADMIN`) — see `NAVIGATION_AND_RBAC.md` §5.1.
 
 ---
 
@@ -109,7 +109,7 @@
   * **Important:** The AQL verdict **and** physical dimension results are recomputed server-side via the shared `resolveVerdict()` engine at approval time — the client-supplied `newValues.verdict` is never trusted for persistence, only retained on the `AmendmentLog` (`recomputedVerdict`, `recomputedCategoryResults`, `recomputedFailedDimensions`, `recomputedDimensionResults`) for audit comparison against what was originally drafted.
   * **Frozen snapshot refreeze (AUDIT_REPORT.md #18):** `Submission.gradingSnapshot`/`gradingSnapshotProfileName` are also rewritten in this same `$transaction`, alongside `verdict` — the two are always written together so a submission's frozen category analysis can never drift out of sync with its own stored verdict.
   * **Response 200:** Includes a `verdictRecompute: { clientSupplied, serverRecomputed, mismatch }` diagnostic block so callers can see whether the recomputed verdict differed from the client's draft.
-  * **Auth:** Requires `X-User-Role` header, Group A/B (`EXECUTIVE`, `MANAGER`, `ADMIN`).
+  * **Auth:** Requires `X-User-Role` header, Group A/B (`MANAGER`, `ADMIN`).
 
 * `POST /api/amendments/:id/reject`
   * **Role:** Discards the draft amendment. Sets `amendmentStatus` to `REJECTED` on both the submission and the log.

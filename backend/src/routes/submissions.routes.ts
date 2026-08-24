@@ -1024,7 +1024,7 @@ amendmentsRouter.get('/pending', async (req: Request, res: Response) => {
 // If the amendment's profile can't be resolved, approval hard-fails: this is
 // the one place a verdict is permanently written, so we never guess here.
 // The reviewer's identity comes from the request body (see lib/identity.ts).
-amendmentsRouter.post('/:id/approve', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Request, res: Response) => {
+amendmentsRouter.post('/:id/approve', requireRole('MANAGER', 'ADMIN'), async (req: Request, res: Response) => {
   try {
     const submissionId = String(req.params['id']);
 
@@ -1222,7 +1222,7 @@ amendmentsRouter.post('/:id/approve', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN
 
 // ── POST /api/amendments/:id/reject ───────────────────────────────────────
 // Discards the draft amendment. Sets amendmentStatus → 'REJECTED'.
-amendmentsRouter.post('/:id/reject', requireRole('EXECUTIVE', 'MANAGER', 'ADMIN'), async (req: Request, res: Response) => {
+amendmentsRouter.post('/:id/reject', requireRole('MANAGER', 'ADMIN'), async (req: Request, res: Response) => {
   try {
     const submissionId = String(req.params['id']);
     const body = req.body as { reason?: string };

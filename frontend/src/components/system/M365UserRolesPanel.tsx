@@ -8,15 +8,15 @@ import { useToast } from '../ui/ToastProvider';
 import type { UserRole } from '../../context/AuthContext';
 
 // M365-eligible roles only — matches backend/src/routes/m365Users.routes.ts's
-// M365_ELIGIBLE_ROLES. Real Entra SSO is restricted to Group A/B tier staff
-// (NAVIGATION_AND_RBAC.md §3.1) — Group C stays on PIN login, and is
-// structurally unreachable here: this list only ever contains these three
-// roles, so nothing below can ever render a Group C label.
+// M365_ELIGIBLE_ROLES. Real Entra SSO now spans Group A/B/C
+// (NAVIGATION_AND_RBAC.md §3.1) — LEADER remains PIN-only by deliberate
+// decision and is never added here; EXECUTIVE was merged into MANAGER
+// (zero behavioral differences, zero existing rows — see AUDIT_REPORT.md).
 //
-// Company-hierarchy order (Manager outranks Executive here) — applied
+// Company-hierarchy order (Admin, then Manager, then Supervisor) — applied
 // everywhere these three roles are listed together as a sequence.
 //
-// `label` describes each role by CAPABILITY (Group A/B + what that group
+// `label` describes each role by CAPABILITY (Group A/B/C + what that group
 // can/can't do), not job title — portable phrasing that doesn't assume any
 // specific company's titles. Used for the invite form's <select>, which is
 // roomy (w-full, not a table cell) so the full phrase fits comfortably.
@@ -27,7 +27,7 @@ import type { UserRole } from '../../context/AuthContext';
 const M365_ROLE_OPTIONS: { role: UserRole; label: string; shortLabel: string }[] = [
   { role: 'ADMIN', label: 'Group A — Full System Access (Admin)', shortLabel: 'Admin' },
   { role: 'MANAGER', label: 'Group B — Operational Access (Manager)', shortLabel: 'Manager' },
-  { role: 'EXECUTIVE', label: 'Group B — Operational Access (Executive)', shortLabel: 'Executive' },
+  { role: 'SUPERVISOR', label: 'Group C — Entry & Inspection Access (Supervisor)', shortLabel: 'Supervisor' },
 ];
 
 /**
@@ -304,7 +304,7 @@ export function M365UserRolesPanel() {
             <div>
               <h3 className="text-lg font-semibold uppercase text-primary">Microsoft 365 Access</h3>
               <p className="text-xs text-muted mt-1 font-normal normal-case">
-                Assign ADMIN / MANAGER / EXECUTIVE to real Entra SSO logins.
+                Assign ADMIN / MANAGER / SUPERVISOR to real Entra SSO logins.
               </p>
             </div>
           </div>
