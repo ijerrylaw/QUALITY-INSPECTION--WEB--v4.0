@@ -18,16 +18,6 @@ with its full original context, reasoning, and verification trail.
 
 ## Open Items
 
-1. **Submission-identity-stamping gap.** `Submission.aadObjectId`/
-   `userPrincipalName` are hardcoded literals (`'mock-user-id'`,
-   `'operator@oneglove.com'`, `'sample-data-not-a-real-user'`) on every
-   submission, regardless of login method (PIN or M365) — no submission
-   today is attributable to any real user. The third literal appears on
-   10 of the 14 baseline rows. Blocks building a reliable "does this user
-   have submission history" check (concretely, this is what blocked PIN
-   hard-delete in the Staff PIN Access task).
-   First flagged: Staff PIN Access session. → `CHANGELOG.md` §17.
-
 2. **Real defect taxonomy seeded for `prof_default` only.** MEDLINE,
    CARDINAL, and HENRY SCHEIN profiles still hold placeholder/demo defect
    content, not the real 47-defect taxonomy.
@@ -45,12 +35,6 @@ with its full original context, reasoning, and verification trail.
    for deletion or updating.
    → `CHANGELOG.md` §15.
 
-9. **Real Azure AD/MSAL integration is still blocked** on Jerry's IT
-   manager providing real credentials (Tenant ID, Client ID, Client
-   Secret). Mock M365 login remains the only path in the interim,
-   dev-gated (`import.meta.env.DEV`) so it can't leak into production.
-   → `CHANGELOG.md` §11.7.
-
 10. **Two independently-maintained "default profile" fallbacks disagree
     on `evaluationMode`.** The backend's `HARDCODED_DEFAULT_PROFILE`
     (`resolveVerdict.ts`) sets `CUMULATIVE` for BARRIER / `''` for
@@ -58,11 +42,11 @@ with its full original context, reasoning, and verification trail.
     (`ConfigContext.tsx`) sets `'N/A'` for both. Never reconciled.
 
     **Diagnosed 2026-08-11:**
-    - **Backend** — `backend/src/engine/resolveVerdict.ts:37-59`
+    - **Backend** — `backend/src/engine/resolveVerdict.ts:38-59`
       (`HARDCODED_DEFAULT_PROFILE` const), consumed at two call sites inside
-      `resolveVerdict()`: (a) line 238, when an explicit `profileId ===
+      `resolveVerdict()`: (a) line 385, when an explicit `profileId ===
       'prof_default'` is requested but not found in AppConfig's
-      `inspectionProfiles`; (b) line 268, the final safety net when *no*
+      `inspectionProfiles`; (b) lines 420-424, the final safety net when *no*
       AppConfig profile has usable rules at all (`categories.length === 0`
       or none carry both `aqlLevel` and `evaluationMode`). Server-side, runs
       inside verdict computation — shared by all four routes that call
@@ -155,7 +139,7 @@ with its full original context, reasoning, and verification trail.
     `evalMode` to `'CUMULATIVE'` whenever neither `evalMode` nor
     `evaluationMode` is set — on ANY profile, not just the zero-usable-profile
     case the recent fix (commit `606b5e4`) addressed.**
-    `frontend/src/context/ConfigContext.tsx:392-393`:
+    `frontend/src/context/ConfigContext.tsx:589-590`:
     ```
     evalMode: cat.evalMode ?? cat.evaluationMode ?? 'CUMULATIVE',
     evaluationMode: (cat.evaluationMode ?? cat.evalMode ?? 'CUMULATIVE') as EvaluationMode,
@@ -171,7 +155,7 @@ with its full original context, reasoning, and verification trail.
     other): this is about `getResolvedProfile()`'s category-normalization
     step silently masking a missing field on otherwise-real profile data.
     First flagged during the zero-usable-profile fix (see `hasUsableCategories()`'s
-    doc comment at `ConfigContext.tsx:155-158`, which already calls out that
+    doc comment at `ConfigContext.tsx:293-302`, which already calls out that
     callers must pass the raw profile, never this function's output, to avoid
     exactly this masking) but not yet logged as its own finding until now.
     Not yet scoped — needs a decision on what an unset evalMode *should* do
