@@ -31,7 +31,7 @@ Five roles exist. `EXECUTIVE` was merged into `MANAGER` (2026-08-24) — confirm
 
 **Real identity is never collapsed down to just the group:** `User.title` (frontend) and `PinUser.jobTitle` (backend) carry the actual job title (e.g. "Plant Director", "Line Leader") for display/audit — never read by any permission check, which uses `role` alone.
 
-**Login method does not determine access.** A Supervisor logging in via mock M365 still resolves to `role: 'SUPERVISOR'` → Group C, identical to a Supervisor logging in via PIN — confirmed live. "Login method and permission level are independent" is a deliberate design rule, not an incidental fact.
+**Login method does not determine access.** A Supervisor logging in via M365 still resolves to `role: 'SUPERVISOR'` → Group C, identical to a Supervisor logging in via PIN — confirmed live. "Login method and permission level are independent" is a deliberate design rule, not an incidental fact.
 
 ---
 
