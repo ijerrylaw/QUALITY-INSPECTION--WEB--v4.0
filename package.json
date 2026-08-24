@@ -2,12 +2,16 @@
   "name": "quality-inspection-web-v4",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=18"
+  },
   "workspaces": [
     "frontend",
     "backend"
   ],
   "scripts": {
-    "dev": "npx concurrently \"npm run dev --workspace=frontend\" \"npm run dev --workspace=backend\""
+    "dev": "npx concurrently \"npm run dev --workspace=frontend\" \"npm run dev --workspace=backend\"",
+    "setup": "node scripts/setup.mjs"
   },
   "allowScripts": {
     "@prisma/engines@7.9.0": true,
