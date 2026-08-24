@@ -1194,14 +1194,14 @@ export function HistoryFeed() {
 
                     {/* 1. LOT NUMBER */}
                     <td className="sticky left-0 bg-surface z-10 py-3 px-3 border-b border-r border-gray-700/50 text-sm font-mono text-primary shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] group-hover:bg-gray-800 transition-colors">
-                      <span className="inline-flex items-center gap-2">
-                        {sub.batchNumber || '—'}
-                        {newSubmissionThreshold && new Date(sub.createdAt) > new Date(newSubmissionThreshold) && (
-                          <span className="px-2 py-0.5 rounded-full font-bold uppercase tracking-wider text-[10px] bg-brand-secondary/10 border border-brand-secondary/30 text-brand-secondary">
+                      <div>{sub.batchNumber || '—'}</div>
+                      {newSubmissionThreshold && new Date(sub.createdAt) > new Date(newSubmissionThreshold) && (
+                        <div className="mt-1">
+                          <span className="inline-flex px-2 py-0.5 rounded-full font-bold uppercase tracking-wider text-[10px] bg-brand-secondary/10 border border-brand-secondary/30 text-brand-secondary">
                             NEW
                           </span>
-                        )}
-                      </span>
+                        </div>
+                      )}
                     </td>
 
                     {/* 2. PRODUCT CODE */}
