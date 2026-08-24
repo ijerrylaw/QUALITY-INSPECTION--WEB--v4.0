@@ -131,14 +131,40 @@ export type DimensionStats = Record<string, {
 export interface AmendmentLog {
   id: string;
   submissionId: string;
-  requestedBy: string;                 // UPN of the user who submitted the amendment
-  reviewedBy?: string;                 // UPN of the approver/rejector (null until actioned)
-  requestedAt: string;                 // ISO timestamp of amendment submission
-  reviewedAt?: string;                 // ISO timestamp of approval/rejection
-  originalValues: string;             // JSON-serialized snapshot of the Submission before amendment
+  originalValues: string;              // JSON-serialized snapshot of the Submission before amendment
   newValues: string;                   // JSON-serialized proposed replacement values
-  supervisorNote: string;              // Mandatory reason text provided by the requestor
+  /**
+   * Requester identity — same mixed model as Submission (§1 above): exactly
+   * ONE side is populated. A PIN-authored draft sets `requestedByPinUserId`
+   * (a real FK to PinUser); an M365/SSO-authored draft sets `requestedBy`
+   * (true UPN/email) and `requestedByDisplayName` instead.
+   */
+  requestedBy: string | null;          // UPN of the SSO user who submitted the amendment — SSO-originated only
+  requestedByDisplayName: string | null; // Human-readable name of the SSO requester, captured at draft time — SSO-originated only
+  requestedByPinUserId: string | null;   // FK to the PinUser who authored the draft — PIN-originated only
+  requestedAt: string;                 // ISO timestamp of amendment submission
+  /**
+   * Reviewer identity — same mixed model as the requester fields above, null
+   * until the draft is actioned.
+   */
+  reviewedBy?: string | null;          // UPN of the SSO approver/rejector — SSO-originated only, null until actioned
+  reviewedByDisplayName?: string | null; // Human-readable name of the SSO reviewer, captured at review time — SSO-originated only
+  reviewedByPinUserId?: string | null;   // FK to the PinUser who reviewed — PIN-originated only
+  reviewedAt?: string;                 // ISO timestamp of approval/rejection
   status: AmendmentStatus;
+  supervisorNote?: string;             // Optional notes/reason supplied by the Supervisor
+  /**
+   * Server-recomputed verdict audit trail, via the same resolveVerdict()
+   * engine used for the live submission — set (informational) at draft time
+   * and overwritten (authoritative) at approval time, when it's what
+   * actually gets persisted to Submission.verdict. All four fields are null
+   * on rows created before this audit trail existed.
+   */
+  recomputedVerdict?: 'PASSED' | 'FAILED' | null;
+  recomputedCategoryResults?: string | null;   // JSON — CategoryResult[] backing recomputedVerdict
+  recomputedFailedDimensions?: number | null;  // Count of physical dimensions with ≥1 out-of-spec slot
+  recomputedDimensionResults?: string | null;  // JSON — DimensionResult[] explaining recomputedFailedDimensions
+  createdAt: string;
 }
 ```
 
