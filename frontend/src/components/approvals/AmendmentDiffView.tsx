@@ -88,6 +88,41 @@ function pickSectionNode(tree: DiffNode, fields: string[]): DiffNode {
   return { status: anyChanged ? 'changed' : 'unchanged', children, isArray: false };
 }
 
+// ── Defects: implicit-zero diffing ──────────────────────────────────────────
+// `defects` is a sparse Record<defectId, count> — a defect id absent from one
+// side means "never recorded" (count 0), not "no value to compare." The
+// generic diffTree.ts algorithm doesn't know this (it's a domain rule
+// specific to this one field, not something the shared diff engine should
+// bake in), so it marks a key present only on one side as 'added'/'removed'
+// — which rendered as a bare value with no arrow, and never entered the
+// unchanged-collapse count even when the "real" comparison (0 vs 0) is a
+// no-op. Resolving both sides to an explicit count here, per key, fixes
+// both: a 0-vs-N key renders as "0 → N" like any other changed row, and a
+// 0-vs-0 key collapses into "N unchanged fields not shown" like any other
+// untouched field — bypassing collectChangedLeaves/collectUnchanged (which
+// operate at DiffStatus/top-level-of-subtree granularity, not this field's
+// domain-specific implicit-zero rule) for the defects section only.
+function toDefectCount(value: unknown): number {
+  return typeof value === 'number' ? value : (Number(value) || 0);
+}
+
+function resolveDefectRows(defectsNode: DiffNode | undefined): { rows: DiffRow[]; unchangedEntries: UnchangedEntry[] } {
+  const rows: DiffRow[] = [];
+  const unchangedEntries: UnchangedEntry[] = [];
+  if (!defectsNode?.children) return { rows, unchangedEntries };
+
+  for (const [defectId, child] of Object.entries(defectsNode.children)) {
+    const original = toDefectCount(child.original);
+    const proposed = toDefectCount(child.proposed);
+    if (original === proposed) {
+      unchangedEntries.push({ path: defectId, value: proposed });
+    } else {
+      rows.push({ keyPath: ['defects', defectId], node: { status: 'changed', original, proposed } });
+    }
+  }
+  return { rows, unchangedEntries };
+}
+
 // ── Label resolution per row ───────────────────────────────────────────────
 
 function labelForRow(
@@ -215,10 +250,12 @@ function UnchangedCollapse({
   entries,
   expanded,
   onToggle,
+  labelForPath = (path) => SUBMISSION_FIELD_LABELS[path] ?? path,
 }: {
   entries: UnchangedEntry[];
   expanded: boolean;
   onToggle: () => void;
+  labelForPath?: (path: string) => string;
 }) {
   if (entries.length === 0) return null;
   return (
@@ -240,7 +277,7 @@ function UnchangedCollapse({
           {entries.map(({ path, value }) => (
             <div key={path} className="pt-3 first:pt-3">
               <span className="block text-[10px] font-bold text-muted uppercase mb-1">
-                {SUBMISSION_FIELD_LABELS[path] ?? path}
+                {labelForPath(path)}
               </span>
               {value !== null && typeof value === 'object' ? (
                 <JsonViewer data={value} />
@@ -269,6 +306,7 @@ function DiffSubgroup({
   resolveProfileValue,
   showUnchanged,
   onToggleUnchanged,
+  labelForPath,
 }: {
   heading?: string;
   muted?: boolean;
@@ -281,6 +319,7 @@ function DiffSubgroup({
   resolveProfileValue: (raw: unknown) => ProfileDisplayValue;
   showUnchanged: boolean;
   onToggleUnchanged: () => void;
+  labelForPath?: (path: string) => string;
 }) {
   if (rows.length === 0 && unchangedEntries.length === 0) return null;
 
@@ -326,7 +365,7 @@ function DiffSubgroup({
         <div className="text-xs text-muted italic px-3 py-2">No changes.</div>
       )}
 
-      <UnchangedCollapse entries={unchangedEntries} expanded={showUnchanged} onToggle={onToggleUnchanged} />
+      <UnchangedCollapse entries={unchangedEntries} expanded={showUnchanged} onToggle={onToggleUnchanged} labelForPath={labelForPath} />
     </div>
   );
 }
@@ -354,6 +393,32 @@ function AmendmentDiffSection({
   expandedGroups: Record<string, boolean>;
   onToggleGroup: (key: string) => void;
 }) {
+  // Defects gets its own implicit-zero resolution instead of the generic
+  // DiffStatus-based walk — see resolveDefectRows() above. Every other
+  // section keeps the standard collectChangedLeaves/collectUnchanged path.
+  if (sectionId === 'defects') {
+    const { rows, unchangedEntries } = resolveDefectRows(sectionNode.children?.['defects']);
+    if (rows.length === 0 && unchangedEntries.length === 0) return null;
+
+    return (
+      <div className="space-y-2">
+        <h4 className="text-xs font-bold text-brand-secondary uppercase tracking-widest">{title}</h4>
+        <DiffSubgroup
+          rows={rows}
+          unchangedEntries={unchangedEntries}
+          sectionId={sectionId}
+          dimensionLabels={dimensionLabels}
+          dimensionDecimals={dimensionDecimals}
+          defectLabelContext={defectLabelContext}
+          resolveProfileValue={resolveProfileValue}
+          showUnchanged={Boolean(expandedGroups[`${sectionId}:raw`])}
+          onToggleUnchanged={() => onToggleGroup(`${sectionId}:raw`)}
+          labelForPath={(defectId) => defectLabelContext.labels[defectId] ?? defectId}
+        />
+      </div>
+    );
+  }
+
   const changedRows = collectChangedLeaves(sectionNode, []);
   const unchangedEntries = collectUnchanged(sectionNode);
 
