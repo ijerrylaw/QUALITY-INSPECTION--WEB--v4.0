@@ -222,7 +222,7 @@ export function PinAdminPanel() {
               value={employeeId}
               onChange={(e) => setEmployeeId(e.target.value.toUpperCase())}
               className="w-full bg-canvas border border-gray-700 text-sm font-mono uppercase text-primary rounded-lg px-4 py-2.5 focus:border-brand-primary outline-none"
-              placeholder="e.g. EMP-00123"
+              placeholder="e.g. OT1234 or FOT1234"
             />
           </div>
 
@@ -234,7 +234,7 @@ export function PinAdminPanel() {
               value={jobTitle}
               onChange={(e) => setJobTitle(e.target.value)}
               className="w-full bg-canvas border border-gray-700 text-sm text-primary rounded-lg px-4 py-2.5 focus:border-brand-primary outline-none"
-              placeholder="e.g. Packing Operator - Line 3"
+              placeholder="e.g. IPQA Operator or PSQA Leader"
             />
           </div>
 
