@@ -153,6 +153,18 @@ interface Submission {
 /** Mirrors backend/src/routes/submissions.routes.ts's MAX_APPROVED_AMENDMENTS. */
 const MAX_APPROVED_AMENDMENTS = 3;
 
+/**
+ * Column widths for the CSS Grid data table below — declared once, applied
+ * to the header row and every data row so they align, and to nothing else
+ * (the expanded row's detail panel spans all of them via `col-span-full`,
+ * not a separately-negotiated width). Chosen to comfortably fit this app's
+ * real data (batch numbers, product codes, badge text) without wrapping;
+ * the last column is a flexible remainder rather than a fixed width so the
+ * table still fills wider viewports instead of leaving dead space.
+ */
+const GRID_TEMPLATE_COLUMNS =
+  '40px 190px 170px 110px 130px 170px 140px 120px 150px minmax(140px,1fr)';
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function parseDefects(raw: Record<string, number> | string | undefined): Record<string, number> {
@@ -257,19 +269,28 @@ function AmendmentBadge({ status }: { status: AmendmentStatus }) {
 }
 
 // ── Table header ──────────────────────────────────────────────────────────────
+// role="columnheader" divs, not <th> — this table is built on CSS Grid (see
+// the "CSS Grid, not <table>" note above the main render below), which uses
+// a deterministic, standards-defined track-sizing algorithm instead of
+// HTML table auto-layout's much less predictable column/colspan negotiation
+// — the thing three prior fix attempts on the expanded panel could never
+// fully pin down or control. whitespace-nowrap is applied directly on each
+// header (short, fixed label text that's meant to stay on one line) rather
+// than on a shared ancestor, so it can never cascade into content that
+// doesn't want it.
 
 function Th({ children, isSticky = false }: { children: React.ReactNode; isSticky?: boolean }) {
   if (isSticky) {
     return (
-      <th className="sticky left-0 bg-surface z-10 text-xs font-semibold uppercase tracking-wider text-muted py-3 px-3 border-b border-r border-gray-700/50 text-left whitespace-nowrap shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+      <div role="columnheader" className="sticky left-0 bg-surface z-10 text-xs font-semibold uppercase tracking-wider text-muted py-3 px-3 border-b border-r border-gray-700/50 text-left whitespace-nowrap shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
         {children}
-      </th>
+      </div>
     );
   }
   return (
-    <th className="bg-canvas text-xs font-semibold uppercase tracking-wider text-muted py-3 px-3 border-b border-gray-800 text-left whitespace-nowrap">
+    <div role="columnheader" className="bg-canvas text-xs font-semibold uppercase tracking-wider text-muted py-3 px-3 border-b border-gray-800 text-left whitespace-nowrap">
       {children}
-    </th>
+    </div>
   );
 }
 
@@ -397,14 +418,11 @@ function DefectBreakdownPanel({
   const previewErrorMessage = previewState.status === 'error' ? previewState.message : undefined;
 
   return (
-    <td colSpan={10} className="p-0 border-b border-gray-700/50 bg-canvas shadow-inner">
-      {/* whitespace-normal overrides the table's own whitespace-nowrap (§4.2,
-          needed so Lot Number/Date/etc. don't wrap in the collapsed rows) —
-          that nowrap is inherited by every descendant, including this panel,
-          where it fights the flex-wrap rows below: a flex item holding
-          nowrap text can't reflow to a new line, only shrink, so under
-          space pressure it gets squeezed and its nowrap text overflows past
-          the panel's own overflow-hidden edge instead of wrapping. */}
+    <div role="cell" className="col-span-full p-0 border-b border-gray-700/50 bg-canvas shadow-inner">
+      {/* whitespace-normal is defensive, not a fix for anything this file
+          does — this panel never relies on an ancestor's whitespace
+          setting either way (see AqlCategoryAnalysisPanel.tsx, which sets
+          its own regardless of caller). */}
       <div className="px-3 py-4 space-y-3 whitespace-normal">
 
         {/* ── §5.3 Info/Cyan alert — legacy row, no frozen snapshot ──────────── */}
@@ -498,7 +516,7 @@ function DefectBreakdownPanel({
           </div>
         )}
       </div>
-    </td>
+    </div>
   );
 }
 
@@ -890,12 +908,27 @@ export function HistoryFeed() {
         </div>
       </div>
 
-      {/* ── §4.2 High-Density Data Table ───────────────────────────────────── */}
+      {/* ── §4.2 High-Density Data Table ─────────────────────────────────────
+          CSS Grid, not <table>. The expanded-row panel used to be a
+          <td colSpan={10}> — three separate fix attempts patched things
+          *inside* that cell (padding, then whitespace-nowrap, then a full
+          rebuild of its own contents) and the clipping bug survived all
+          three, confirmed against a real screenshot. HTML table auto-layout
+          negotiates a colspan cell's width against the other rows' column
+          widths using an algorithm that's notoriously inconsistent across
+          browsers/DPI settings — CSS Grid's track-sizing algorithm is
+          standards-defined and deterministic instead. Columns are declared
+          ONCE (GRID_TEMPLATE_COLUMNS below) on the outer grid; every row is
+          `display: contents` (renders no box of its own — ARIA role="row"
+          for accessibility, but its children become direct grid items), so
+          the expanded panel is a plain `grid-column: 1 / -1` item — full
+          width by the grid's own already-established tracks, not a
+          separately negotiated cell. */}
       <div className="bg-surface border border-gray-800 rounded-lg overflow-x-auto shadow-sm scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
-        <table className="w-full text-left whitespace-nowrap">
-          <thead>
-            <tr>
-              <th className="bg-canvas w-10 py-3 px-2 border-b border-gray-800" />
+        <div role="table" className="grid min-w-max" style={{ gridTemplateColumns: GRID_TEMPLATE_COLUMNS }}>
+          <div role="rowgroup" style={{ display: 'contents' }}>
+            <div role="row" style={{ display: 'contents' }}>
+              <div role="columnheader" className="bg-canvas py-3 px-2 border-b border-gray-800" />
               <Th isSticky>
                 <div>FULL SYSTEM</div>
                 <div className="text-[10px] text-gray-500">LOT NUMBER</div>
@@ -920,15 +953,16 @@ export function HistoryFeed() {
                 <div className="text-[10px] text-gray-500">GLOVE WEIGHT (g)</div>
               </Th>
               <Th>INSPECTOR</Th>
-            </tr>
-          </thead>
-          <tbody>
+            </div>
+          </div>
+
+          <div role="rowgroup" style={{ display: 'contents' }}>
             {loading ? (
-              <tr>
-                <td colSpan={10} className="py-8 text-center text-muted font-mono animate-pulse uppercase tracking-wider text-sm">
+              <div role="row" style={{ display: 'contents' }}>
+                <div role="cell" className="col-span-full py-8 text-center text-muted font-mono animate-pulse uppercase tracking-wider text-sm">
                   Loading inspection records...
-                </td>
-              </tr>
+                </div>
+              </div>
             ) : sortedSubmissions.length > 0 ? (
               sortedSubmissions.flatMap((sub) => {
                 const dateStr = (sub.productionDate || '').split('T')[0];
@@ -940,22 +974,24 @@ export function HistoryFeed() {
                 const isExpanded = expandedRowId === sub.id;
 
                 const dataRow = (
-                  <tr
+                  <div
+                    role="row"
                     key={`${sub.id}-row`}
                     onClick={() => handleRowClick(sub.id)}
-                    className={`hover:bg-white/5 transition-colors cursor-pointer group ${isExpanded ? 'bg-white/[0.03]' : ''}`}
+                    style={{ display: 'contents' }}
+                    className="cursor-pointer group"
                   >
                     {/* Expand chevron */}
-                    <td className={`py-3 px-2 border-b border-gray-700/50 text-center transition-colors ${isExpanded ? 'bg-brand-primary/5' : ''}`}>
+                    <div role="cell" className={`py-3 px-2 border-b border-gray-700/50 text-center transition-colors group-hover:bg-white/5 ${isExpanded ? 'bg-brand-primary/5' : ''}`}>
                       <span className="text-muted group-hover:text-primary transition-colors inline-flex items-center justify-center">
                         {isExpanded
                           ? <ChevronDown className="w-4 h-4" strokeWidth={2} />
                           : <ChevronRight className="w-4 h-4" strokeWidth={2} />}
                       </span>
-                    </td>
+                    </div>
 
                     {/* 1. LOT NUMBER */}
-                    <td className="sticky left-0 bg-surface z-10 py-3 px-3 border-b border-r border-gray-700/50 text-sm font-mono text-primary shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] group-hover:bg-gray-800 transition-colors">
+                    <div role="cell" className="sticky left-0 bg-surface z-10 py-3 px-3 border-b border-r border-gray-700/50 text-sm font-mono text-primary whitespace-nowrap shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] group-hover:bg-gray-800 transition-colors">
                       <div>{sub.batchNumber || '—'}</div>
                       {newSubmissionThreshold && new Date(sub.createdAt) > new Date(newSubmissionThreshold) && (
                         <div className="mt-1">
@@ -964,21 +1000,21 @@ export function HistoryFeed() {
                           </span>
                         </div>
                       )}
-                    </td>
+                    </div>
 
                     {/* 2. PRODUCT CODE */}
-                    <td className="py-3 px-3 border-b border-gray-700/50 text-sm font-mono text-primary">
+                    <div role="cell" className="py-3 px-3 border-b border-gray-700/50 text-sm font-mono text-primary whitespace-nowrap group-hover:bg-white/5 transition-colors">
                       {sub.productCode || '—'}
-                    </td>
+                    </div>
 
                     {/* 3. DATE & TIME */}
-                    <td className="py-3 px-3 border-b border-gray-700/50">
+                    <div role="cell" className="py-3 px-3 border-b border-gray-700/50 whitespace-nowrap group-hover:bg-white/5 transition-colors">
                       <div className="text-sm font-mono text-primary">{dateStr || '—'}</div>
                       <div className="text-xs font-mono text-muted">{timeStr}</div>
-                    </td>
+                    </div>
 
                     {/* 4. VERDICT & DEFECT COUNT */}
-                    <td className="py-3 px-3 border-b border-gray-700/50">
+                    <div role="cell" className="py-3 px-3 border-b border-gray-700/50 whitespace-nowrap group-hover:bg-white/5 transition-colors">
                       <div className="flex flex-col gap-1.5 items-start">
                         <VerdictBadge verdict={sub.verdict} />
                         {totalDefects > 0 && (
@@ -999,60 +1035,60 @@ export function HistoryFeed() {
                           <span className="text-[10px] font-mono text-emerald-500/70">0 defects</span>
                         )}
                       </div>
-                    </td>
+                    </div>
 
                     {/* 5. STATUS */}
-                    <td className="py-3 px-3 border-b border-gray-700/50">
+                    <div role="cell" className="py-3 px-3 border-b border-gray-700/50 whitespace-nowrap group-hover:bg-white/5 transition-colors">
                       <AmendmentBadge status={sub.amendmentStatus} />
-                    </td>
+                    </div>
 
                     {/* 6. PRODUCTION LINE & SHIFT */}
-                    <td className="py-3 px-3 border-b border-gray-700/50">
+                    <div role="cell" className="py-3 px-3 border-b border-gray-700/50 whitespace-nowrap group-hover:bg-white/5 transition-colors">
                       <div className="text-sm font-mono text-primary">{sub.machineId || '—'}</div>
                       <div className="text-xs font-mono text-muted">{sub.shift ? sub.shift.split(' (')[0] : '—'}</div>
-                    </td>
+                    </div>
 
                     {/* 7. GLOVE SIZE & SAMPLE SIZE */}
-                    <td className="py-3 px-3 border-b border-gray-700/50">
+                    <div role="cell" className="py-3 px-3 border-b border-gray-700/50 whitespace-nowrap group-hover:bg-white/5 transition-colors">
                       <div className="text-sm font-mono text-primary">{sub.size || '—'}</div>
                       <div className="text-xs font-mono text-muted">{sub.sampleSize ?? '—'}</div>
-                    </td>
+                    </div>
 
                     {/* 8. TOTAL CARTON & GLOVE WEIGHT */}
-                    <td className="py-3 px-3 border-b border-gray-700/50">
+                    <div role="cell" className="py-3 px-3 border-b border-gray-700/50 whitespace-nowrap group-hover:bg-white/5 transition-colors">
                       <div className="text-sm font-mono text-primary">{sub.totalCarton ?? '—'}</div>
                       <div className="text-xs font-mono text-muted">
                         {sub.gloveWeight != null ? `${sub.gloveWeight}g` : '—'}
                       </div>
-                    </td>
+                    </div>
 
                     {/* 9. INSPECTOR */}
-                    <td className="py-3 px-3 border-b border-gray-700/50 text-sm text-muted max-w-[160px] truncate font-sans">
+                    <div role="cell" className="py-3 px-3 border-b border-gray-700/50 text-sm text-muted whitespace-nowrap truncate font-sans group-hover:bg-white/5 transition-colors">
                       {sub.inspectorName || '—'}
-                    </td>
-                  </tr>
+                    </div>
+                  </div>
                 );
 
                 if (!isExpanded) return [dataRow];
 
                 return [
                   dataRow,
-                  <tr key={`${sub.id}-panel`} className="bg-canvas">
+                  <div role="row" key={`${sub.id}-panel`} style={{ display: 'contents' }}>
                     <DefectBreakdownPanel sub={sub} onAmend={handleAmend} />
-                  </tr>,
+                  </div>,
                 ];
               })
             ) : (
-              <tr>
-                <td colSpan={10} className="py-8 text-center text-muted text-sm font-sans">
+              <div role="row" style={{ display: 'contents' }}>
+                <div role="cell" className="col-span-full py-8 text-center text-muted text-sm font-sans">
                   {searchTerm || activeFilterCount > 0
                     ? 'No records match your search/filters.'
                     : 'No inspection records found.'}
-                </td>
-              </tr>
+                </div>
+              </div>
             )}
-          </tbody>
-        </table>
+          </div>
+        </div>
       </div>
 
       {!loading && hasMore && (
