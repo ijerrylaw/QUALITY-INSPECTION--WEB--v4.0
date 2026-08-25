@@ -20,35 +20,8 @@ import { Button } from '../ui/Button';
 import { useToast } from '../ui/ToastProvider';
 import { API_BASE_URL, useConfig } from '../../context/ConfigContext';
 import { useHistoryIndicator } from '../../context/HistoryIndicatorContext';
-
-// ── Display-only helpers ──────────────────────────────────────────────────────
-// isZeroTolerance/isPassFailNil/snapBracket are label/text helpers only — they
-// pick which threshold text to render (e.g. "Ac: 0 · zero tolerance" vs
-// "Ac ≤ X · Re ≥ Y") and the "n=X → ISO n=Y" display line. Pass/fail
-// DETERMINATION and threshold VALUES come from POST /api/verdict/preview (the
-// same resolveVerdict()/evaluateAQLVerdict() engine every persisting route
-// uses — see StepReviewSubmit.tsx §5.6) via buildCategoryAnalysis() below, not
-// from a local matrix. Mirrors backend/src/engine/iso2859-matrix.ts's bracket
-// list and snapToBracket() algorithm for this display-only purpose.
-
-const SAMPLE_SIZE_BRACKETS = [2, 3, 5, 8, 13, 20, 32, 50, 80, 125, 200, 315, 500] as const;
-
-function isZeroTolerance(aqlLevel: string): boolean {
-  return /and/i.test(aqlLevel) || /zero.?tolerance/i.test(aqlLevel) || /^0$/.test(aqlLevel.trim());
-}
-
-function isPassFailNil(aqlLevel: string): boolean {
-  return /pass.?fail/i.test(aqlLevel) || /nil/i.test(aqlLevel);
-}
-
-function snapBracket(n: number): number {
-  const clamped = Math.max(2, Math.round(n));
-  return [...SAMPLE_SIZE_BRACKETS].reduce((best, candidate) => {
-    const dC = Math.abs(candidate - clamped);
-    const dB = Math.abs(best - clamped);
-    return dC < dB || (dC === dB && candidate > best) ? candidate : best;
-  }, SAMPLE_SIZE_BRACKETS[0] as number);
-}
+import { AqlCategoryAnalysisPanel } from './AqlCategoryAnalysisPanel';
+import type { CategoryAnalysis, DefectItem } from './AqlCategoryAnalysisPanel';
 
 // ── POST /api/verdict/preview response shape ─────────────────────────────────
 // Mirrors backend/src/engine/aqlEvaluator.ts's exported CategoryResult/
@@ -76,26 +49,9 @@ type VerdictPreviewState =
   | { status: 'error'; message: string }
   | { status: 'success'; categoryResults: ServerCategoryResult[] };
 
-// ── Category analysis types & builder ────────────────────────────────────────
-
-interface DefectItem {
-  id: string;
-  name: string;
-  count: number;
-  failing: boolean;
-}
-
-interface CategoryAnalysis {
-  id: string;
-  name: string;
-  aqlLevel: string;
-  evaluationMode: string;
-  threshold: { ac: number; re: number } | null;
-  totalCount: number;
-  /** true=PASS, false=FAIL, null=qualitative/informational/not-yet-available (no verdict shown) */
-  passed: boolean | null;
-  defectItems: DefectItem[];
-}
+// ── Category analysis builder ─────────────────────────────────────────────
+// CategoryAnalysis/DefectItem now live in AqlCategoryAnalysisPanel.tsx (the
+// component that actually renders them) — imported above.
 
 /**
  * Pure join: local category/defect iteration (which categories exist, which
@@ -436,8 +392,9 @@ function DefectBreakdownPanel({
   );
 
   const totalClean = Object.values(cleanDefects).reduce((a, b) => a + b, 0);
-  const snappedBracket = snapBracket(sub.sampleSize);
   const anyFail = categoryAnalysis.some((c) => c.passed === false);
+  const previewStatus = hasSnapshot ? 'snapshot' : previewState.status;
+  const previewErrorMessage = previewState.status === 'error' ? previewState.message : undefined;
 
   return (
     <td colSpan={10} className="p-0 border-b border-gray-700/50 bg-canvas shadow-inner">
@@ -490,219 +447,17 @@ function DefectBreakdownPanel({
         )}
 
         {/* ── AQL Category Analysis Panel ───────────────────────────────────── */}
-        <div className="rounded-lg border border-gray-800 overflow-hidden bg-surface">
-
-          {/* Panel header */}
-          <div className="bg-gray-800/50 px-4 py-2 flex items-center justify-between border-b border-gray-800 flex-wrap gap-2">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-3.5 h-3.5 text-muted" strokeWidth={2} />
-              <span className="text-xs font-bold uppercase tracking-wider text-muted">
-                AQL Category Analysis
-              </span>
-              {/* "WOULD FAIL" indicator when reference analysis reveals failures on unlinked submissions */}
-              {anyFail && noProfileLinked && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/30 text-amber-400">
-                  WOULD FAIL
-                </span>
-              )}
-              {anyFail && !noProfileLinked && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-500/10 border border-rose-500/30 text-rose-400">
-                  CATEGORY FAILED
-                </span>
-              )}
-              {!hasSnapshot && previewState.status === 'loading' && (
-                <span className="text-[10px] text-muted font-mono animate-pulse">Loading AQL analysis…</span>
-              )}
-              {!hasSnapshot && previewState.status === 'error' && (
-                <span className="text-[10px] text-amber-400 font-mono">
-                  AQL analysis unavailable ({previewState.message}) — showing raw defect counts only.
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-3 flex-wrap">
-              {/* ISO bracket note */}
-              <span className="text-[10px] font-mono text-muted">
-                n={sub.sampleSize} → ISO n={snappedBracket}
-              </span>
-              {/* Clean total */}
-              <span className="text-[10px] font-mono text-muted">
-                {totalClean} defect{totalClean !== 1 ? 's' : ''} total
-              </span>
-              {/* Active profile name — §4.5 cyan for system identity */}
-              {displayProfileName && (
-                <span className="text-[10px] font-bold font-mono text-brand-secondary uppercase tracking-wider">
-                  {displayProfileName}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* ── Per-category rows ────────────────────────────────────────────── */}
-          <div className="divide-y divide-gray-800/50">
-            {categoryAnalysis.map((cat) => {
-              const isFail = cat.passed === false;
-              const isNA   = cat.passed === null;
-              const zeroTol = isZeroTolerance(cat.aqlLevel);
-              const pfNil   = isPassFailNil(cat.aqlLevel);
-
-              return (
-                <div
-                  key={cat.id}
-                  className={`px-4 py-3 transition-colors ${isFail ? 'bg-rose-500/[0.04]' : ''}`}
-                >
-                  {/* Row: meta chips left · count + verdict right */}
-                  <div className="flex items-center justify-between flex-wrap gap-y-1.5 gap-x-3">
-
-                    {/* LEFT: category identity + AQL chips */}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {/* Category name */}
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted w-[90px] shrink-0">
-                        {cat.name}
-                      </span>
-
-                      {/* AQL Level — §4.8A indigo for system parameter */}
-                      <span className="px-2 py-0.5 rounded font-mono text-[10px] uppercase bg-indigo-500/10 border border-indigo-500/30 text-indigo-400">
-                        {cat.aqlLevel || '—'}
-                      </span>
-
-                      {/* Evaluation mode — §4.8B emerald active, gray N/A */}
-                      {cat.evaluationMode ? (
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                          cat.evaluationMode === 'CUMULATIVE' || cat.evaluationMode === 'GRANULAR'
-                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                            : 'bg-gray-500/10 border-gray-500/30 text-gray-400'
-                        }`}>
-                          {cat.evaluationMode}
-                        </span>
-                      ) : null}
-
-                      {/* Acceptance threshold chip — §4.8A standard value chip */}
-                      {zeroTol && (
-                        <span className="px-2 py-0.5 rounded font-mono text-[10px] bg-gray-800/50 border border-gray-700/50 text-muted">
-                          Ac: 0  ·  zero tolerance
-                        </span>
-                      )}
-                      {!zeroTol && !pfNil && cat.evaluationMode && cat.evaluationMode !== '' && cat.threshold && (
-                        <span className="px-2 py-0.5 rounded font-mono text-[10px] bg-gray-800/50 border border-gray-700/50 text-muted">
-                          Ac ≤ {cat.threshold.ac}  ·  Re ≥ {cat.threshold.re}
-                        </span>
-                      )}
-                      {pfNil && (
-                        <span className="px-2 py-0.5 rounded font-mono text-[10px] bg-gray-800/50 border border-gray-700/50 text-muted">
-                          qualitative
-                        </span>
-                      )}
-                    </div>
-
-                    {/* RIGHT: count + verdict */}
-                    <div className="flex items-center gap-2 shrink-0">
-                      {/* Defect count */}
-                      <span className={`text-[11px] font-mono font-bold ${
-                        cat.totalCount === 0
-                          ? 'text-muted'
-                          : isFail
-                            ? 'text-rose-400'
-                            : 'text-primary'
-                      }`}>
-                        {cat.totalCount} found
-                      </span>
-
-                      {/* Category verdict badge — §4.8B */}
-                      {!isNA && cat.evaluationMode && cat.evaluationMode !== '' && (
-                        isFail ? (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-500/10 border border-rose-500/30 text-rose-400">
-                            FAIL
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-                            PASS
-                          </span>
-                        )
-                      )}
-                      {(isNA || !cat.evaluationMode) && (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-gray-500/10 border border-gray-500/30 text-gray-400">
-                          N/A
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Defect pills — only shown for non-zero counts */}
-                  {cat.defectItems.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-2 pl-1">
-                      {cat.defectItems.map((item) => (
-                        <div
-                          key={item.id}
-                          className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 border shadow-sm ${
-                            item.failing
-                              ? 'bg-rose-500/10 border-rose-500/30'
-                              : 'bg-canvas border-gray-700/50'
-                          }`}
-                        >
-                          <span className="font-mono text-[11px] text-primary">{item.name}</span>
-                          <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded border min-w-[1.5rem] text-center ${
-                            item.failing
-                              ? 'text-rose-400 bg-rose-500/15 border-rose-500/30'
-                              : 'text-muted bg-gray-800/50 border-gray-700/50'
-                          }`}>
-                            {item.count}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Zero-defect placeholder */}
-                  {cat.defectItems.length === 0 && (
-                    <div className="mt-1 pl-1">
-                      <span className="text-[10px] font-mono text-muted/40">none recorded</span>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-
-            {/* ── Unclassified defects — §4.9 amber ────────────────────────── */}
-            {unclassified.length > 0 && (
-              <div className="px-4 py-3 bg-amber-500/[0.04]">
-                <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
-                      Unclassified
-                    </span>
-                    {/* §4.8B amber warning badge */}
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/30 text-amber-400">
-                      NOT IN PROFILE
-                    </span>
-                  </div>
-                  <span className="text-[11px] font-mono text-amber-400/70">
-                    {unclassified.reduce((a, [, c]) => a + c, 0)} found
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-2 pl-1">
-                  {unclassified.map(([id, count]) => (
-                    <div
-                      key={id}
-                      className="inline-flex items-center gap-2 bg-canvas border border-amber-500/20 rounded-md px-3 py-1.5 shadow-sm"
-                    >
-                      <span className="font-mono text-[11px] text-amber-400/70">{id}</span>
-                      <span className="text-xs font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 min-w-[1.5rem] text-center">
-                        {count}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* ── Empty state ───────────────────────────────────────────────── */}
-            {totalClean === 0 && unclassified.length === 0 && (
-              <div className="px-4 py-5 text-sm text-muted font-sans text-center">
-                No defects recorded for this lot.
-              </div>
-            )}
-          </div>
-        </div>
+        <AqlCategoryAnalysisPanel
+          categoryAnalysis={categoryAnalysis}
+          unclassified={unclassified}
+          totalClean={totalClean}
+          sampleSize={sub.sampleSize}
+          displayProfileName={displayProfileName}
+          anyFail={anyFail}
+          noProfileLinked={noProfileLinked}
+          previewStatus={previewStatus}
+          previewErrorMessage={previewErrorMessage}
+        />
 
         {/* ── Amendment actions ──────────────────────────────────────────────── */}
         {/* Note: `amendmentStatus === 'APPROVED'` no longer blocks this block —
