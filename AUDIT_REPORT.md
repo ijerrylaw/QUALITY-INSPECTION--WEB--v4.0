@@ -254,3 +254,38 @@ with its full original context, reasoning, and verification trail.
     OAuth flow needed to reach these admin-only screens as a real user. No
     defect is suspected — tracking-only, pending Jerry's manual check.
 
+22. **`StepReviewSubmit.tsx`'s pre-submit "Category Breakdown" table silently
+    omits RECORD ONLY categories entirely** — discovered while building the
+    RECORD ONLY AQL Level (Defect Category Setup). `categoryVerdicts`
+    (`StepReviewSubmit.tsx:215-231`) is built by mapping over
+    `previewState.categoryResults`, the array `POST /api/verdict/preview`
+    returns from `evaluateAQLVerdict()`. That engine's true-exclusion skip
+    path (`aqlEvaluator.ts:242`, `if (!category.evaluationMode) continue;` —
+    exactly what RECORD ONLY relies on) means a RECORD ONLY category never
+    gets a `CategoryResult` pushed at all, so it's structurally absent from
+    `categoryResults`, not merely `passed: null` within it. Since the
+    breakdown table only renders `categoryVerdicts.map(...)`
+    (`StepReviewSubmit.tsx:404`), a RECORD ONLY category's recorded defect
+    counts from Step 3 (Defect Tabulation) never appear anywhere in Step 4's
+    per-category review, even though the operator did record them.
+
+    **Not a total data loss** — the raw counts still show in
+    `SubmissionSummary.tsx`'s defect list above the breakdown table, since
+    that component iterates every `defectDefinitions` entry directly rather
+    than joining against `categoryResults` (fixed as part of the RECORD ONLY
+    build's toggle-collapse commit). Just invisible in the category-level
+    table specifically.
+
+    **Contrast with `HistoryFeed.tsx`** (post-submit view): its
+    `buildCategoryAnalysis()` (`HistoryFeed.tsx:64-116`) iterates
+    `profile.aqlCategories` — ALL configured categories — and only uses
+    `serverResults` to fill in `passed`/`threshold` when present, defaulting
+    to `passed: null` otherwise. That's the pattern the new RECORD ONLY badge
+    (this build, `AqlCategoryAnalysisPanel.tsx`) relies on, and it correctly
+    shows RECORD ONLY categories. `StepReviewSubmit.tsx` uses a structurally
+    different, narrower pattern (source list = server results, not local
+    categories) that predates this build and was not in scope to change —
+    flagging here rather than silently deciding whether Step 4 should gain
+    the same category-driven join HistoryFeed.tsx uses, or a simpler
+    RECORD-ONLY-specific addendum row.
+
