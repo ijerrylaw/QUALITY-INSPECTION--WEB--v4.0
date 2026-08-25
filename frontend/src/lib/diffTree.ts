@@ -65,6 +65,50 @@ export const NON_SUBSTANTIVE_DIFF_FIELDS = new Set<string>([
   'gradingSnapshotProfileName',
 ]);
 
+/**
+ * Per-dimension keys inside `dimensionMins.<dimId>` that are internal
+ * computed flags rather than reviewer-meaningful values — `isGraded`/
+ * `isMin` mirror the dimension's grading config (identical on both sides of
+ * any single amendment, since config isn't what's being amended) and
+ * `fails` is a derived boolean restating what min/max/avg vs threshold
+ * already show. Confirmed via two real amendment records
+ * (A003Z6225001, A001A6237011): every graded dimension produced its own
+ * "<DIM> — Graded" (always true/true, never a real diff) and
+ * "<DIM> — Fails — Slot N" rows purely from this noise, not from anything
+ * a reviewer would call a substantive change. Stripped in `buildDiffTree`
+ * (see `stripDimensionMinsNoise`) rather than hidden in the render layer,
+ * so they're excluded from the diff tree itself — including its
+ * unchanged-field counts.
+ */
+const DIMENSION_STAT_NOISE_KEYS = new Set(['fails', 'isMin', 'isGraded']);
+
+/**
+ * Strips `DIMENSION_STAT_NOISE_KEYS` from every `dimId` entry of a
+ * `dimensionMins` value before it's diffed. Runs on both sides in
+ * `buildDiffTree`, ahead of the generic recursive diff, so the noise keys
+ * never produce diff nodes (changed, added, or unchanged) in the first
+ * place — the generic differ (`diffObject`/`diffValue`) stays domain-
+ * agnostic; only this one field gets the extra pass.
+ */
+function stripDimensionMinsNoise(value: unknown): unknown {
+  const parsed = normalize(value);
+  if (!isPlainObject(parsed)) return parsed;
+
+  const result: Record<string, unknown> = {};
+  for (const [dimId, stats] of Object.entries(parsed)) {
+    if (!isPlainObject(stats)) {
+      result[dimId] = stats;
+      continue;
+    }
+    const cleaned: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(stats)) {
+      if (!DIMENSION_STAT_NOISE_KEYS.has(k)) cleaned[k] = v;
+    }
+    result[dimId] = cleaned;
+  }
+  return result;
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -118,6 +162,42 @@ function diffValue(rawOriginal: unknown, rawProposed: unknown): DiffNode {
   return { status: equal ? 'unchanged' : 'changed', original, proposed };
 }
 
+/**
+ * Builds a full subtree for a value that exists on only one side (added or
+ * removed) — recurses into objects/arrays the same way diffValue/diffObject/
+ * diffArray do for a two-sided comparison, instead of stopping at a single
+ * flat leaf. Without this, a key present on only one side (e.g. a
+ * `dimensionMins.<dimId>` entry for a dimension the other side never
+ * recorded stats for) collapsed its ENTIRE value — every nested field at
+ * once — into one leaf node, which the render layer then had no choice but
+ * to dump as raw formatted JSON (AmendmentDiffView.tsx's `JsonViewer`
+ * fallback for container-valued leaves) instead of one row per field. Same
+ * one-sided status is stamped on every leaf/container in the subtree so the
+ * renderer's added/removed styling still applies throughout.
+ */
+function oneSidedNode(rawValue: unknown, side: 'added' | 'removed'): DiffNode {
+  const value = normalize(rawValue);
+  const sideKey = side === 'added' ? 'proposed' : 'original';
+
+  if (isPlainObject(value)) {
+    const children: Record<string, DiffNode> = {};
+    for (const [k, v] of Object.entries(value)) {
+      children[k] = oneSidedNode(v, side);
+    }
+    return { status: side, [sideKey]: value, children, isArray: false };
+  }
+
+  if (Array.isArray(value)) {
+    const children: Record<string, DiffNode> = {};
+    value.forEach((v, i) => {
+      children[String(i)] = oneSidedNode(v, side);
+    });
+    return { status: side, [sideKey]: value, children, isArray: true };
+  }
+
+  return { status: side, [sideKey]: value };
+}
+
 function diffObject(original: Record<string, unknown>, proposed: Record<string, unknown>): DiffNode {
   const keys = Array.from(new Set([...Object.keys(original), ...Object.keys(proposed)]));
   const children: Record<string, DiffNode> = {};
@@ -129,9 +209,9 @@ function diffObject(original: Record<string, unknown>, proposed: Record<string, 
 
     let child: DiffNode;
     if (inOriginal && !inProposed) {
-      child = { status: 'removed', original: normalize(original[key]) };
+      child = oneSidedNode(original[key], 'removed');
     } else if (!inOriginal && inProposed) {
-      child = { status: 'added', proposed: normalize(proposed[key]) };
+      child = oneSidedNode(proposed[key], 'added');
     } else {
       child = diffValue(original[key], proposed[key]);
     }
@@ -195,6 +275,13 @@ export function buildDiffTree(
   }
   for (const [k, v] of Object.entries(proposed)) {
     if (!excludeKeys.has(k)) filteredProposed[k] = v;
+  }
+
+  if ('dimensionMins' in filteredOriginal) {
+    filteredOriginal.dimensionMins = stripDimensionMinsNoise(filteredOriginal.dimensionMins);
+  }
+  if ('dimensionMins' in filteredProposed) {
+    filteredProposed.dimensionMins = stripDimensionMinsNoise(filteredProposed.dimensionMins);
   }
 
   return diffObject(filteredOriginal, filteredProposed);
