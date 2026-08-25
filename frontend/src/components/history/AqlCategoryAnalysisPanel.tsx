@@ -75,7 +75,7 @@
  * (emerald PASS, rose FAIL, gray N/A), §4.9 Amber for unclassified defects.
  */
 
-import { ShieldCheck } from 'lucide-react';
+import { ShieldCheck, Eye } from 'lucide-react';
 
 // ── Display-only helpers ─────────────────────────────────────────────────
 // Pass/fail DETERMINATION and threshold VALUES come from the server
@@ -92,6 +92,20 @@ function isZeroTolerance(aqlLevel: string): boolean {
 
 function isPassFail(aqlLevel: string): boolean {
   return /pass.?fail/i.test(aqlLevel);
+}
+
+/**
+ * RECORD ONLY categories are excluded from verdict computation entirely
+ * (evaluationMode: '', aqlEvaluator.ts's true-exclusion skip path) — they
+ * render `passed: null`, same as any other informational/not-yet-available
+ * category. Detected off `aqlLevel` text (same convention as
+ * isZeroTolerance/isPassFail above) rather than `evaluationMode === ''`
+ * alone, since an unconfigured category can also carry an empty
+ * evaluationMode (AQLCategory doc comment, ConfigContext.tsx) — RECORD ONLY
+ * needs its own distinct badge, not the generic "N/A" used for that case.
+ */
+function isRecordOnly(aqlLevel: string): boolean {
+  return /record.?only/i.test(aqlLevel);
 }
 
 export function snapBracket(n: number): number {
@@ -209,6 +223,7 @@ export function AqlCategoryAnalysisPanel({
           const isNA = cat.passed === null;
           const zeroTol = isZeroTolerance(cat.aqlLevel);
           const pf = isPassFail(cat.aqlLevel);
+          const recordOnly = isRecordOnly(cat.aqlLevel);
 
           return (
             <div
@@ -257,6 +272,12 @@ export function AqlCategoryAnalysisPanel({
                       qualitative
                     </span>
                   )}
+                  {recordOnly && (
+                    <span className="px-2 py-0.5 rounded font-mono text-[10px] bg-gray-800/50 border border-gray-700/50 text-muted inline-flex items-center gap-1">
+                      <Eye className="w-3 h-3" strokeWidth={2} />
+                      record only
+                    </span>
+                  )}
                 </div>
 
                 {/* RIGHT: count + verdict */}
@@ -284,7 +305,13 @@ export function AqlCategoryAnalysisPanel({
                       </span>
                     )
                   )}
-                  {(isNA || !cat.evaluationMode) && (
+                  {(isNA || !cat.evaluationMode) && recordOnly && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-gray-500/10 border border-gray-500/30 text-gray-400 inline-flex items-center gap-1">
+                      <Eye className="w-3 h-3" strokeWidth={2} />
+                      RECORD ONLY
+                    </span>
+                  )}
+                  {(isNA || !cat.evaluationMode) && !recordOnly && (
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-gray-500/10 border border-gray-500/30 text-gray-400">
                       N/A
                     </span>
