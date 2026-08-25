@@ -3,6 +3,10 @@ dist
 .env
 .DS_Store
 
+# Vitest browser-mode auto-captures a screenshot on any failing test
+__screenshots__/
+.vitest-attachments/
+
 # Real One Glove Group production data exports (monthly) — must never enter git history
 *.xlsx
 *.xls
