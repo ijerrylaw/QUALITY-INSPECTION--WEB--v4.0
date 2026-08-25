@@ -201,7 +201,7 @@ export function SubmissionSummary({ inspectionData, originalData }: SubmissionSu
   const isQualitativeCategory = (categoryId: string) =>
     (aqlCategories.find((c) => c.id === categoryId)?.aql ??
       aqlCategories.find((c) => c.id === categoryId)?.aqlLevel ??
-      '').toUpperCase() === 'PASS/FAIL/NIL';
+      '').toUpperCase() === 'PASS/FAIL';
 
   const currentDefects: Record<string, number> = inspectionData?.defects ?? {};
   const currentQualitative: Record<string, string> = inspectionData?.qualitative ?? {};

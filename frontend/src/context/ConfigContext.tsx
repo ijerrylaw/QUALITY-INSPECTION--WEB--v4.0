@@ -252,7 +252,7 @@ export type EvaluationMode = 'CUMULATIVE' | 'GRANULAR' | 'N/A' | '';
 
 /**
  * AQLCategory — a severity tier within an inspection profile.
- * aqlLevel values: '0.65' | '1.0' | '1.5' | '2.5' | '4.0' | '6.5' | 'AND' | 'PASS/FAIL/NIL'
+ * aqlLevel values: '0.65' | '1.0' | '1.5' | '2.5' | '4.0' | '6.5' | 'AND' | 'PASS/FAIL'
  */
 export interface AQLCategory {
   id: string;
@@ -501,7 +501,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
               { id: 'CRITICAL',  name: 'CRITICAL',  aqlLevel: '1.5',           evaluationMode: 'CUMULATIVE' },
               { id: 'MAJOR',     name: 'MAJOR',     aqlLevel: '2.5',           evaluationMode: 'CUMULATIVE' },
               { id: 'MINOR',     name: 'MINOR',     aqlLevel: '4.0',           evaluationMode: 'GRANULAR' },
-              { id: 'PACKAGING', name: 'PACKAGING', aqlLevel: 'PASS/FAIL/NIL', evaluationMode: 'N/A' },
+              { id: 'PACKAGING', name: 'PACKAGING', aqlLevel: 'PASS/FAIL', evaluationMode: 'N/A' },
             ],
             defectDefinitions: [
               { id: 'def_hole',     name: 'Hole',       categoryId: 'BARRIER' },

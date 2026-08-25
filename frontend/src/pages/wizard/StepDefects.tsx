@@ -16,7 +16,7 @@
  * Two interaction models driven by category aql value:
  *  1. Quantitative (aql: '0.65'|'1.0'|'1.5'|'2.5'|'4.0'|'6.5'|'AND'):
  *     Rapid-tap counter cards (-/count/+).
- *  2. Qualitative (aql: 'PASS/FAIL/NIL'):
+ *  2. Qualitative (aql: 'PASS/FAIL'):
  *     2-way toggle chips (PASS / FAIL).
  *
  * UI_DESIGN_SYSTEM.md compliance:
@@ -52,9 +52,9 @@ type QualitativeState = 'PASS' | 'FAIL';
 
 // Icon map for category icon names stored in QualityRules config
 
-/** Returns true when the category uses PASS/FAIL/NIL qualitative evaluation */
+/** Returns true when the category uses PASS/FAIL qualitative evaluation */
 const isQualitativeAql = (aql: string | undefined): boolean =>
-  (aql ?? '').toUpperCase() === 'PASS/FAIL/NIL';
+  (aql ?? '').toUpperCase() === 'PASS/FAIL';
 
 /**
  * N/A-mode state encoding per ISO2859_MATH_ENGINE.md §2: the backend engine

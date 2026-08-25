@@ -45,7 +45,7 @@ const HARDCODED_DEFAULT_PROFILE = {
     { id: 'MAJOR',     name: 'MAJOR',     aqlLevel: '2.5',           evaluationMode: 'CUMULATIVE' },
     { id: 'MINOR',     name: 'MINOR',     aqlLevel: '4.0',           evaluationMode: 'GRANULAR'   },
     // PACKAGING is qualitative; '' causes engine to skip it (informational only)
-    { id: 'PACKAGING', name: 'PACKAGING', aqlLevel: 'PASS/FAIL/NIL', evaluationMode: ''           },
+    { id: 'PACKAGING', name: 'PACKAGING', aqlLevel: 'PASS/FAIL',     evaluationMode: ''           },
   ],
   defectDefinitions: [
     // Engine matches defect defs to categories via currentClass === category.name || category.id

@@ -247,7 +247,7 @@ export function WizardPage() {
         const profile = getResolvedProfile(target.profileId);
         const qualitativeCategoryIds = new Set(
           (profile?.aqlCategories ?? [])
-            .filter((cat) => (cat.aql ?? cat.aqlLevel ?? '').toUpperCase() === 'PASS/FAIL/NIL')
+            .filter((cat) => (cat.aql ?? cat.aqlLevel ?? '').toUpperCase() === 'PASS/FAIL')
             .map((cat) => cat.id),
         );
         const qualitative: Record<string, 'PASS' | 'FAIL'> = {};

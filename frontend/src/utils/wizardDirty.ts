@@ -53,7 +53,7 @@ const AMEND_COMPARABLE_FIELDS = [
 
 function isQualitativeCategory(categoryId: string, aqlCategories: AQLCategory[]): boolean {
   const cat = aqlCategories.find((c) => c.id === categoryId);
-  return (cat?.aql ?? cat?.aqlLevel ?? '').toUpperCase() === 'PASS/FAIL/NIL';
+  return (cat?.aql ?? cat?.aqlLevel ?? '').toUpperCase() === 'PASS/FAIL';
 }
 
 export interface WizardDirtyInput {

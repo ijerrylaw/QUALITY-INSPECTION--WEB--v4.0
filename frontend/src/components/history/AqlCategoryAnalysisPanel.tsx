@@ -90,8 +90,8 @@ function isZeroTolerance(aqlLevel: string): boolean {
   return /and/i.test(aqlLevel) || /zero.?tolerance/i.test(aqlLevel) || /^0$/.test(aqlLevel.trim());
 }
 
-function isPassFailNil(aqlLevel: string): boolean {
-  return /pass.?fail/i.test(aqlLevel) || /nil/i.test(aqlLevel);
+function isPassFail(aqlLevel: string): boolean {
+  return /pass.?fail/i.test(aqlLevel);
 }
 
 export function snapBracket(n: number): number {
@@ -208,7 +208,7 @@ export function AqlCategoryAnalysisPanel({
           const isFail = cat.passed === false;
           const isNA = cat.passed === null;
           const zeroTol = isZeroTolerance(cat.aqlLevel);
-          const pfNil = isPassFailNil(cat.aqlLevel);
+          const pf = isPassFail(cat.aqlLevel);
 
           return (
             <div
@@ -247,12 +247,12 @@ export function AqlCategoryAnalysisPanel({
                       Ac: 0  ·  zero tolerance
                     </span>
                   )}
-                  {!zeroTol && !pfNil && cat.evaluationMode && cat.evaluationMode !== '' && cat.threshold && (
+                  {!zeroTol && !pf && cat.evaluationMode && cat.evaluationMode !== '' && cat.threshold && (
                     <span className="px-2 py-0.5 rounded font-mono text-[10px] bg-gray-800/50 border border-gray-700/50 text-muted">
                       Ac ≤ {cat.threshold.ac}  ·  Re ≥ {cat.threshold.re}
                     </span>
                   )}
-                  {pfNil && (
+                  {pf && (
                     <span className="px-2 py-0.5 rounded font-mono text-[10px] bg-gray-800/50 border border-gray-700/50 text-muted">
                       qualitative
                     </span>

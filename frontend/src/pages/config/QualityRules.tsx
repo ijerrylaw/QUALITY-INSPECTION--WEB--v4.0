@@ -38,7 +38,7 @@ interface QualityRulesProps {
 }
 
 // ISO 2859-1 AQL whitelist — ISO2859_MATH_ENGINE.md §1
-const ISO_WHITELIST = ['AND', '0.65', '1.0', '1.5', '2.5', '4.0', '6.5', 'PASS/FAIL/NIL'];
+const ISO_WHITELIST = ['AND', '0.65', '1.0', '1.5', '2.5', '4.0', '6.5', 'PASS/FAIL'];
 // Evaluation Modes — DATA_SCHEMAS_AND_TYPES.md §2
 const EVAL_MODES: string[] = ['CUMULATIVE', 'GRANULAR'];
 
@@ -59,7 +59,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
         { id: 'CRITICAL',  name: 'CRITICAL',  aql: '1.5',           evalMode: 'CUMULATIVE' },
         { id: 'MAJOR',     name: 'MAJOR',     aql: '2.5',           evalMode: 'CUMULATIVE' },
         { id: 'MINOR',     name: 'MINOR',     aql: '4.0',           evalMode: 'GRANULAR' },
-        { id: 'PACKAGING', name: 'PACKAGING', aql: 'PASS/FAIL/NIL', evalMode: 'N/A' },
+        { id: 'PACKAGING', name: 'PACKAGING', aql: 'PASS/FAIL', evalMode: 'N/A' },
       ],
       defectDefinitions: [
         { id: 'def_hole', name: 'Hole', categoryId: 'BARRIER' },
@@ -264,12 +264,12 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   const updateCategoryForm = (formSetter: any, field: string, value: string) => {
     formSetter((prev: any) => {
       const next = { ...prev, [field]: value };
-      // PASS/FAIL/NIL is qualitative (no numeric Ac/Re threshold applies) —
+      // PASS/FAIL is qualitative (no numeric Ac/Re threshold applies) —
       // N/A is the only valid mode. AND is zero-tolerance but still a
       // numeric count check (ISO2859_MATH_ENGINE.md §2, resolveVerdict.ts's
       // HARDCODED_DEFAULT_PROFILE both specify CUMULATIVE) — it must never
       // be forced to N/A here.
-      if (field === 'aql' && value === 'PASS/FAIL/NIL') {
+      if (field === 'aql' && value === 'PASS/FAIL') {
         next.evalMode = 'N/A';
       } else if (field === 'aql' && next.evalMode === 'N/A') {
         next.evalMode = 'CUMULATIVE';
@@ -630,7 +630,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                 {activeCategories.map((cat: any, index: number) => {
                   const isEditing = editingCategoryId === cat.id;
                   const targetAql = isEditing ? editCategoryForm.aql : cat.aql;
-                  const isAutoLocked = targetAql === 'PASS/FAIL/NIL';
+                  const isAutoLocked = targetAql === 'PASS/FAIL';
 
                   return (
                     <tr key={cat.id} className="hover:bg-surface-light transition-colors group border-b border-gray-700/50">
@@ -744,7 +744,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                 
                 {/* ── Inline Add Category Row ───────────────────────────────── */}
                 {isAddingCategory && (() => {
-                  const isAutoLocked = newCategoryForm.aql === 'PASS/FAIL/NIL';
+                  const isAutoLocked = newCategoryForm.aql === 'PASS/FAIL';
                   return (
                     <tr className="bg-surface-light border-b border-brand-secondary/30">
                       <td className="py-3 px-3">

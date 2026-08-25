@@ -196,7 +196,7 @@ export type EvaluationMode = 'CUMULATIVE' | 'GRANULAR' | 'N/A' | '';
 export interface AQLCategory {
   id: string;
   name: string;
-  aqlLevel: string;        // e.g. '0.65', '1.0', '1.5', '2.5', 'AND', 'PASS/FAIL/NIL'
+  aqlLevel: string;        // e.g. '0.65', '1.0', '1.5', '2.5', 'AND', 'PASS/FAIL'
   evaluationMode: EvaluationMode;
   // Optional UI-display fields (frontend-only, not persisted):
   iconName?: string;

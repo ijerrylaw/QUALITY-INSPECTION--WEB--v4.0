@@ -33,7 +33,7 @@ The evaluation function determines the final PASS/FAIL verdict by mapping record
   
   Fails if any item has state `=== 2`.
 
-* **Empty String `''` Mode:** The engine skips this category entirely. Used for informational-only rows (e.g., PACKAGING in pass/fail/nil mode where no numeric AQL applies).
+* **Empty String `''` Mode:** The engine skips this category entirely. Used for informational-only rows (e.g., PACKAGING in pass/fail mode where no numeric AQL applies).
 
 **Engine source files:**
 - Matrix + bracket snap: `backend/src/engine/iso2859-matrix.ts`
