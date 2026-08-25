@@ -33,11 +33,25 @@ import {
   Loader2,
   AlertTriangle,
   RefreshCw,
+  Eye,
 } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastProvider';
 import { useConfig, API_BASE_URL } from '../../context/ConfigContext';
-import type { AQLCategory } from '../../context/ConfigContext';
+import type { AQLCategory, DefectDefinition } from '../../context/ConfigContext';
 import { SubmissionSummary } from './SubmissionSummary';
+
+/**
+ * Returns true when the category is RECORD ONLY — excluded from verdict
+ * computation entirely via aqlEvaluator.ts's true-exclusion skip
+ * (`evaluationMode === ''`), so it never gets a CategoryResult pushed and is
+ * structurally absent from POST /api/verdict/preview's categoryResults
+ * (AUDIT_REPORT.md #22). Mirrors StepDefects.tsx's isRecordOnlyAql /
+ * AqlCategoryAnalysisPanel.tsx's isRecordOnly — same detection convention,
+ * kept as its own inline copy per this file's existing "display-only inline
+ * copy, kept in sync manually" pattern (see file header).
+ */
+const isRecordOnlyAql = (aql: string | undefined): boolean =>
+  (aql ?? '').toUpperCase() === 'RECORD ONLY';
 
 export interface StepReviewSubmitProps {
   inspectionData: Record<string, any>;
@@ -98,14 +112,19 @@ type VerdictPreviewState =
   | { status: 'error'; message: string }
   | { status: 'success'; verdict: 'PASSED' | 'FAILED'; categoryResults: VerdictCategoryResult[] };
 
-/** Per-category display row, derived from VerdictCategoryResult + local profile labels. */
+/**
+ * Per-category display row, derived from VerdictCategoryResult + local
+ * profile labels — OR, for RECORD ONLY categories (see isRecordOnlyAql
+ * above), synthesized entirely client-side since no VerdictCategoryResult
+ * exists for them at all.
+ */
 interface CategoryVerdictRow {
   categoryName: string;
   aql: string;
   evalMode: string;
   defectCount: number;
   thresholds: { ac: number; re: number; bracket: number } | null;
-  result: 'PASS' | 'FAIL';
+  result: 'PASS' | 'FAIL' | 'RECORD_ONLY';
   reason?: string;
 }
 
@@ -128,6 +147,7 @@ export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpd
   );
 
   const aqlCategories: AQLCategory[] = activeProfile?.aqlCategories ?? [];
+  const defectDefinitions: DefectDefinition[] = activeProfile?.defectDefinitions ?? [];
   const sampleSize: number = inspectionData?.sampleSize ?? 125;
   const defectsSignature = JSON.stringify(inspectionData?.defects ?? {});
 
@@ -212,22 +232,56 @@ export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpd
       ? previewState.categoryResults.reduce((sum, cr) => sum + cr.totalCount, 0)
       : null;
 
+  // Iterates the LOCAL profile's category order (not previewState.categoryResults'
+  // order) so a RECORD ONLY category — which never gets a VerdictCategoryResult
+  // at all, per aqlEvaluator.ts's true-exclusion skip — can be interleaved into
+  // its correct relative position instead of only ever appending after every
+  // graded category. Graded categories keep the exact same server-sourced
+  // fields as before; only their position in the array is now driven by the
+  // local profile instead of the server response's array order (the two have
+  // always matched in practice, since the server iterates the same profile).
   const categoryVerdicts: CategoryVerdictRow[] =
     previewState.status === 'success'
-      ? previewState.categoryResults.map((cr) => {
-          const localCat = aqlCategories.find((c) => c.id === cr.categoryId);
-          return {
-            categoryName: cr.categoryName,
-            aql: localCat?.aql ?? localCat?.aqlLevel ?? '—',
-            evalMode: cr.evaluationMode === 'N/A' ? 'QUALITATIVE' : cr.evaluationMode,
-            defectCount: cr.totalCount,
-            thresholds: { ac: cr.threshold.ac, re: cr.threshold.re, bracket: snapToDisplayBracket(sampleSize) },
-            result: cr.passed ? ('PASS' as const) : ('FAIL' as const),
-            reason: cr.passed
-              ? undefined
-              : cr.failingDefects.map((fd) => `${fd.defectName}: ${fd.count} > ac(${fd.threshold.ac})`).join('; '),
-          };
-        })
+      ? aqlCategories.reduce<CategoryVerdictRow[]>((rows, localCat) => {
+          const cr = previewState.categoryResults.find((r) => r.categoryId === localCat.id);
+          if (cr) {
+            rows.push({
+              categoryName: cr.categoryName,
+              aql: localCat.aql ?? localCat.aqlLevel ?? '—',
+              evalMode: cr.evaluationMode === 'N/A' ? 'QUALITATIVE' : cr.evaluationMode,
+              defectCount: cr.totalCount,
+              thresholds: { ac: cr.threshold.ac, re: cr.threshold.re, bracket: snapToDisplayBracket(sampleSize) },
+              result: cr.passed ? 'PASS' : 'FAIL',
+              reason: cr.passed
+                ? undefined
+                : cr.failingDefects.map((fd) => `${fd.defectName}: ${fd.count} > ac(${fd.threshold.ac})`).join('; '),
+            });
+            return rows;
+          }
+
+          // No VerdictCategoryResult for this category — either it's RECORD
+          // ONLY (expected, display it as a plain quantity) or genuinely
+          // unconfigured (no aqlLevel/evaluationMode set at all — skip it
+          // silently, same as before this fix).
+          const aqlText = localCat.aql ?? localCat.aqlLevel ?? '—';
+          if (isRecordOnlyAql(aqlText)) {
+            const defectCount = defectDefinitions
+              .filter((d) => d.categoryId === localCat.id)
+              .reduce((sum, d) => sum + (inspectionData?.defects?.[d.id] ?? 0), 0);
+            rows.push({
+              categoryName: localCat.name,
+              aql: aqlText,
+              // "NOT GRADED" rather than repeating "RECORD ONLY" a third time
+              // in this row — the AQL chip already reads "AQL RECORD ONLY"
+              // and the right-hand Eye badge already says "RECORD ONLY".
+              evalMode: 'NOT GRADED',
+              defectCount,
+              thresholds: null,
+              result: 'RECORD_ONLY',
+            });
+          }
+          return rows;
+        }, [])
       : [];
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -413,9 +467,16 @@ export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpd
                   </span>
                 )}
                 <span className="text-[10px] font-mono text-muted">Count: {cv.defectCount}</span>
-                <span className={`ml-auto text-xs font-mono font-bold ${cv.result === 'PASS' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {cv.result}
-                </span>
+                {cv.result === 'RECORD_ONLY' ? (
+                  <span className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-gray-500/10 border border-gray-500/30 text-gray-400 inline-flex items-center gap-1">
+                    <Eye className="w-3 h-3" strokeWidth={2} />
+                    RECORD ONLY
+                  </span>
+                ) : (
+                  <span className={`ml-auto text-xs font-mono font-bold ${cv.result === 'PASS' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {cv.result}
+                  </span>
+                )}
                 {cv.reason && (
                   <span className="text-[10px] text-rose-400/70 font-mono w-full pl-5">↳ {cv.reason}</span>
                 )}

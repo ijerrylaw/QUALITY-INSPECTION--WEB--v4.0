@@ -254,38 +254,50 @@ with its full original context, reasoning, and verification trail.
     OAuth flow needed to reach these admin-only screens as a real user. No
     defect is suspected — tracking-only, pending Jerry's manual check.
 
-22. **`StepReviewSubmit.tsx`'s pre-submit "Category Breakdown" table silently
-    omits RECORD ONLY categories entirely** — discovered while building the
-    RECORD ONLY AQL Level (Defect Category Setup). `categoryVerdicts`
-    (`StepReviewSubmit.tsx:215-231`) is built by mapping over
-    `previewState.categoryResults`, the array `POST /api/verdict/preview`
-    returns from `evaluateAQLVerdict()`. That engine's true-exclusion skip
-    path (`aqlEvaluator.ts:242`, `if (!category.evaluationMode) continue;` —
-    exactly what RECORD ONLY relies on) means a RECORD ONLY category never
-    gets a `CategoryResult` pushed at all, so it's structurally absent from
-    `categoryResults`, not merely `passed: null` within it. Since the
-    breakdown table only renders `categoryVerdicts.map(...)`
-    (`StepReviewSubmit.tsx:404`), a RECORD ONLY category's recorded defect
-    counts from Step 3 (Defect Tabulation) never appear anywhere in Step 4's
-    per-category review, even though the operator did record them.
+22. **RESOLVED 2026-08-25.** ~~`StepReviewSubmit.tsx`'s pre-submit "Category
+    Breakdown" table silently omits RECORD ONLY categories entirely~~ —
+    discovered while building the RECORD ONLY AQL Level (Defect Category
+    Setup). `categoryVerdicts` (`StepReviewSubmit.tsx:215-231`, pre-fix) was
+    built by mapping over `previewState.categoryResults`, the array
+    `POST /api/verdict/preview` returns from `evaluateAQLVerdict()`. That
+    engine's true-exclusion skip path (`aqlEvaluator.ts:242`,
+    `if (!category.evaluationMode) continue;` — exactly what RECORD ONLY
+    relies on) means a RECORD ONLY category never gets a `CategoryResult`
+    pushed at all, so it was structurally absent from `categoryResults`, not
+    merely `passed: null` within it — a RECORD ONLY category's recorded
+    defect counts from Step 3 (Defect Tabulation) never appeared anywhere in
+    Step 4's per-category review, even though the operator did record them.
 
-    **Not a total data loss** — the raw counts still show in
-    `SubmissionSummary.tsx`'s defect list above the breakdown table, since
-    that component iterates every `defectDefinitions` entry directly rather
-    than joining against `categoryResults` (fixed as part of the RECORD ONLY
-    build's toggle-collapse commit). Just invisible in the category-level
-    table specifically.
+    **Fix:** `categoryVerdicts` now iterates the LOCAL profile's
+    `aqlCategories` (not `previewState.categoryResults`'s own array order),
+    joining in each category's `VerdictCategoryResult` when the server
+    returned one, and synthesizing a client-computed row for any category
+    detected as RECORD ONLY (`isRecordOnlyAql()`, mirrors
+    `StepDefects.tsx`/`AqlCategoryAnalysisPanel.tsx`'s own copies of this
+    check) that has none — same pattern `HistoryFeed.tsx`'s
+    `buildCategoryAnalysis()` already used (see below), applied here for the
+    first time. The synthesized row's quantity is summed client-side from
+    `inspectionData.defects` against `defectDefinitions` filtered to that
+    category, since no server total exists for it. Rendered with the same
+    gray Eye-badge convention as `AqlCategoryAnalysisPanel.tsx` (commit
+    `acf7edc`) — no new visual pattern introduced. `totalDefects` (the
+    "Total Defects Recorded" / "Verdict Impact" KPI card) was checked and
+    confirmed unaffected: it's still summed directly from
+    `previewState.categoryResults` alone, so it already excluded RECORD ONLY
+    quantities before this fix and continues to — verified live via a
+    Vitest browser-mode regression test (see below), not just by inspection.
+    Display-only change — `resolveVerdict.ts`/`aqlEvaluator.ts` untouched;
+    RECORD ONLY categories remain fully excluded from the actual lot verdict.
 
-    **Contrast with `HistoryFeed.tsx`** (post-submit view): its
-    `buildCategoryAnalysis()` (`HistoryFeed.tsx:64-116`) iterates
-    `profile.aqlCategories` — ALL configured categories — and only uses
-    `serverResults` to fill in `passed`/`threshold` when present, defaulting
-    to `passed: null` otherwise. That's the pattern the new RECORD ONLY badge
-    (this build, `AqlCategoryAnalysisPanel.tsx`) relies on, and it correctly
-    shows RECORD ONLY categories. `StepReviewSubmit.tsx` uses a structurally
-    different, narrower pattern (source list = server results, not local
-    categories) that predates this build and was not in scope to change —
-    flagging here rather than silently deciding whether Step 4 should gain
-    the same category-driven join HistoryFeed.tsx uses, or a simpler
-    RECORD-ONLY-specific addendum row.
+    **Verified live** (real Chromium via Vitest browser mode — MSAL/PIN-login
+    blockers made an actual click-through infeasible, same limitation as the
+    RECORD ONLY build session): new permanent regression test
+    `frontend/src/pages/wizard/__tests__/StepReviewSubmit.recordOnly.test.tsx`
+    renders the real `StepReviewSubmit` component with a mocked profile
+    (one graded CUMULATIVE category + one RECORD ONLY category) and a mocked
+    `POST /api/verdict/preview` response that reproduces the engine's real
+    omission shape. Confirms: the RECORD ONLY category renders with its
+    correct quantity and the Eye badge, has no PASS/FAIL badge, and the KPI
+    total stays server-verdict-derived (doesn't double-count the RECORD ONLY
+    quantity). Both tests pass.
 
