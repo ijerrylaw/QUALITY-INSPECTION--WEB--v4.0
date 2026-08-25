@@ -28,6 +28,8 @@ import {
   ArrowUp,
   ArrowDown,
   AlertTriangle,
+  Ruler,
+  Eye,
 } from 'lucide-react';
 import { useConfig } from '../../context/ConfigContext';
 import { useToast } from '../../components/ui/ToastProvider';
@@ -38,9 +40,45 @@ interface QualityRulesProps {
 }
 
 // ISO 2859-1 AQL whitelist — ISO2859_MATH_ENGINE.md §1
-const ISO_WHITELIST = ['AND', '0.65', '1.0', '1.5', '2.5', '4.0', '6.5', 'PASS/FAIL'];
+const ISO_WHITELIST = ['AND', '0.65', '1.0', '1.5', '2.5', '4.0', '6.5', 'PASS/FAIL', 'RECORD ONLY'];
 // Evaluation Modes — DATA_SCHEMAS_AND_TYPES.md §2
 const EVAL_MODES: string[] = ['CUMULATIVE', 'GRANULAR'];
+
+/**
+ * Eval Mode auto-lock label for AQL Levels that force a non-editable Eval
+ * Mode — null means the category's Eval Mode is freely editable. Mirrors
+ * the dimension-level Graded/Record-only icon convention (Ruler/Eye,
+ * ProductConfigAccordion.tsx) in its wording, kept visually distinct from
+ * genuine 'N/A (Auto-Locked)' so a RECORD ONLY category never reads as a
+ * qualitative one at a glance.
+ */
+function getAutoLockLabel(aql: string): string | null {
+  if (aql === 'PASS/FAIL') return 'N/A (Auto-Locked)';
+  if (aql === 'RECORD ONLY') return 'RECORD ONLY (Locked)';
+  return null;
+}
+
+/**
+ * The actual evaluationMode value auto-lock writes for a given AQL Level —
+ * mirrors updateCategoryForm()'s write-side logic. RECORD ONLY writes ''
+ * (empty string), NOT 'N/A' — aqlEvaluator.ts's true-exclusion skip path
+ * (`if (!category.evaluationMode) continue;`) only triggers on '', so this
+ * is what actually excludes the category from verdict computation.
+ * PASS/FAIL still writes 'N/A', which is evaluated (qualitative pass/fail),
+ * not skipped. Returns null when the AQL Level doesn't auto-lock.
+ */
+function getAutoLockValue(aql: string): string | null {
+  if (aql === 'PASS/FAIL') return 'N/A';
+  if (aql === 'RECORD ONLY') return '';
+  return null;
+}
+
+/** Read-only Eval Mode display text — a saved RECORD ONLY category's evalMode is '', which would otherwise render as a blank cell. */
+function formatEvalMode(aql: string, evalMode: string): string {
+  if (evalMode) return evalMode;
+  if (aql === 'RECORD ONLY') return 'RECORD ONLY';
+  return evalMode;
+}
 
 
 
@@ -264,14 +302,18 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   const updateCategoryForm = (formSetter: any, field: string, value: string) => {
     formSetter((prev: any) => {
       const next = { ...prev, [field]: value };
-      // PASS/FAIL is qualitative (no numeric Ac/Re threshold applies) —
-      // N/A is the only valid mode. AND is zero-tolerance but still a
-      // numeric count check (ISO2859_MATH_ENGINE.md §2, resolveVerdict.ts's
+      // PASS/FAIL is qualitative (no numeric Ac/Re threshold applies) — N/A
+      // is the only valid mode, and is still evaluated (aqlEvaluator.ts's
+      // N/A branch). RECORD ONLY excludes the category from verdict
+      // computation entirely, via evaluationMode: '' (see getAutoLockValue).
+      // AND is zero-tolerance but still a numeric count check
+      // (ISO2859_MATH_ENGINE.md §2, resolveVerdict.ts's
       // HARDCODED_DEFAULT_PROFILE both specify CUMULATIVE) — it must never
-      // be forced to N/A here.
-      if (field === 'aql' && value === 'PASS/FAIL') {
-        next.evalMode = 'N/A';
-      } else if (field === 'aql' && next.evalMode === 'N/A') {
+      // be auto-locked here.
+      const lockValue = field === 'aql' ? getAutoLockValue(value) : null;
+      if (lockValue !== null) {
+        next.evalMode = lockValue;
+      } else if (field === 'aql' && (next.evalMode === 'N/A' || next.evalMode === '')) {
         next.evalMode = 'CUMULATIVE';
       }
       return next;
@@ -630,7 +672,8 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                 {activeCategories.map((cat: any, index: number) => {
                   const isEditing = editingCategoryId === cat.id;
                   const targetAql = isEditing ? editCategoryForm.aql : cat.aql;
-                  const isAutoLocked = targetAql === 'PASS/FAIL';
+                  const autoLockLabel = getAutoLockLabel(targetAql);
+                  const isAutoLocked = autoLockLabel != null;
 
                   return (
                     <tr key={cat.id} className="hover:bg-surface-light transition-colors group border-b border-gray-700/50">
@@ -685,7 +728,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                             }`}
                           >
                             {isAutoLocked ? (
-                              <option value="N/A">N/A (Auto-Locked)</option>
+                              <option value={editCategoryForm.evalMode}>{autoLockLabel}</option>
                             ) : (
                               EVAL_MODES.map(mode => (
                                 <option key={mode} value={mode}>{mode}</option>
@@ -693,7 +736,14 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                             )}
                           </select>
                         ) : (
-                          <span className="font-mono text-sm text-primary">{cat.evalMode}</span>
+                          <span className="font-mono text-sm text-primary inline-flex items-center gap-1.5">
+                            {cat.evalMode === '' ? (
+                              <Eye className="w-3.5 h-3.5 text-gray-500 shrink-0" strokeWidth={2} />
+                            ) : (
+                              <Ruler className="w-3.5 h-3.5 text-muted shrink-0" strokeWidth={2} />
+                            )}
+                            {formatEvalMode(cat.aql, cat.evalMode)}
+                          </span>
                         )}
                       </td>
 
@@ -744,7 +794,8 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                 
                 {/* ── Inline Add Category Row ───────────────────────────────── */}
                 {isAddingCategory && (() => {
-                  const isAutoLocked = newCategoryForm.aql === 'PASS/FAIL';
+                  const autoLockLabel = getAutoLockLabel(newCategoryForm.aql);
+                  const isAutoLocked = autoLockLabel != null;
                   return (
                     <tr className="bg-surface-light border-b border-brand-secondary/30">
                       <td className="py-3 px-3">
@@ -787,7 +838,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                           }`}
                         >
                           {isAutoLocked ? (
-                            <option value="N/A">N/A (Auto-Locked)</option>
+                            <option value={newCategoryForm.evalMode}>{autoLockLabel}</option>
                           ) : (
                             EVAL_MODES.map(mode => (
                               <option key={mode} value={mode}>{mode}</option>
@@ -948,12 +999,13 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 font-mono text-[10px] uppercase px-2 py-0.5 rounded">AQL: {cat.aql}</span>
-                      <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider ${
-                        cat.evalMode === 'N/A' 
-                          ? 'bg-gray-500/10 border-gray-500/30 text-gray-400' 
+                      <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1 ${
+                        cat.evalMode === 'N/A' || cat.evalMode === ''
+                          ? 'bg-gray-500/10 border-gray-500/30 text-gray-400'
                           : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
                       }`}>
-                        {cat.evalMode}
+                        {cat.evalMode === '' && <Eye className="w-3 h-3" strokeWidth={2} />}
+                        {formatEvalMode(cat.aql, cat.evalMode)}
                       </span>
                     </div>
                   </div>

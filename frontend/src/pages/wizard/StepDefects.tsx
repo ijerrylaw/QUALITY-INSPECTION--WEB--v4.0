@@ -34,6 +34,7 @@ import {
   Info,
   Minus,
   Plus,
+  Eye,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useConfig } from '../../context/ConfigContext';
@@ -55,6 +56,10 @@ type QualitativeState = 'PASS' | 'FAIL';
 /** Returns true when the category uses PASS/FAIL qualitative evaluation */
 const isQualitativeAql = (aql: string | undefined): boolean =>
   (aql ?? '').toUpperCase() === 'PASS/FAIL';
+
+/** Returns true when the category is RECORD ONLY — counted here, excluded from AQL verdict computation. */
+const isRecordOnlyAql = (aql: string | undefined): boolean =>
+  (aql ?? '').toUpperCase() === 'RECORD ONLY';
 
 /**
  * N/A-mode state encoding per ISO2859_MATH_ENGINE.md §2: the backend engine
@@ -207,6 +212,7 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
 
   const activeCategoryAql = activeCategory?.aql ?? activeCategory?.aqlLevel ?? '—';
   const isQual = isQualitativeAql(activeCategoryAql);
+  const isRecordOnly = isRecordOnlyAql(activeCategoryAql);
 
   return (
     <form id="wizard-step-form" onSubmit={handleSubmit} className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -297,7 +303,7 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
                     AQL: {activeCategoryAql}
                   </span>
                   {/* Evaluation Mode Badge */}
-                  {activeCategory && !isQual && (
+                  {activeCategory && !isQual && !isRecordOnly && (
                     <span className="px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 border-emerald-500/30 text-emerald-400">
                       {activeCategory.evalMode ?? activeCategory.evaluationMode ?? 'CUMULATIVE'}
                     </span>
@@ -305,6 +311,12 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
                   {activeCategory && isQual && (
                     <span className="px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider bg-gray-500/10 border-gray-500/30 text-gray-400">
                       N/A
+                    </span>
+                  )}
+                  {activeCategory && isRecordOnly && (
+                    <span className="px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider bg-gray-500/10 border-gray-500/30 text-gray-400 flex items-center gap-1">
+                      <Eye className="w-3 h-3" strokeWidth={2} />
+                      RECORD ONLY
                     </span>
                   )}
                 </div>

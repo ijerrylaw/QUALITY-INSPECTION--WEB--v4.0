@@ -252,7 +252,7 @@ export type EvaluationMode = 'CUMULATIVE' | 'GRANULAR' | 'N/A' | '';
 
 /**
  * AQLCategory — a severity tier within an inspection profile.
- * aqlLevel values: '0.65' | '1.0' | '1.5' | '2.5' | '4.0' | '6.5' | 'AND' | 'PASS/FAIL'
+ * aqlLevel values: '0.65' | '1.0' | '1.5' | '2.5' | '4.0' | '6.5' | 'AND' | 'PASS/FAIL' | 'RECORD ONLY'
  */
 export interface AQLCategory {
   id: string;

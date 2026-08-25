@@ -33,7 +33,7 @@ The evaluation function determines the final PASS/FAIL verdict by mapping record
   
   Fails if any item has state `=== 2`.
 
-* **Empty String `''` Mode:** The engine skips this category entirely. Used for informational-only rows (e.g., PACKAGING in pass/fail mode where no numeric AQL applies).
+* **Empty String `''` Mode:** The engine skips this category entirely — captured defect counts never affect the verdict. This is what a **RECORD ONLY** AQL Level category writes as its `evaluationMode` (Configuration Control > Quality Rules auto-locks it, mirroring the dimension-level Graded/Record-only pattern — see §5). Distinct from N/A mode above: a PASS/FAIL category is still evaluated (qualitative pass/fail per defect); only RECORD ONLY truly opts a category out of verdict computation.
 
 **Engine source files:**
 - Matrix + bracket snap: `backend/src/engine/iso2859-matrix.ts`
