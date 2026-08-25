@@ -7,24 +7,50 @@
  *
  *  GET    /api/pin-users              List all PIN users (active + inactive).
  *  POST   /api/pin-users              Create a new PIN user.
- *  PATCH  /api/pin-users/:id/deactivate  Deactivate a PIN user (frees the PIN for reuse).
+ *  PATCH  /api/pin-users/:id/deactivate  Deactivate a PIN user.
+ *  PATCH  /api/pin-users/:id/reset-pin   Issue a new temp PIN, sets
+ *        `mustChangePin: true` — the ADMIN/MANAGER-facing counterpart to a
+ *        worker's own POST /api/auth/pin-change below. Used when a worker
+ *        forgets their PIN and requests a reset in person; no self-service
+ *        reset trigger exists in-app by design.
  *  DELETE /api/pin-users/:id          Hard-delete a PIN user — only allowed when
  *        the user has zero Submission/AmendmentLog history (409 otherwise,
  *        pointing the caller at Deactivate instead).
  *
- *  All four above require Group A or B (requireGroup('A', 'B')) — matches
+ *  All five above require Group A or B (requireGroup('A', 'B')) — matches
  *  Jerry's rule that department managers (Group B) typically manage their own
  *  staff; Group C (including Supervisors) cannot reach this screen at all.
  *
  * Also exports:
  *  - pinAuthRouter (mounted at /api/auth):
- *      - POST /pin-login   deliberately ungated since it IS the login step;
- *        no role exists yet to check.
+ *      - GET  /pin-directory  ungated, pre-authentication account picker for
+ *        the kiosk login screen (LoginPage.tsx) — identity-first login now
+ *        requires the worker to select their own account before entering a
+ *        PIN, rather than a PIN alone resolving identity via a scan-all
+ *        match. Deliberately NOT `toPublicPinUser()`/the Group A/B roster
+ *        shape — explicitly `select`-scoped to `{ id, name, employeeId }`
+ *        only, since this is reachable with no auth at all.
+ *      - POST /pin-login   deliberately ungated since it IS the login step.
+ *        Identity-scoped: takes `{ userId, pin }` (the account chosen via
+ *        /pin-directory) and verifies `pin` against ONLY that one active
+ *        row's hash — no more scan-all-active-rows matching. This is *why*
+ *        PIN uniqueness across staff no longer matters (see `active` field's
+ *        doc comment on `PinUser`, schema.prisma) — two workers sharing a
+ *        PIN is unambiguous once identity is chosen first, so this route
+ *        (and every PIN-setting route below) neither checks nor reports PIN
+ *        collisions.
  *      - POST /pin-change  self-service PIN change (Staff PIN Access task,
- *        AUDIT_REPORT.md). Also ungated — identity is established by
- *        verifying `currentPin` against every active row (same scan
- *        `/pin-login` already does), never by trusting a client-passed
- *        userId. Available to any PIN-logged-in user, not just Group A/B.
+ *        AUDIT_REPORT.md; also what the forced first-login `SetPinPage`
+ *        reuses). Takes `{ userId, currentPin, newPin }` — identity-scoped
+ *        the same way `/pin-login` now is (verifies `currentPin` against
+ *        only the named user's own row), rather than a scan-all match on
+ *        `currentPin` alone. That scan-all approach predates this file's
+ *        identity-first redesign and, left as-is, would have become a real
+ *        ambiguity/misattribution risk the moment PIN uniqueness was
+ *        dropped (two active users could share a `currentPin`, and a bare
+ *        scan has no way to know which one is actually mid-login). Clears
+ *        `mustChangePin` on success. Available to any PIN-logged-in user,
+ *        not just Group A/B.
  *
  * pinHash/pinSalt are never included in any response.
  */
@@ -54,7 +80,7 @@ function isPinEligibleRole(value: unknown): value is PinEligibleRole {
   return typeof value === 'string' && (PIN_ELIGIBLE_ROLES as readonly string[]).includes(value);
 }
 
-function toPublicPinUser(u: { id: string; name: string; employeeId: string; jobTitle: string; role: string; active: boolean; createdAt: Date; updatedAt: Date }) {
+function toPublicPinUser(u: { id: string; name: string; employeeId: string; jobTitle: string; role: string; active: boolean; mustChangePin: boolean; createdAt: Date; updatedAt: Date }) {
   return {
     id: u.id,
     name: u.name,
@@ -62,6 +88,7 @@ function toPublicPinUser(u: { id: string; name: string; employeeId: string; jobT
     jobTitle: u.jobTitle,
     role: u.role,
     active: u.active,
+    mustChangePin: u.mustChangePin,
     createdAt: u.createdAt,
     updatedAt: u.updatedAt,
   };
@@ -112,22 +139,15 @@ pinUsersRouter.post('/', requireGroup('A', 'B'), async (req: Request, res: Respo
 
     // employeeId uniqueness — pre-check for a friendly error; the DB's own
     // @unique constraint (schema.prisma) is the atomic backstop against a
-    // race between this check and the insert below. Unlike PIN uniqueness
-    // (below), this is checked across ALL rows, not just active ones —
-    // employeeId is a permanent real-world identity key, not a reusable
-    // credential like a PIN.
+    // race between this check and the insert below. employeeId is a
+    // permanent real-world identity key, checked across ALL rows, not just
+    // active ones. PIN itself is deliberately NOT checked for uniqueness —
+    // see the file header's POST /pin-login doc comment for why a shared
+    // PIN across staff is harmless (and reporting a collision would leak
+    // "a valid PIN exists somewhere" pre-selection-of-identity).
     const existingEmployeeId = await prisma.pinUser.findFirst({ where: { employeeId } });
     if (existingEmployeeId) {
       res.status(409).json({ error: 'This Employee ID is already in use.' });
-      return;
-    }
-
-    // PIN uniqueness is only enforced among active rows — deactivating a
-    // person frees their PIN for reuse.
-    const activeUsers = await prisma.pinUser.findMany({ where: { active: true } });
-    const collision = activeUsers.some((u) => verifyPin(body.pin as string, u.pinHash, u.pinSalt));
-    if (collision) {
-      res.status(409).json({ error: 'This PIN is already in use by an active user.' });
       return;
     }
 
@@ -171,6 +191,42 @@ pinUsersRouter.patch('/:id/deactivate', requireGroup('A', 'B'), async (req: Requ
   } catch (error) {
     console.error('[PATCH /api/pin-users/:id/deactivate] Error:', error);
     res.status(500).json({ error: 'Failed to deactivate PIN user' });
+  }
+});
+
+// PATCH /api/pin-users/:id/reset-pin — ADMIN/MANAGER-issued temp PIN. Worker
+// requests a reset in person (no self-service reset trigger exists in-app,
+// by design — only Group A/B can issue a new temp PIN); this replaces
+// pinHash/pinSalt with the admin-entered PIN and sets mustChangePin: true,
+// so the worker is forced through SetPinPage.tsx on their next login before
+// this temp PIN can become their actual working PIN. No uniqueness check —
+// see the file header's POST /pin-login doc comment.
+pinUsersRouter.patch('/:id/reset-pin', requireGroup('A', 'B'), async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params['id']);
+    const body = req.body as { pin?: string };
+
+    if (!isValidSixDigitPin(body.pin)) {
+      res.status(400).json({ error: 'pin must be exactly 6 digits' });
+      return;
+    }
+
+    const existing = await prisma.pinUser.findUnique({ where: { id } });
+    if (!existing) {
+      res.status(404).json({ error: 'PIN user not found' });
+      return;
+    }
+
+    const { pinHash, pinSalt } = hashPin(body.pin as string);
+    const updated = await prisma.pinUser.update({
+      where: { id },
+      data: { pinHash, pinSalt, mustChangePin: true },
+    });
+
+    res.json(toPublicPinUser(updated));
+  } catch (error) {
+    console.error('[PATCH /api/pin-users/:id/reset-pin] Error:', error);
+    res.status(500).json({ error: 'Failed to reset PIN' });
   }
 });
 
@@ -262,39 +318,79 @@ pinUsersRouter.delete('/:id', requireGroup('A', 'B'), async (req: Request, res: 
 // ── /api/auth (public — this IS the login step) ─────────────────────────────
 export const pinAuthRouter = Router();
 
-// POST /api/auth/pin-login
+// GET /api/auth/pin-directory — ungated, pre-authentication account picker
+// for the kiosk login screen's identity-first redesign (LoginPage.tsx). Only
+// name + employeeId, active accounts only — explicitly `select`-scoped
+// (never toPublicPinUser(), which is a superset) so pinHash/pinSalt/
+// jobTitle/role can never leak here even by future accident.
+pinAuthRouter.get('/pin-directory', async (_req: Request, res: Response) => {
+  try {
+    const pinUsers = await prisma.pinUser.findMany({
+      where: { active: true },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, employeeId: true },
+    });
+    res.json({ pinUsers });
+  } catch (error) {
+    console.error('[GET /api/auth/pin-directory] Error:', error);
+    res.status(500).json({ error: 'Failed to retrieve PIN directory' });
+  }
+});
+
+// POST /api/auth/pin-login — identity-first: the client selects an account
+// via GET /pin-directory first, then submits { userId, pin }. Verified
+// against ONLY that one active row's hash — no more scan-all-active-rows
+// matching (see file header). `active: true` is part of the lookup itself
+// (not a post-hoc check) so a deactivated account can't log in even with a
+// correct old PIN.
 pinAuthRouter.post('/pin-login', async (req: Request, res: Response) => {
   try {
-    const body = req.body as { pin?: string };
-    if (!isValidSixDigitPin(body.pin)) {
+    const body = req.body as { userId?: string; pin?: string };
+    const userId = typeof body.userId === 'string' ? body.userId : '';
+
+    if (!userId || !isValidSixDigitPin(body.pin)) {
       res.status(401).json({ error: 'Invalid PIN' });
       return;
     }
 
-    const activeUsers = await prisma.pinUser.findMany({ where: { active: true } });
-    const match = activeUsers.find((u) => verifyPin(body.pin as string, u.pinHash, u.pinSalt));
-
-    if (!match) {
+    const match = await prisma.pinUser.findFirst({ where: { id: userId, active: true } });
+    if (!match || !verifyPin(body.pin as string, match.pinHash, match.pinSalt)) {
       res.status(401).json({ error: 'Invalid PIN' });
       return;
     }
 
-    res.json({ id: match.id, name: match.name, jobTitle: match.jobTitle, role: match.role });
+    res.json({
+      id: match.id,
+      name: match.name,
+      jobTitle: match.jobTitle,
+      role: match.role,
+      mustChangePin: match.mustChangePin,
+    });
   } catch (error) {
     console.error('[POST /api/auth/pin-login] Error:', error);
     res.status(500).json({ error: 'Failed to process PIN login' });
   }
 });
 
-// POST /api/auth/pin-change — self-service PIN change, ungated. Identity is
-// established purely by finding which active PinUser's pinHash the submitted
-// currentPin verifies against (same scan pin-login already does) — no userId
-// is ever accepted from the client.
+// POST /api/auth/pin-change — self-service PIN change (also what the forced
+// first-login SetPinPage reuses). Identity-scoped the same way /pin-login
+// now is: { userId, currentPin, newPin }, verified against only the named
+// user's own row. Deliberately NOT a scan-all-active-rows match on
+// currentPin alone anymore — that predates this file's identity-first
+// redesign, and since PIN uniqueness is no longer enforced (see file
+// header), a bare scan could no longer reliably tell which of several
+// same-PIN active users is actually mid-change. Both callers already know
+// their own userId (the just-completed login response, or the already-
+// authenticated session), so this is no less "self-service" than before —
+// currentPin is still the real proof-of-identity factor, just checked
+// against the right row instead of all of them. No uniqueness check on
+// newPin — see file header. Clears mustChangePin on success.
 pinAuthRouter.post('/pin-change', async (req: Request, res: Response) => {
   try {
-    const body = req.body as { currentPin?: string; newPin?: string };
+    const body = req.body as { userId?: string; currentPin?: string; newPin?: string };
+    const userId = typeof body.userId === 'string' ? body.userId : '';
 
-    if (!isValidSixDigitPin(body.currentPin)) {
+    if (!userId || !isValidSixDigitPin(body.currentPin)) {
       res.status(401).json({ error: 'Current PIN is incorrect.' });
       return;
     }
@@ -303,27 +399,16 @@ pinAuthRouter.post('/pin-change', async (req: Request, res: Response) => {
       return;
     }
 
-    const activeUsers = await prisma.pinUser.findMany({ where: { active: true } });
-    const self = activeUsers.find((u) => verifyPin(body.currentPin as string, u.pinHash, u.pinSalt));
-    if (!self) {
+    const self = await prisma.pinUser.findFirst({ where: { id: userId, active: true } });
+    if (!self || !verifyPin(body.currentPin as string, self.pinHash, self.pinSalt)) {
       res.status(401).json({ error: 'Current PIN is incorrect.' });
-      return;
-    }
-
-    // Uniqueness among active rows, excluding the resolved user's own row —
-    // same rule POST /api/pin-users enforces at creation time.
-    const collision = activeUsers.some(
-      (u) => u.id !== self.id && verifyPin(body.newPin as string, u.pinHash, u.pinSalt)
-    );
-    if (collision) {
-      res.status(409).json({ error: 'This PIN is already in use by an active user.' });
       return;
     }
 
     const { pinHash, pinSalt } = hashPin(body.newPin as string);
     const updated = await prisma.pinUser.update({
       where: { id: self.id },
-      data: { pinHash, pinSalt },
+      data: { pinHash, pinSalt, mustChangePin: false },
     });
 
     res.json(toPublicPinUser(updated));

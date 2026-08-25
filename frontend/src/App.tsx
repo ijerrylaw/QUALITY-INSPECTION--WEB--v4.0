@@ -11,6 +11,7 @@ import { LoginPage } from './pages/LoginPage';
 import { PendingAccessPage } from './pages/PendingAccessPage';
 import { RevokedAccessPage } from './pages/RevokedAccessPage';
 import { BootstrapAdminPage } from './pages/BootstrapAdminPage';
+import { SetPinPage } from './pages/SetPinPage';
 import { WizardPage } from './pages/WizardPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { ApprovalsPage } from './pages/ApprovalsPage';
@@ -51,6 +52,16 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   // admin claim instead of falling into PendingAccessPage's dead end.
   if (user?.loginMethod === 'M365' && user.status === 'bootstrap-eligible') {
     return <BootstrapAdminPage />;
+  }
+
+  // PIN was set by an ADMIN/MANAGER (creation or a reset) and hasn't been
+  // replaced by the worker's own choice yet — block every route, same
+  // "full-screen gate before the app shell" pattern as the three cases
+  // above, until SetPinPage's self-service change clears this (see
+  // AuthContext.tsx's User.mustChangePin doc comment). Applies uniformly to
+  // all four Group C PIN-eligible roles — the gate is on loginMethod, not role.
+  if (user?.loginMethod === 'PIN' && user.mustChangePin) {
+    return <SetPinPage />;
   }
 
   return (

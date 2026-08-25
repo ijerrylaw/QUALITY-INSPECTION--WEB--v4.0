@@ -251,9 +251,24 @@ model PinUser {
   /// Per-record random salt used to compute pinHash
   pinSalt   String
 
-  /// Deactivated users are kept (not deleted) for audit history; their PIN
-  /// becomes free for reuse since uniqueness is only enforced among active rows.
+  /// Deactivated users are kept (not deleted) for audit history. PIN
+  /// uniqueness is deliberately NOT enforced (login is identity-first —
+  /// the worker picks their own account from a directory before entering a
+  /// PIN, so two staff sharing a PIN is unambiguous and harmless — see
+  /// pinUsers.routes.ts's POST /api/auth/pin-login).
   active    Boolean  @default(true)
+
+  /// True until the PIN holder sets their own PIN via POST /api/auth/pin-change
+  /// (which clears it) — forces frontend/src/pages/SetPinPage.tsx before any
+  /// other route, so an ADMIN/MANAGER-chosen PIN (at creation, via
+  /// POST /api/pin-users, or at reset, via PATCH /:id/reset-pin — both of
+  /// which set this back to true) is only ever a one-time temp credential,
+  /// never the account's actual working PIN. Defaults true so brand-new
+  /// accounts are covered with no extra route code — EXISTING rows as of
+  /// this field's introduction were explicitly backfilled to false
+  /// (scripts/backfill-must-change-pin.ts) so current staff are never
+  /// retroactively forced through the gate for a PIN they already own.
+  mustChangePin Boolean @default(true)
 
   // --- Back-relations (required by Prisma for the named relations below) ---
   // These make PIN-originated work attributable to a real person. Never

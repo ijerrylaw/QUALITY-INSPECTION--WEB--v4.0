@@ -2,9 +2,15 @@
  * @file PinChangeModal.tsx
  * @description Self-service PIN change for PIN-logged-in staff (AUDIT_REPORT.md,
  * Staff PIN Access task). Reachable from Sidebar.tsx's footer for any
- * user.loginMethod === 'PIN' session — no Group A/B auth required, since the
- * correct current PIN itself is the identity check (verified server-side
- * against POST /api/auth/pin-change, never a client-passed userId).
+ * user.loginMethod === 'PIN' session — no Group A/B auth required. Identity
+ * is scoped to the already-authenticated session's own `user.id`, and the
+ * correct current PIN is still required as the proof-of-identity factor
+ * (verified server-side against POST /api/auth/pin-change's `{ userId,
+ * currentPin, newPin }`). Scoped by userId rather than a bare currentPin
+ * scan-all — PIN uniqueness across staff is no longer enforced (identity-
+ * first login, LoginPage.tsx), so a scan with no userId could no longer
+ * reliably tell which of potentially several same-PIN active users this
+ * session actually belongs to.
  *
  * Modal shell follows QualityRules.tsx's delete-confirmation modal pattern
  * (bg-black/70 backdrop, bg-canvas card) sized for a form instead.
@@ -13,6 +19,7 @@ import { useState } from 'react';
 import { KeyRound, X } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { API_BASE_URL } from '../../context/ConfigContext';
+import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../ui/ToastProvider';
 
 interface PinChangeModalProps {
@@ -47,6 +54,7 @@ function PinField({
 }
 
 export function PinChangeModal({ open, onClose }: PinChangeModalProps) {
+  const { user } = useAuth();
   const { addToast } = useToast();
   const [currentPin, setCurrentPin] = useState('');
   const [newPin, setNewPin] = useState('');
@@ -81,12 +89,17 @@ export function PinChangeModal({ open, onClose }: PinChangeModalProps) {
       return;
     }
 
+    if (!user) {
+      setFormError('No active session — please log in again.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/auth/pin-change`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentPin, newPin }),
+        body: JSON.stringify({ userId: user.id, currentPin, newPin }),
       });
 
       const data = await res.json().catch(() => ({}));

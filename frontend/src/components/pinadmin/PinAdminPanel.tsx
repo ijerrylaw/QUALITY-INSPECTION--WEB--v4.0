@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { UserPlus, UserX, RefreshCw, Eye, EyeOff, Trash2, AlertTriangle, X, Check, Pencil } from 'lucide-react';
+import { UserPlus, UserX, RefreshCw, Eye, EyeOff, Trash2, AlertTriangle, X, Check, Pencil, KeyRound } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { API_BASE_URL } from '../../context/ConfigContext';
@@ -15,6 +15,8 @@ interface PinUser {
   jobTitle: string;
   role: UserRole;
   active: boolean;
+  /** True until this person sets their own PIN — see PinUser.mustChangePin (schema.prisma). */
+  mustChangePin: boolean;
   createdAt: string;
 }
 
@@ -62,6 +64,13 @@ export function PinAdminPanel() {
   const [editEmployeeIdValue, setEditEmployeeIdValue] = useState('');
   const [editEmployeeIdError, setEditEmployeeIdError] = useState<string | null>(null);
   const [savingEmployeeId, setSavingEmployeeId] = useState(false);
+
+  // Reset PIN state — Group A/B issues a new temp PIN in person, per the
+  // "no self-service reset trigger in-app" design (PATCH /:id/reset-pin).
+  const [resetPinForUser, setResetPinForUser] = useState<PinUser | null>(null);
+  const [resetPinValue, setResetPinValue] = useState('');
+  const [resetPinError, setResetPinError] = useState<string | null>(null);
+  const [resettingPin, setResettingPin] = useState(false);
 
   const fetchPinUsers = () => {
     setLoading(true);
@@ -127,6 +136,47 @@ export function PinAdminPanel() {
       fetchPinUsers();
     } catch (err) {
       console.error('[PinAdminPanel] Deactivate failed:', err);
+    }
+  };
+
+  const startResetPin = (pu: PinUser) => {
+    setResetPinForUser(pu);
+    setResetPinValue('');
+    setResetPinError(null);
+  };
+
+  const cancelResetPin = () => {
+    setResetPinForUser(null);
+    setResetPinValue('');
+    setResetPinError(null);
+  };
+
+  const handleResetPin = async () => {
+    if (!resetPinForUser) return;
+    if (!/^\d{6}$/.test(resetPinValue)) {
+      setResetPinError('PIN must be exactly 6 digits.');
+      return;
+    }
+
+    setResettingPin(true);
+    setResetPinError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/pin-users/${resetPinForUser.id}/reset-pin`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...authHeader(user) },
+        body: JSON.stringify({ pin: resetPinValue }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Server error: ${res.status}`);
+      }
+      setResetPinForUser(null);
+      setResetPinValue('');
+      fetchPinUsers();
+    } catch (err) {
+      setResetPinError(err instanceof Error ? err.message : 'Failed to reset PIN.');
+    } finally {
+      setResettingPin(false);
     }
   };
 
@@ -254,9 +304,10 @@ export function PinAdminPanel() {
           <div className="space-y-2">
             <label className="text-xs font-semibold uppercase tracking-wider text-muted">6-Digit PIN</label>
             <input
-              type="text"
+              type="password"
               inputMode="numeric"
               maxLength={6}
+              autoComplete="new-password"
               required
               value={pin}
               onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
@@ -373,12 +424,26 @@ export function PinAdminPanel() {
                   <td className="px-6 py-3 text-muted">{pu.jobTitle}</td>
                   <td className="px-6 py-3 text-muted text-xs">{ROLE_LABELS[pu.role] ?? pu.role}</td>
                   <td className="px-6 py-3">
-                    <Badge variant={pu.active ? 'success' : 'danger'}>
-                      {pu.active ? 'Active' : 'Deactivated'}
-                    </Badge>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <Badge variant={pu.active ? 'success' : 'danger'}>
+                        {pu.active ? 'Active' : 'Deactivated'}
+                      </Badge>
+                      {pu.active && pu.mustChangePin && (
+                        <Badge variant="warning">Temp PIN</Badge>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-3 text-right">
                     <div className="inline-flex items-center gap-2">
+                      {pu.active && (
+                        <Button
+                          variant="secondary"
+                          className="px-3 h-8 inline-flex items-center gap-1.5"
+                          onClick={() => startResetPin(pu)}
+                        >
+                          <KeyRound className="w-3.5 h-3.5" /> Reset PIN
+                        </Button>
+                      )}
                       {pu.active && (
                         <Button
                           variant="danger"
@@ -406,6 +471,65 @@ export function PinAdminPanel() {
           </table>
         </div>
       </div>
+
+      {/* ── Reset PIN Modal — admin issues a new temp PIN in person; on save
+           the account's mustChangePin flips back to true, forcing the
+           worker through SetPinPage.tsx before this temp PIN can become
+           their actual working PIN. Same delete-confirmation modal shell
+           as below, sized for a form instead. ── */}
+      {resetPinForUser && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-canvas border border-gray-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
+            <div className="flex items-start gap-4 p-4 border-b border-gray-800">
+              <div className="w-12 h-12 rounded-full bg-brand-primary/10 flex items-center justify-center shrink-0">
+                <KeyRound className="w-6 h-6 text-brand-secondary" strokeWidth={2} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold uppercase tracking-wide text-primary mb-1">
+                  Reset PIN
+                </h3>
+                <p className="text-sm text-muted">
+                  Enter a new temporary PIN for{' '}
+                  <span className="font-bold text-white">{resetPinForUser.name}</span>.
+                  They'll be required to set their own PIN on next login.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 space-y-2">
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted">New Temporary PIN</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={6}
+                autoComplete="new-password"
+                autoFocus
+                value={resetPinValue}
+                onChange={(e) => setResetPinValue(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleResetPin();
+                }}
+                className="w-full bg-canvas border border-gray-700 text-sm font-mono text-primary rounded-lg px-4 py-2.5 focus:border-brand-primary outline-none"
+                placeholder="000000"
+              />
+              {resetPinError && <p className="text-xs text-danger">{resetPinError}</p>}
+            </div>
+
+            <div className="p-4 bg-surface flex items-center justify-end gap-3">
+              <button
+                onClick={cancelResetPin}
+                className="h-10 px-4 rounded-lg bg-canvas border border-gray-700 text-muted hover:text-white font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none"
+              >
+                <X className="w-4 h-4" strokeWidth={2} />
+                <span>Cancel</span>
+              </button>
+              <Button onClick={handleResetPin} disabled={resettingPin}>
+                {resettingPin ? 'Resetting...' : 'Reset PIN'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Delete Confirmation Modal — matches QualityRules.tsx's delete-profile
            modal pattern (bg-black/70 backdrop, bg-canvas card, rose AlertTriangle

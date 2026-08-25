@@ -72,14 +72,28 @@ export interface User {
   loginMethod: 'M365' | 'PIN';
   /** Always 'active' for PIN logins — see LoginStatus's doc comment. */
   status: LoginStatus;
+  /**
+   * True only for a PIN login whose PIN was set by an ADMIN/MANAGER (account
+   * creation or a `PATCH /:id/reset-pin`), not yet replaced by the worker's
+   * own choice. Always `false` for M365 — this status model has no meaning
+   * there. App.tsx's ProtectedRoute is the single place this is enforced:
+   * `loginMethod === 'PIN' && mustChangePin` renders SetPinPage.tsx before
+   * the app shell, forcing a self-service PIN change (POST /api/auth/pin-
+   * change, which clears this) before any other route is reachable — the
+   * whole point being that an ADMIN/MANAGER never knows a PIN holder's
+   * actual *working* PIN, only ever a one-time temp one.
+   */
+  mustChangePin: boolean;
 }
 
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   loginWithM365: () => Promise<User>;
-  loginWithPIN: (pin: string) => Promise<void>;
+  loginWithPIN: (userId: string, pin: string) => Promise<void>;
   claimBootstrapAdmin: () => Promise<void>;
+  /** Clears `user.mustChangePin` client-side after SetPinPage.tsx's POST /api/auth/pin-change succeeds server-side — same "trust the just-completed server response" pattern as claimBootstrapAdmin below, not a separate re-fetch. */
+  completePinChange: () => void;
   logout: () => void;
 }
 
@@ -150,6 +164,7 @@ async function resolveM365User(account: AccountInfo): Promise<User> {
     facilityId: 'GLOBAL',
     loginMethod: 'M365',
     status,
+    mustChangePin: false,
   };
 }
 
@@ -221,18 +236,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Real PIN login — verified server-side against backend/src/routes/pinUsers.routes.ts's
   // POST /api/auth/pin-login (PinUser table), not a client-side hardcoded check.
-  const loginWithPIN = useCallback(async (pin: string) => {
+  // Identity-first: `userId` comes from the account the worker selected via
+  // LoginPage.tsx's searchable directory (GET /api/auth/pin-directory)
+  // BEFORE entering a PIN — the backend verifies `pin` against only that one
+  // row, never a scan-all match, so this call fails if either the id is
+  // wrong or the PIN is wrong for that specific account.
+  const loginWithPIN = useCallback(async (userId: string, pin: string) => {
     const res = await fetch(`${API_BASE_URL}/api/auth/pin-login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin }),
+      body: JSON.stringify({ userId, pin }),
     });
 
     if (!res.ok) {
       throw new Error('Invalid PIN');
     }
 
-    const identity = (await res.json()) as { id: string; name: string; jobTitle: string; role: UserRole };
+    const identity = (await res.json()) as { id: string; name: string; jobTitle: string; role: UserRole; mustChangePin: boolean };
 
     setUser({
       id: identity.id,
@@ -243,7 +263,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       facilityId: 'KLANG_PLANT',
       loginMethod: 'PIN',
       status: 'active',
+      mustChangePin: identity.mustChangePin,
     });
+  }, []);
+
+  // Called by SetPinPage.tsx once its POST /api/auth/pin-change call has
+  // already succeeded server-side (which is what actually clears
+  // mustChangePin in the DB) — this just mirrors that into client state so
+  // App.tsx's ProtectedRoute gate re-evaluates and lets the user through.
+  const completePinChange = useCallback(() => {
+    setUser((prev) => (prev ? { ...prev, mustChangePin: false } : prev));
   }, []);
 
   const logout = useCallback(() => {
@@ -264,6 +293,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loginWithM365,
         loginWithPIN,
         claimBootstrapAdmin,
+        completePinChange,
         logout,
       }}
     >
