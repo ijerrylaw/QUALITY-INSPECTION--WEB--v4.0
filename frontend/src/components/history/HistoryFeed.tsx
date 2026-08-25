@@ -10,8 +10,7 @@
  * - §5.3  Inline Informational Alert: amber border-l-4 for no-profile warning.
  */
 
-import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Search, Filter, Download, ChevronDown, ChevronRight,
@@ -176,6 +175,19 @@ const COLUMN_WIDTHS = ['4%', '13%', '14%', '10%', '11%', '14%', '10%', '6%', '8%
  */
 const TABLE_MIN_WIDTH_PX = 1100;
 
+/**
+ * Cap on the expanded detail panel's own content height, independent of the
+ * table — a heavily-failed record (~25 defects across 6 AQL categories) must
+ * not be able to make one row's expansion push the rest of the table so far
+ * down that scanning other rows becomes impractical. ~420px comfortably fits
+ * a header plus 2-3 category blocks before the panel's own scrollbar kicks
+ * in; deliberately a fixed pixel value, same reasoning as
+ * TABLE_MIN_WIDTH_PX — never derived from content. Governs HEIGHT only; the
+ * panel's WIDTH is fixed regardless (it's a `<td colSpan>` inside a
+ * `table-fixed` table — see the note above the table's render).
+ */
+const DETAIL_MAX_HEIGHT_PX = 420;
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function parseDefects(raw: Record<string, number> | string | undefined): Record<string, number> {
@@ -297,75 +309,38 @@ function Th({ children, isDivider = false }: { children: React.ReactNode; isDivi
   );
 }
 
-// ── Content-area bounds tracker ─────────────────────────────────────────────
-// Tracks `ref`'s element in viewport coordinates — used to size the
-// fixed-position detail panel below to the table's own content area rather
-// than the full window, so it doesn't overlap the sidebar. Three distinct
-// triggers are watched, because no single one covers every way this can
-// change:
-//   - the element's OWN size changing (its own ResizeObserver) — e.g. a
-//     narrower viewport shrinking the max-w-7xl content column itself;
-//   - the sidebar's SIZE changing (ResizeObserver on <aside>, best-effort:
-//     collapsing it from w-64 to w-20 changes <main>'s available width,
-//     which re-centers this mx-auto element's LEFT offset via a pure
-//     position shift with no size change of its own — the one case the
-//     first observer can't catch);
-//   - a plain window resize, as a blunt fallback for anything else.
-// `useLayoutEffect` (not `useEffect`) so the first measurement is ready
-// before paint — the panel below stays hidden until bounds are known,
-// specifically to avoid a one-frame flash at the wrong position/width.
-function useContentAreaBounds(ref: React.RefObject<HTMLElement | null>) {
-  const [bounds, setBounds] = useState<{ left: number; width: number } | null>(null);
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-
-    const measure = () => {
-      const r = el.getBoundingClientRect();
-      setBounds({ left: r.left, width: r.width });
-    };
-    measure();
-
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    const aside = document.querySelector('aside');
-    if (aside) ro.observe(aside);
-    window.addEventListener('resize', measure);
-
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', measure);
-    };
-  }, [ref]);
-
-  return bounds;
-}
-
 // ── Defect Breakdown Panel ────────────────────────────────────────────────────
-// Renders via a portal to document.body, `position: fixed` to the viewport
-// bottom, sized to `bounds` (the table's content area — see
-// useContentAreaBounds above) rather than nested inside the table/page DOM.
-// This is deliberate, not incidental: the panel used to be a <td colSpan>
-// inside the table, and its own max-content width fed the table's width
-// calculation, which is what caused the original clipping bug (see the
-// MASTER-DETAIL note above the table's render). A portal makes it
-// structurally impossible for this panel to ever again influence anything
-// about the table's layout, regardless of how wide its content gets.
+// A plain `<td colSpan={COLUMN_WIDTHS.length}>` inside the table again —
+// back to the original inline-under-the-clicked-row placement, deliberately.
+//
+// History: this WAS a <td colSpan> originally, and its own max-content
+// width (every AQL chip/badge laid out on one unwrapped line) fed the
+// table's width calculation under the default auto-layout algorithm,
+// dragging the whole table wider than the viewport — the original bug.
+// Round 2 fixed the width leak by moving this panel below the whole row
+// list (out of the table) AND independently switching the table itself to
+// `table-fixed` with explicit percentage COLUMN_WIDTHS (see the note above
+// the table's render) — under fixed layout, cell CONTENT cannot influence
+// column width AT ALL, full stop, regardless of where that content lives.
+// Round 3 pinned the panel to the viewport bottom instead, to fix a
+// separate usability complaint (too far from the clicked row on a long
+// list) — but that in turn wasn't a pleasant experience either.
+//
+// So: back inline, but table-fixed — established as the width-safety net in
+// round 2 and never removed since — is what makes that safe THIS time,
+// where it wasn't safe the first time (that was default auto-layout). The
+// content-independent-width guarantee this relies on is part of the CSS
+// spec for table-layout:fixed (CSS2.1 §17.5.2.1), not a heuristic — see
+// history.widthRegression.test.tsx for the automated guard, which measures
+// this directly in a real browser and also proves it against a
+// deliberately-reverted (auto-layout) control case.
 
 function DefectBreakdownPanel({
   sub,
   onAmend,
-  onClose,
-  bounds,
-  onHeightChange,
 }: {
   sub: Submission;
   onAmend: (id: string) => void;
-  onClose: () => void;
-  bounds: { left: number; width: number };
-  /** Reports the panel's own rendered height so the caller can pad the scrollable page content below it — see the spacer in the main render. */
-  onHeightChange: (height: number) => void;
 }) {
   const { getResolvedProfile } = useConfig();
 
@@ -481,67 +456,19 @@ function DefectBreakdownPanel({
   const previewStatus = hasSnapshot ? 'snapshot' : previewState.status;
   const previewErrorMessage = previewState.status === 'error' ? previewState.message : undefined;
 
-  // Reports this panel's actual rendered height (post-layout, not an
-  // estimate) to the caller, which pads the scrollable page content below
-  // by that amount so the fixed panel never permanently hides the table's
-  // last rows. Measured synchronously via getBoundingClientRect() the
-  // moment this effect runs — NOT solely from the ResizeObserver's own
-  // callback, which is async and (like all rendering-pipeline callbacks —
-  // rAF included) can be deferred indefinitely while the tab is
-  // backgrounded/hidden, which would otherwise leave the padding stuck at 0
-  // for however long that lasts. The observer is still attached, for
-  // legitimate CONTENT changes after the initial mount (e.g. more
-  // categories arriving once the live /api/verdict/preview fetch resolves).
-  // Cleans up to 0 on unmount (panel closed) so the padding doesn't linger.
-  const panelRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const el = panelRef.current;
-    if (!el) return;
-    onHeightChange(el.getBoundingClientRect().height);
-    const ro = new ResizeObserver((entries) => onHeightChange(entries[0].contentRect.height));
-    ro.observe(el);
-    return () => {
-      ro.disconnect();
-      onHeightChange(0);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  return createPortal(
-    <div
-      ref={panelRef}
-      style={{ left: bounds.left, width: bounds.width }}
-      className="fixed bottom-0 z-40 flex flex-col max-h-[70vh] bg-surface border border-gray-800 border-b-0 rounded-t-lg shadow-2xl"
-    >
-
-      {/* Panel header — names the record this detail belongs to (the panel
-          no longer sits directly beneath its own row), and NOT part of the
-          scrollable area below, so it stays visible however tall the
-          content gets. */}
-      <div className="shrink-0 flex items-center justify-between gap-3 flex-wrap px-4 py-3 border-b border-gray-800 bg-canvas/50 rounded-t-lg">
-        <div className="flex items-center gap-3 flex-wrap min-w-0">
-          <span className="text-xs font-bold uppercase tracking-wider text-muted">
-            Record Detail
-          </span>
-          <span className="text-sm font-mono font-bold text-primary">
-            {sub.batchNumber || sub.id}
-          </span>
-          <span className="text-xs font-mono text-muted">{sub.productCode}</span>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="w-7 h-7 rounded-md flex items-center justify-center text-muted hover:bg-gray-800 hover:text-primary transition-colors outline-none shrink-0"
-          aria-label="Close record detail"
-        >
-          <X className="w-4 h-4" strokeWidth={2} />
-        </button>
-      </div>
-
-      {/* Scrollable content — internally capped at max-h-[70vh] (on the
-          panel above) rather than growing without bound, since a heavily-
-          failed record can carry ~25 defect chips across 6 AQL categories. */}
-      <div className="px-4 py-4 space-y-3 overflow-y-auto">
+  return (
+    <td colSpan={COLUMN_WIDTHS.length} className="p-0 border-b border-gray-700/50 bg-canvas shadow-inner">
+      {/* Scrollable content — capped at DETAIL_MAX_HEIGHT_PX (fixed, never
+          content-derived — see that constant's comment) so a heavily-
+          failed record's ~25 defect chips across 6 AQL categories scrolls
+          internally instead of pushing the rest of the table an arbitrary
+          distance down the page. This governs HEIGHT only; WIDTH comes
+          entirely from the table's own table-fixed + COLUMN_WIDTHS (this
+          <td>'s colSpan spans them, it doesn't negotiate its own width),
+          so no amount of content here can widen the table — see the note
+          above DefectBreakdownPanel and the automated regression test
+          (history.widthRegression.test.tsx) that checks this directly. */}
+      <div className="px-3 py-4 space-y-3 overflow-y-auto" style={{ maxHeight: `${DETAIL_MAX_HEIGHT_PX}px` }}>
 
         {/* ── §5.3 Info/Cyan alert — legacy row, no frozen snapshot ──────────── */}
         {/* AUDIT_REPORT.md #18: predates gradingSnapshot, deliberately not
@@ -634,8 +561,7 @@ function DefectBreakdownPanel({
           </div>
         )}
       </div>
-    </div>,
-    document.body,
+    </td>
   );
 }
 
@@ -710,17 +636,6 @@ export function HistoryFeed() {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
-  // Actual rendered height of the open detail panel (via ResizeObserver in
-  // DefectBreakdownPanel, not an estimate) — used to pad the bottom of this
-  // component's own content so the fixed panel never permanently covers the
-  // table's last rows or the Load More button.
-  const [panelHeight, setPanelHeight] = useState(0);
-  // Root of this component's own render tree. Its bounds (after HistoryPage's
-  // max-w-7xl/mx-auto/p-8 and the sidebar's width already apply) ARE the
-  // table's content area — what the fixed detail panel below sizes itself
-  // to, so it lines up with the table instead of the raw viewport.
-  const contentAreaRef = useRef<HTMLDivElement>(null);
-  const contentAreaBounds = useContentAreaBounds(contentAreaRef);
 
   // Debounce the search box so it doesn't fire a fetch on every keystroke.
   useEffect(() => {
@@ -842,16 +757,6 @@ export function HistoryFeed() {
     [submissions],
   );
 
-  // The record whose detail panel renders below the table. Resolved from the
-  // live list rather than stored as its own copy, so a refresh (focus,
-  // filter change, Load More) always shows current data — and so a selected
-  // row that disappears from the results simply closes the panel instead of
-  // leaving a stale one open.
-  const selectedSubmission = useMemo(
-    () => sortedSubmissions.find((s) => s.id === expandedRowId) ?? null,
-    [sortedSubmissions, expandedRowId],
-  );
-
   const handleExportCsv = async () => {
     setIsExporting(true);
     try {
@@ -897,7 +802,7 @@ export function HistoryFeed() {
   };
 
   return (
-    <div className="space-y-4" ref={contentAreaRef}>
+    <div className="space-y-4">
 
       {/* ── §4.3 Data Table Toolbar ────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mb-4">
@@ -1049,31 +954,41 @@ export function HistoryFeed() {
       </div>
 
       {/* ── §4.2 High-Density Data Table ─────────────────────────────────────
-          MASTER-DETAIL: the expanded record's detail panel renders via a
-          portal, `position: fixed` to the viewport bottom (see
-          DefectBreakdownPanel below) — not below this table, and not
-          inside it either.
-
-          It used to be a <td colSpan={10}> inside this table, and three
-          separate attempts to fix its "clipping" failed because none of
-          them addressed the real cause. Measured, not theorised: a cell's
-          max-content width feeds the table's own width calculation, and
-          the detail panel's max-content width — every AQL chip and badge
-          laid out on ONE unwrapped line — is far wider than the viewport.
-          It dragged the whole table out to that width, so the rightmost
-          columns and the panel's own right-aligned content (the profile
-          name, AMEND RECORD) sat off-screen past the horizontal scroll.
-          That is also why it looked fine at 3840x2400 and broken at
-          1920x1080: at 3840 the container was simply wide enough to fit
-          the blown-out width. Nothing was ever being clipped.
-
-          Two independent guards now, either of which alone is sufficient:
-            1. The detail panel is no longer inside the table at all, so it
-               cannot contribute to any column's width.
-            2. `table-fixed` — under fixed layout, cell CONTENT never
-               influences column widths (they come from COLUMN_WIDTHS and
-               the table's own width), so no future cell can widen the
-               table either. */}
+          INLINE DETAIL, back to the original interaction model: clicking a
+          row's chevron expands its detail directly beneath it (a <tr> with
+          a <td colSpan={COLUMN_WIDTHS.length}>), pushing subsequent rows
+          down. This went through three rounds to get back to:
+            1. ORIGINAL BUG: this table used default (auto) table-layout.
+               A colSpan cell's max-content width — every AQL chip/badge on
+               one unwrapped line — fed the table's own width calculation,
+               dragging the whole table wider than the viewport. Reproduced
+               on a 1920x1080 screen and not 3840x2400 with the identical
+               record, because at 3840 the container was simply wide enough
+               to fit the blown-out width — nothing was ever being clipped.
+            2. FIX: switched to `table-fixed` with explicit percentage
+               COLUMN_WIDTHS (below). Under fixed layout, cell CONTENT
+               cannot influence column width AT ALL — not a heuristic, part
+               of the CSS2.1 §17.5.2.1 spec for table-layout:fixed. Also
+               moved the detail panel out of the table (belt-and-braces,
+               two independent guards) to fix the bug immediately, since
+               verifying table-fixed alone was sufficient took another
+               round.
+            3. UX: "out of the table" meant below the WHOLE row list, too
+               far from the clicked row on a long table (round 2 relocated
+               it below; round 3 tried pinning it to the viewport bottom
+               instead) — neither was a pleasant experience. Restored here
+               to inline, relying on table-fixed (established since step 2,
+               never removed) as the sole width guard this time — which is
+               what makes inline safe now when it wasn't step 1, where
+               table-layout was still auto.
+          Guarded going forward by history.widthRegression.test.tsx, which
+          renders this real component with worst-case data (25 defects, 6
+          categories) in an actual browser (Vitest browser mode / Playwright
+          — jsdom has no layout engine, so a jsdom test could not have
+          caught this class of bug at all) and asserts the table's rendered
+          width is unchanged whether the detail row is open or closed — and
+          proves that assertion is meaningful by first showing it correctly
+          FAILS against a deliberately-reverted (auto-layout) control case. */}
       <div className="bg-surface border border-gray-800 rounded-lg overflow-x-auto shadow-sm scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
         <table className="w-full table-fixed text-left" style={{ minWidth: `${TABLE_MIN_WIDTH_PX}px` }}>
           <colgroup>
@@ -1111,44 +1026,31 @@ export function HistoryFeed() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={10} className="py-8 text-center text-muted font-mono animate-pulse uppercase tracking-wider text-sm">
+                <td colSpan={COLUMN_WIDTHS.length} className="py-8 text-center text-muted font-mono animate-pulse uppercase tracking-wider text-sm">
                   Loading inspection records...
                 </td>
               </tr>
             ) : sortedSubmissions.length > 0 ? (
-              sortedSubmissions.map((sub) => {
+              sortedSubmissions.flatMap((sub) => {
                 const dateStr = (sub.productionDate || '').split('T')[0];
                 const timeStr =
                   (sub.samplingTime || '').split('T')[1]?.substring(0, 5) ||
                   sub.samplingTime ||
                   '—';
                 const totalDefects = sumDefects(sub.defects);
-                const isSelected = expandedRowId === sub.id;
+                const isExpanded = expandedRowId === sub.id;
 
-                return (
+                const dataRow = (
                   <tr
                     key={`${sub.id}-row`}
                     onClick={() => handleRowClick(sub.id)}
-                    className={`hover:bg-white/5 transition-colors cursor-pointer group ${isSelected ? 'bg-brand-primary/[0.07]' : ''}`}
+                    className={`hover:bg-white/5 transition-colors cursor-pointer group ${isExpanded ? 'bg-brand-primary/[0.07]' : ''}`}
                   >
-                    {/* Expand chevron — the accent bar here is the same
-                        pattern Sidebar.tsx uses for its own active nav item
-                        (`absolute left-0 ... w-1 bg-brand-secondary
-                        rounded-r-full`), reused so "this row's detail is
-                        the one open below" reads as the same kind of
-                        signal elsewhere in the app already teaches. Needed
-                        now that the detail panel is a fixed panel at the
-                        bottom of the viewport rather than physically
-                        attached under its row — without this, on a long
-                        scrolled list there'd be no way to tell which row
-                        the open panel belongs to. */}
-                    <td className="relative py-3 px-2 border-b border-gray-700/50 text-center">
-                      {isSelected && (
-                        <span className="absolute left-0 top-2 bottom-2 w-1 bg-brand-secondary rounded-r-full" />
-                      )}
+                    {/* Expand chevron */}
+                    <td className="py-3 px-2 border-b border-gray-700/50 text-center">
                       <span className="text-muted group-hover:text-primary transition-colors inline-flex items-center justify-center">
-                        {isSelected
-                          ? <ChevronDown className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
+                        {isExpanded
+                          ? <ChevronDown className="w-4 h-4" strokeWidth={2} />
                           : <ChevronRight className="w-4 h-4" strokeWidth={2} />}
                       </span>
                     </td>
@@ -1190,7 +1092,7 @@ export function HistoryFeed() {
                               {totalDefects} defect{totalDefects !== 1 ? 's' : ''}
                             </span>
                             <span className="text-[9px] font-sans text-muted/50 group-hover/hint:text-primary/70 transition-colors">
-                              {isSelected ? '▲ hide' : '▼ detail'}
+                              {isExpanded ? '▲ hide' : '▼ detail'}
                             </span>
                           </div>
                         )}
@@ -1231,10 +1133,19 @@ export function HistoryFeed() {
                     </td>
                   </tr>
                 );
+
+                if (!isExpanded) return [dataRow];
+
+                return [
+                  dataRow,
+                  <tr key={`${sub.id}-panel`}>
+                    <DefectBreakdownPanel sub={sub} onAmend={handleAmend} />
+                  </tr>,
+                ];
               })
             ) : (
               <tr>
-                <td colSpan={10} className="py-8 text-center text-muted text-sm font-sans">
+                <td colSpan={COLUMN_WIDTHS.length} className="py-8 text-center text-muted text-sm font-sans">
                   {searchTerm || activeFilterCount > 0
                     ? 'No records match your search/filters.'
                     : 'No inspection records found.'}
@@ -1253,37 +1164,6 @@ export function HistoryFeed() {
         </div>
       )}
 
-      {/* Spacer reserving room for the fixed detail panel below, sized to
-          its ACTUAL rendered height (reported live via ResizeObserver, not
-          guessed) — otherwise the panel would permanently cover the last
-          row(s)/Load More button whenever it's open. Lives at the end of
-          this component's own content, which is what <main>'s scrollbar
-          actually measures, so it correctly extends how far the page
-          scrolls rather than trying to pad a container this file doesn't
-          own. */}
-      {selectedSubmission && <div style={{ height: panelHeight }} aria-hidden />}
-
-      {/* ── Detail panel for the selected record ─────────────────────────────
-          Rendered via a portal, `position: fixed` to the viewport bottom —
-          NOT a descendant of the table, and not even a DOM descendant of
-          this div despite appearing here in JSX (portals render into
-          document.body). Both are deliberate: this is what structurally
-          guarantees the panel's content can never again influence the
-          table's width (the original bug, three fix attempts back), and
-          `position: fixed` is what keeps it in view without scrolling on a
-          long list (the usability problem this round fixes) — sized to
-          `contentAreaBounds` so it lines up with the table instead of the
-          full window and doesn't overlap the sidebar. */}
-      {selectedSubmission && contentAreaBounds && (
-        <DefectBreakdownPanel
-          key={selectedSubmission.id}
-          sub={selectedSubmission}
-          onAmend={handleAmend}
-          onClose={() => setExpandedRowId(null)}
-          bounds={contentAreaBounds}
-          onHeightChange={setPanelHeight}
-        />
-      )}
     </div>
   );
 }
