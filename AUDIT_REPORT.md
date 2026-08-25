@@ -36,10 +36,35 @@ with its full original context, reasoning, and verification trail.
    → `CHANGELOG.md` §15.
 
 10. **Two independently-maintained "default profile" fallbacks disagree
-    on `evaluationMode`.** The backend's `HARDCODED_DEFAULT_PROFILE`
+    on `evaluationMode`.** ~~The backend's `HARDCODED_DEFAULT_PROFILE`
     (`resolveVerdict.ts`) sets `CUMULATIVE` for BARRIER / `''` for
     PACKAGING; the frontend's separate hardcoded fallback
-    (`ConfigContext.tsx`) sets `'N/A'` for both. Never reconciled.
+    (`ConfigContext.tsx`) sets `'N/A'` for both.~~
+
+    **PACKAGING half fixed 2026-08-25** (RECORD ONLY build): `ConfigContext.tsx`'s
+    fallback now sets `''` for PACKAGING too, matching `resolveVerdict.ts` —
+    both fallbacks now genuinely skip it via `aqlEvaluator.ts`'s true-exclusion
+    path instead of only the backend one doing so. **Still open:**
+    - **BARRIER still disagrees** — `resolveVerdict.ts` sets `CUMULATIVE`
+      (correct: BARRIER is a numeric zero-tolerance AND category), while
+      `ConfigContext.tsx` still sets `'N/A'` (wrong: `'N/A'` means qualitative
+      state-encoded, not zero-tolerance-count — see `aqlEvaluator.ts`'s N/A
+      branch). Not touched by this build — out of scope for the RECORD ONLY
+      task, which only named the PACKAGING line. Same reachability caveat as
+      below (zero-usable-profile state only).
+    - **A third, previously-undocumented copy of this exact fallback exists**:
+      `QualityRules.tsx`'s local `defaultProfiles` (~line 90-101, the
+      Quality Rules admin screen's own initial-state seed, used when
+      `config.inspectionProfiles` is empty). It carries the *same* stale
+      pattern as the old `ConfigContext.tsx` fallback — BARRIER: `'N/A'`,
+      PACKAGING: `'N/A'` (not fixed as part of this build; not explicitly
+      in scope). Unlike `ConfigContext.tsx`'s fallback (display-only, never
+      sent to the backend), this one is a real editable admin form's seed —
+      if an admin opens Quality Rules on a zero-profile install and hits
+      Save without touching BARRIER/PACKAGING, this stale `'N/A'` pair gets
+      persisted into `AppConfig.inspectionProfiles` for real, at which point
+      it stops being a "fallback" and becomes the live profile — a path the
+      other two fallbacks don't have.
 
     **Diagnosed 2026-08-11:**
     - **Backend** — `backend/src/engine/resolveVerdict.ts:38-59`

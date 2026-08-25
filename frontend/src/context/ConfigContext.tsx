@@ -501,7 +501,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
               { id: 'CRITICAL',  name: 'CRITICAL',  aqlLevel: '1.5',           evaluationMode: 'CUMULATIVE' },
               { id: 'MAJOR',     name: 'MAJOR',     aqlLevel: '2.5',           evaluationMode: 'CUMULATIVE' },
               { id: 'MINOR',     name: 'MINOR',     aqlLevel: '4.0',           evaluationMode: 'GRANULAR' },
-              { id: 'PACKAGING', name: 'PACKAGING', aqlLevel: 'PASS/FAIL', evaluationMode: 'N/A' },
+              // '' (not 'N/A') — matches resolveVerdict.ts's HARDCODED_DEFAULT_PROFILE,
+              // hits aqlEvaluator.ts's true-exclusion skip path. See AUDIT_REPORT.md #10.
+              { id: 'PACKAGING', name: 'PACKAGING', aqlLevel: 'PASS/FAIL', evaluationMode: '' },
             ],
             defectDefinitions: [
               { id: 'def_hole',     name: 'Hole',       categoryId: 'BARRIER' },
