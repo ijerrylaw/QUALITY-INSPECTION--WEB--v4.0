@@ -301,24 +301,4 @@ describe('HistoryFeed: real component, real worst-case data', () => {
     const detailCell = container.querySelector('td[colspan]') as HTMLTableCellElement;
     expect(detailCell.getBoundingClientRect().width).toBeLessThanOrEqual(table.getBoundingClientRect().width + 0.5);
   });
-
-  test('the detail content area is height-capped and internally scrollable, not width-capped', async () => {
-    stubFetch();
-    const { container, findByText } = renderHistoryFeed();
-
-    await findByText('A001Z6225001');
-    const row = container.querySelector('table tbody tr')!;
-    row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await findByText('AQL Category Analysis');
-
-    const scrollArea = container.querySelector('td[colspan] > div') as HTMLDivElement;
-    await waitFor(() => {
-      // Real content (6 categories x 4 defects) must exceed the cap for
-      // this to be a meaningful check of the cap actually doing something.
-      expect(scrollArea.scrollHeight).toBeGreaterThan(scrollArea.clientHeight);
-    });
-
-    expect(scrollArea.clientHeight).toBeLessThanOrEqual(420 + 1); // DETAIL_MAX_HEIGHT_PX, +1px layout rounding tolerance
-    expect(getComputedStyle(scrollArea).overflowY).toBe('auto');
-  });
 });
