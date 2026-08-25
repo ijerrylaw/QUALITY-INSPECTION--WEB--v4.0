@@ -1073,9 +1073,6 @@ export function HistoryFeed() {
                             <span className="text-[10px] font-mono text-rose-400/90 font-bold bg-rose-500/10 px-1.5 rounded border border-rose-500/20">
                               {totalDefects} defect{totalDefects !== 1 ? 's' : ''}
                             </span>
-                            <span className="text-[9px] font-sans text-muted/50 group-hover/hint:text-primary/70 transition-colors">
-                              {isExpanded ? '▲ hide' : '▼ detail'}
-                            </span>
                           </div>
                         )}
                         {totalDefects === 0 && (
