@@ -8,7 +8,8 @@
  * Sparse maps (per-defect counts, per-defect qualitative states) omit a key
  * entirely when the operator never touched it during the original entry —
  * that omission means "the original value was the map's implicit default"
- * (0 for counts, 'NIL' for qualitative), NOT "no original data available."
+ * (0 for counts, '' — not yet recorded — for qualitative PASS/FAIL states),
+ * NOT "no original data available."
  * Conflating the two was the bug this module fixes: callers must resolve
  * their own map's implicit default into `originalValue` themselves (they're
  * the ones who know what "absent" means for their field), and pass whether

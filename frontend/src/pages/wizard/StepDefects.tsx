@@ -17,7 +17,7 @@
  *  1. Quantitative (aql: '0.65'|'1.0'|'1.5'|'2.5'|'4.0'|'6.5'|'AND'):
  *     Rapid-tap counter cards (-/count/+).
  *  2. Qualitative (aql: 'PASS/FAIL/NIL'):
- *     3-way toggle chips (PASS / FAIL / NIL).
+ *     2-way toggle chips (PASS / FAIL).
  *
  * UI_DESIGN_SYSTEM.md compliance:
  * - 48px touch targets (h-12) on counter buttons (§1.2).
@@ -48,7 +48,7 @@ export interface StepDefectsProps {
   originalData?: Record<string, any> | null;
 }
 
-type QualitativeState = 'PASS' | 'FAIL' | 'NIL';
+type QualitativeState = 'PASS' | 'FAIL';
 
 // Icon map for category icon names stored in QualityRules config
 
@@ -59,11 +59,14 @@ const isQualitativeAql = (aql: string | undefined): boolean =>
 /**
  * N/A-mode state encoding per ISO2859_MATH_ENGINE.md §2: the backend engine
  * reads qualitative categories out of the same `defects` map as quantitative
- * ones, with the count value encoding state instead of a raw tally.
+ * ones, with the count value encoding state instead of a raw tally. State 0
+ * means "not yet recorded" — a defect absent from `qualitativeStates` (never
+ * toggled) has no entry here and reads back as 0 implicitly, same as an
+ * untouched quantitative count.
  */
-const QUALITATIVE_ENCODING: Record<QualitativeState, number> = { NIL: 0, PASS: 1, FAIL: 2 };
+const QUALITATIVE_ENCODING: Record<QualitativeState, number> = { PASS: 1, FAIL: 2 };
 
-/** Encodes PASS/FAIL/NIL toggle states into the 0/1/2 values the backend engine expects. */
+/** Encodes PASS/FAIL toggle states into the 1/2 values the backend engine expects. */
 function encodeQualitative(states: Record<string, QualitativeState>): Record<string, number> {
   return Object.fromEntries(
     Object.entries(states).map(([id, state]) => [id, QUALITATIVE_ENCODING[state]]),
@@ -313,14 +316,14 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
                   const displayId = getDisplayId(defect);
 
                   if (isQual) {
-                    // ── QUALITATIVE: PASS / FAIL / NIL Toggle ─────────────
-                    const state: QualitativeState = qualitativeStates[defect.id] ?? 'NIL';
+                    // ── QUALITATIVE: PASS / FAIL Toggle ─────────────
+                    const state: QualitativeState | undefined = qualitativeStates[defect.id];
                     // Amendment-only "changed from original" highlight — reuses
                     // Cyan/Info (brand-secondary) per the 2026-08-14 planning
                     // decision (no dedicated token exists for this state; see
                     // AUDIT_REPORT.md).
                     const isChanged = originalData != null &&
-                      hasFieldChanged(true, originalData?.qualitative?.[defect.id] ?? 'NIL', state);
+                      hasFieldChanged(true, originalData?.qualitative?.[defect.id] ?? '', state ?? '');
 
                     return (
                       <div key={defect.id} className={`border rounded-lg p-3 flex flex-col justify-between shadow-sm ${
@@ -331,7 +334,7 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
                           <span className="font-mono text-[10px] text-muted uppercase tracking-widest shrink-0">ID: {displayId}</span>
                         </div>
 
-                        {/* 3-State Segmented Toggle */}
+                        {/* 2-State Segmented Toggle */}
                         <div className="inline-flex bg-canvas p-1 rounded-lg border border-gray-800 items-center gap-1 w-full justify-between shadow-inner">
                           {/* PASS */}
                           <button
@@ -357,24 +360,11 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
                           >
                             FAIL
                           </button>
-                          {/* NIL */}
-                          <button
-                            type="button"
-                            onClick={() => setQualState(defect.id, 'NIL')}
-                            className={`flex-1 h-8 px-2 flex items-center justify-center rounded-md text-xs font-bold uppercase tracking-wider transition-all cursor-pointer select-none outline-none ${
-                              state === 'NIL'
-                                ? 'bg-gray-700/40 text-gray-300 border border-gray-600 shadow-sm'
-                                : 'text-muted hover:text-primary hover:bg-surface/50 border border-transparent'
-                            }`}
-                          >
-                            NIL
-                          </button>
                         </div>
                         <OriginalValueNote
                           hasOriginal={originalData != null}
-                          originalValue={originalData?.qualitative?.[defect.id] ?? 'NIL'}
-                          currentValue={state}
-                          emptyDisplay="NIL"
+                          originalValue={originalData?.qualitative?.[defect.id] ?? ''}
+                          currentValue={state ?? ''}
                           className="mt-2 text-[10px] text-rose-400 font-mono text-center"
                         />
                       </div>

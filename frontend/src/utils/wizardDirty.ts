@@ -95,7 +95,7 @@ export function isWizardDirty({
     const originalQualitative: Record<string, string> = originalData.qualitative ?? {};
     for (const defect of defectDefinitions) {
       if (qualitativeIds.has(defect.id)) {
-        if (hasFieldChanged(true, originalQualitative[defect.id] ?? 'NIL', currentQualitative[defect.id] ?? 'NIL')) {
+        if (hasFieldChanged(true, originalQualitative[defect.id] ?? '', currentQualitative[defect.id] ?? '')) {
           return true;
         }
       } else if (hasFieldChanged(true, originalDefects[defect.id] ?? 0, currentDefects[defect.id] ?? 0)) {
@@ -134,7 +134,10 @@ export function isWizardDirty({
   );
   if (hasNonZeroQuantCount) return true;
 
-  if (Object.values(currentQualitative).some((state) => state !== 'NIL')) return true;
+  // Untouched qualitative defects are absent from the map entirely (2-way
+  // PASS/FAIL toggle — see StepDefects.tsx's QUALITATIVE_ENCODING), so any
+  // entry at all means the operator made a choice.
+  if (Object.keys(currentQualitative).length > 0) return true;
 
   return false;
 }

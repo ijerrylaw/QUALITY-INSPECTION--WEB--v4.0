@@ -46,7 +46,7 @@ const FIXED_DIM_LENGTH = '__fixed_length__';
 const FIXED_DIM_PALM = '__fixed_palm__';
 const SLOTS_PER_DIM = 5;
 
-const QUALITATIVE_LABELS: Record<string, string> = { NIL: 'NIL', PASS: 'PASS', FAIL: 'FAIL' };
+const QUALITATIVE_LABELS: Record<string, string> = { PASS: 'PASS', FAIL: 'FAIL' };
 
 function formatDisplay(value: unknown): string {
   if (value === undefined || value === null || value === '') return '—';
@@ -214,8 +214,8 @@ export function SubmissionSummary({ inspectionData, originalData }: SubmissionSu
       ? {
           key: defect.id,
           label: defect.name,
-          original: QUALITATIVE_LABELS[originalQualitative[defect.id] ?? 'NIL'] ?? 'NIL',
-          current: QUALITATIVE_LABELS[currentQualitative[defect.id] ?? 'NIL'] ?? 'NIL',
+          original: QUALITATIVE_LABELS[originalQualitative[defect.id] ?? ''] ?? '',
+          current: QUALITATIVE_LABELS[currentQualitative[defect.id] ?? ''] ?? '',
         }
       : {
           key: defect.id,

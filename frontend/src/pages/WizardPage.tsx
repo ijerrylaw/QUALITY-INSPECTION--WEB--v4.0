@@ -95,8 +95,13 @@ function safeParseJSON<T>(raw: unknown, fallback: T): T {
   }
 }
 
-/** Inverse of StepDefects.tsx's QUALITATIVE_ENCODING (0=NIL, 1=PASS, 2=FAIL). */
-const QUALITATIVE_DECODING: Record<number, 'PASS' | 'FAIL' | 'NIL'> = { 0: 'NIL', 1: 'PASS', 2: 'FAIL' };
+/**
+ * Inverse of StepDefects.tsx's QUALITATIVE_ENCODING (1=PASS, 2=FAIL). State 0
+ * (and anything else unrecognized) has no entry — decodes to `undefined`,
+ * meaning "not yet recorded," and is left out of the `qualitative` map below
+ * rather than defaulting to a placeholder state.
+ */
+const QUALITATIVE_DECODING: Record<number, 'PASS' | 'FAIL'> = { 1: 'PASS', 2: 'FAIL' };
 
 /**
  * The 7 fields RETAIN CONTEXT FOR NEXT BATCH carries forward (StepReviewSubmit.tsx),
@@ -233,20 +238,23 @@ export function WizardPage() {
         const dimensions     = safeParseJSON<Record<string, any>>(target.dimensions, {});
         const dimensionMins  = safeParseJSON<Record<string, any>>(target.dimensionMins, {});
 
-        // Decode N/A-mode qualitative states back from the persisted 0/1/2
+        // Decode N/A-mode qualitative states back from the persisted 1/2
         // encoding (inverse of StepDefects.tsx's QUALITATIVE_ENCODING) so
-        // reopening an amendment restores the operator's original PASS/FAIL/
-        // NIL toggle choices instead of defaulting every N/A-mode defect to NIL.
+        // reopening an amendment restores the operator's original PASS/FAIL
+        // toggle choices. A defect with no recorded state (0, or absent from
+        // rawDefects) is simply left out of the map, same as a never-touched
+        // defect in a fresh entry.
         const profile = getResolvedProfile(target.profileId);
         const qualitativeCategoryIds = new Set(
           (profile?.aqlCategories ?? [])
             .filter((cat) => (cat.aql ?? cat.aqlLevel ?? '').toUpperCase() === 'PASS/FAIL/NIL')
             .map((cat) => cat.id),
         );
-        const qualitative: Record<string, 'PASS' | 'FAIL' | 'NIL'> = {};
+        const qualitative: Record<string, 'PASS' | 'FAIL'> = {};
         for (const def of profile?.defectDefinitions ?? []) {
           if (!qualitativeCategoryIds.has(def.categoryId)) continue;
-          qualitative[def.id] = QUALITATIVE_DECODING[rawDefects[def.id] as number] ?? 'NIL';
+          const decoded = QUALITATIVE_DECODING[rawDefects[def.id] as number];
+          if (decoded) qualitative[def.id] = decoded;
         }
 
         // `side` and `sequenceNo` aren't persisted as their own columns — only
