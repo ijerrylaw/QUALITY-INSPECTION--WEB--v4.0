@@ -1486,8 +1486,12 @@ Cancel or pre-submit Discard) — dev.db confirmed unchanged at baseline
 ### 5.17 Real identity stamping — Submission & AmendmentLog attribution
 
 **Severity: High (data integrity / audit trail). Status: IMPLEMENTED and
-verified end-to-end, 2026-08-11. NOT YET MERGED to master — branch
-feat/real-identity-stamping.**
+verified end-to-end, 2026-08-11. MERGED to master 2026-08-11 (commit
+`d8e3acd`, "Merge feat/real-identity-stamping into master") — confirmed
+live: `Submission.pinUserId`/`AmendmentLog.requestedByPinUserId` exist in
+`backend/prisma/schema.prisma`, `resolveIdentity()`/`displayNameOf()` exist
+in `backend/src/lib/identity.ts`, all 8 commits listed below (`d9056bf`
+through `30fa028`) are present in master's history.**
 
 Every Submission and AmendmentLog was previously stamped with hardcoded
 literal identity strings ('mock-user-id', 'operator@oneglove.com',
@@ -1564,8 +1568,11 @@ its own work, rather than trusting the prior session's report. Lesson
 for future multi-session work: baseline claims across a session boundary
 should be independently re-verified, not inherited.
 
-**Not yet done:** branch not merged to master. Merge decision pending
-planning-chat review.
+**Merged:** commit `d8e3acd`, 2026-08-11 — confirmed live on master (see
+status line above). Whether the "Known limitations, accepted" list above
+(no token validation, mock-sourced SSO identity, no backfill) still holds
+depends on §5.18's own merge status, which is unchanged by this fix and not
+re-verified here.
 
 ### 5.18 Real MSAL/Entra ID SSO login — msal-browser@5.18.0 popup handoff bridge
 
@@ -4456,3 +4463,471 @@ the id strings change. The source profile is never touched — every new id
 is written onto freshly mapped copies (`{ ...cat, id: ... }` /
 `{ ...def, id: ..., categoryId: ... }`). Typecheck clean, production build
 succeeds.
+
+## 25. M365 Admin Access Lifecycle — Bootstrap, Invite, Offboarding (Stage 1 backend + Stage 2 frontend) — Shipped 2026-08-21
+
+Closes the confirmed gap that a fresh install had no working path for its
+first user to ever become ADMIN — until this pass, `POST
+/api/auth/m365-login` was a bare unconditional upsert with no route from
+"empty M365UserRole table" to a real admin account.
+
+**Schema** (`56ca692`): `M365UserRole.aadObjectId` made nullable (an
+invited-but-unclaimed row has no login yet) and unique alongside
+`userPrincipalName` — SQLite permits multiple NULLs under a UNIQUE index,
+so any number of unclaimed invites can coexist. New `isActive` (mirrors
+`PinUser.active`). No new `status`/`invitedAt` column needed:
+`(aadObjectId, role, isActive)` alone fully and unambiguously
+distinguishes every reachable state — documented as a truth table on the
+model itself. Applied via `prisma db push` + `prisma generate`, additive
+only.
+
+**Backend, Stage 1** (`974d871`), all in `m365Users.routes.ts`:
+- `POST /api/auth/m365-login` rewritten as explicit branching over 5
+  states instead of `role===null` inference: known+active (unchanged),
+  known+inactive → `'revoked'`, an unclaimed invite for this UPN gets
+  claimed (sets `aadObjectId`, keeps the pre-assigned role) unless the
+  invite itself was revoked (also `'revoked'`, never silently claimable),
+  a genuinely empty table → `'bootstrap-eligible'` with no row created,
+  otherwise the existing pending-row behavior. Response envelope adds
+  `status` alongside the existing `role` — additive.
+- `POST /api/m365-users/invite` (Group A only) pre-registers a future
+  admin/manager by email, rejecting a duplicate UPN with distinct
+  messages for "already claimed" vs "already invited".
+- `PATCH /api/m365-users/:id/deactivate`, `/reactivate`, and `DELETE
+  /api/m365-users/:id` (Group A only) — offboarding. No delete-safety
+  history check unlike `PinUser`'s: confirmed via `identity.ts` and
+  live-verified that `Submission`/`AmendmentLog` store a frozen
+  `displayName`/`userPrincipalName` snapshot for SSO rows, never a live
+  join back to `M365UserRole`. `reactivate` has no `PinUser` equivalent —
+  new for M365 per design.
+- `requireNotLastActiveAdmin()` guards PATCH-away-from-ADMIN, deactivate,
+  and delete alike — only blocks when the *target* is currently
+  `role='ADMIN'` and `isActive=true`.
+- `POST /api/auth/claim-bootstrap-admin` (deliberately ungated — no
+  admin exists yet to gate against) re-checks at call time that the
+  table is still empty, then creates the row at a fixed id
+  (`BOOTSTRAP_ADMIN_ROW_ID`) rather than `cuid()` — race-safe purely via
+  primary-key uniqueness, enforced atomically by SQLite. Verified with a
+  genuine 5-way concurrent first-claim test: exactly one succeeded, four
+  got a clean 409.
+
+Verified live against an isolated test backend (separate port, throwaway
+SQLite via `prisma db push`, never the shared `dev.db`): empty-table
+bootstrap signal, successful claim, second-claim rejection, 2-way and
+5-way concurrent races, invite + claim-via-login with role preserved,
+duplicate-invite rejection, last-admin lockout on all three actions then
+success after promoting a second admin, revoked-user login status,
+reactivate restoring access, revoked-invite-before-claim correctly
+reported as `'revoked'`, delete-with-linked-Submission confirmed safe.
+Also confirmed non-destructively against the real shared `dev.db` that
+the existing production login still resolves to ADMIN exactly as before
+the migration.
+
+**Frontend, Stage 2** (`09898e2`, `639998b`, `5d4f8ed`):
+- Login handling now branches on the `status` field directly instead of
+  inferring from `role===null`. New `RevokedAccessPage` and
+  `BootstrapAdminPage` (confirm-step calling `POST
+  /api/auth/claim-bootstrap-admin`, with race-loss error handling), plus
+  a one-off welcome toast for invite-claimed logins.
+- Invite-by-email form added to the Microsoft 365 Access panel,
+  distinguishing invited-but-unclaimed rows (`aadObjectId` null, role
+  already set) from self-registered pending rows (role null) with a
+  "Pending Invite" badge; duplicate-invite 409 surfaced inline.
+- Status column + Deactivate/Reactivate/Delete row actions, mirroring
+  `PinAdminPanel`'s established convention exactly: Deactivate fires
+  immediately (no confirmation), Delete requires a confirm modal,
+  Reactivate only shows for deactivated rows. Last-active-admin lockout
+  409 surfaced with its specific server message on all three actions.
+
+All frontend pieces live-verified against an isolated throwaway `dev.db`
+copy — never the shared one — torn down after with no leftover process
+or files.
+
+## 26. PIN Access — employeeId Field, INTERN Role, Shared Role Labels — Shipped 2026-08-24
+
+Commit `794dfd5`. Adds a required, unique `employeeId` field to PIN
+registration — auto-uppercased, editable afterward only through a new
+scoped `PATCH /api/pin-users/:id` endpoint (Group A/B, employeeId-only —
+the existing create endpoint stays the only place other PIN fields can be
+set). Adds `INTERN` as a fourth PIN-only Group C role alongside
+Operator/Leader/Supervisor. Also introduces a shared `ROLE_LABELS` lookup
+so `PinAdminPanel` reads plain labels ("Operator") instead of raw enum
+strings or long descriptive phrases, in both the create-form dropdown and
+the roster table — one map instead of two independently-maintained
+copies.
+
+## 27. Doc-Corrections Pass + AmendmentLog Interface Sync — Shipped 2026-08-24
+
+Seven-commit documentation pass correcting staleness that had accumulated
+across the M365 lifecycle (§25), the PIN employeeId/INTERN addition
+(§26), and the real MSAL/identity-stamping work (§5.17, §5.18) — all of
+which had shipped without their reference docs being updated to match.
+
+- **`f84a7d4`** — `NAVIGATION_AND_RBAC.md` §3.1 rewritten to describe the
+  live MSAL popup + `POST /api/auth/m365-login` 5-status lifecycle,
+  replacing the retired `MOCK_M365_IDENTITIES` description. INTERN added
+  to §3.2's PIN-eligible role list; the PIN hard-delete note corrected
+  from "considered, not built" to describe the live `DELETE
+  /api/pin-users/:id` endpoint.
+- **`cf3919a`** — `API_AND_INTEGRATION_SPEC.md` synced the same way: real
+  MSAL flow replaces the mocked description, the stale "blocked on IT"
+  credentials note replaced with the actual wired-since-2026-08-12 state
+  plus the new `npm run setup` wizard. Missing `PATCH`/`DELETE
+  /api/pin-users/:id` rows added to the endpoint table; INTERN added to
+  PIN-eligible role lists.
+- **`18416be`** — `DATA_SCHEMAS_AND_TYPES.md`: `Submission.aadObjectId`/
+  `userPrincipalName` corrected from required to nullable; the mixed
+  PIN/SSO identity model (`pinUserId` FK, `displayName`) documented for
+  the first time. INTERN added to `PinUser.role`.
+- **`12a2f21`** — `schema.prisma`'s `PinUser.role` comment corrected
+  (listed only OPERATOR/LEADER/SUPERVISOR; `PIN_ELIGIBLE_ROLES` has
+  included INTERN since §26).
+- **`357946a`** — stale Framer Motion reference removed from
+  `AI_RULES.md` (`framer-motion` is absent from `frontend/package.json`
+  and unused anywhere in `frontend/src`).
+- **`56b2686`** — stray "mock M365" wording dropped from
+  `NAVIGATION_AND_RBAC.md` §2, missed by the §3.1 rewrite above.
+- **`520168b`** — `AmendmentLog` interface in `DATA_SCHEMAS_AND_TYPES.md`
+  brought to match `schema.prisma` exactly: `requestedBy`/`reviewedBy`
+  corrected from required to nullable; added
+  `requestedByDisplayName`, `requestedByPinUserId`,
+  `reviewedByDisplayName`, `reviewedByPinUserId`, `recomputedVerdict`,
+  `recomputedCategoryResults`, `recomputedFailedDimensions`,
+  `recomputedDimensionResults`, and `createdAt`; `supervisorNote`
+  corrected to optional.
+
+A related, separately-scoped commit the same day (`485959d`) closed two
+`AUDIT_REPORT.md` findings this pass's discovery surfaced as resolved —
+#1 (identity-stamping gap, resolved by §5.17) and #9 (Azure AD blocked on
+IT, credentials wired since 2026-08-12) — and re-pointed two other
+findings' stale code-line citations to their current locations without
+closing the underlying findings. Documentation-only across every commit
+in this entry — no application code touched.
+
+## 28. Amendment Request Review Modal Redesign — Shipped 2026-08-24
+
+The Approvals Queue's amendment review modal replaced its two-column
+raw-JSON diff (`DiffJsonViewer`, a red/green tree renderer) with a
+flattened, single-column view grouped under human-readable section
+headers. Six-commit build:
+
+- **`4363c50`** — extracted `GLOVE LENGTH`/`PALM WIDTH` id+label
+  constants into shared `lib/fixedDimensions.ts` so the new diff
+  renderer and `StepDimensions.tsx` don't each hold their own copy.
+- **`a652104`** — new `lib/amendmentDiffLabels.ts`: static Batch Setup/
+  Verdict field labels and `dimensionMins` stat labels (same
+  `ROLE_LABELS`-style lookup pattern as §26), plus product-scoped
+  dimension labels and strictly-matched profile-scoped defect labels.
+- **`264dd6a`** — new `AmendmentDiffView.tsx`: one row per leaf field
+  (label left, old value struck through → new value highlighted right),
+  grouped under Batch Setup / Dimensions / Defects / Verdict headers,
+  each with a collapsible "N unchanged fields not shown". Consumes the
+  existing `DiffNode` tree from `diffTree.ts` unchanged.
+- **`812683a`** — wired into `ApprovalsQueue.tsx`, replacing the old
+  two-column diff. Resolves dimension labels from the amendment's
+  `productCode` and defect labels from its `profileId` via
+  `ConfigContext`, preferring the proposed side's values. `handleAction`
+  (approve/reject) untouched.
+- **`2efc00c`** — removed the now-dead `DiffJsonViewer`/`DiffTreeNode`/
+  `DiffStatusBadge`/`diffNodeHasVisibleContent` from `JsonViewer.tsx`
+  (plain `JsonViewer`/`tryParseJSON` still in use elsewhere, untouched).
+- **`c519eb2`** — three bundled refinements to the same render pass: (1)
+  each section's changed fields now split into a raw (operator-entered)
+  sub-group shown first and a muted "Calculated from the above" derived
+  sub-group below — `dimensionMins` and `verdict` are derived,
+  everything else including `defects` is raw, confirmed against real
+  pending-amendment data with no ambiguous fields; (2) dropped the
+  strikethrough on old values (rose/emerald color is the only change
+  signal now, redundant otherwise per feedback); (3) `dimensionMins`'
+  numeric stats rounded to the same per-dimension decimal precision
+  `StepDimensions.tsx` already uses (new `buildDimensionDecimalsMap()`),
+  fixing raw floating-point artifacts confirmed in real data (e.g. `avg:
+  0.052000000000000005`).
+
+**Follow-up fix, same day (`ea433a6`):** a defect id absent from the
+original submission's `defects` record means "never recorded" (0), not
+"nothing to compare" — but `diffTree.ts`'s generic object diff marked a
+key present on only one side as added/removed, rendering as a bare new
+value with no arrow and never entering the unchanged-collapse count even
+when the real comparison (0 vs 0) was a no-op. Fixed with a new
+`resolveDefectRows()`, scoped to the Defects section only: resolves both
+sides to an explicit count per defect id (missing = 0) and compares
+directly, bypassing the generic `DiffStatus` walk for this one field.
+Verified against live pending amendments: a genuinely changed defect
+renders `0 -> N`; a defect present at 0 on only one side now correctly
+collapses as unchanged instead of showing a bare `0`.
+
+## 29. Retain Context for Next Batch — Tooltip Fix + localStorage Consolidation — Shipped 2026-08-24
+
+Commit `3ba7a36`. Three fixes to the wizard's "Retain Context for Next
+Batch" checkbox:
+
+1. **Tooltip was wrong on both ends** — claimed Line, Shift, and Product
+   Code are preserved, but Shift is never retained (recomputed from the
+   reset timestamp) and 5 real retained fields went unmentioned.
+   Corrected to the real 7-field list: `profileId`, `productCode`,
+   `size`, `lineId`, `side`, `sampleSize`, `gloveWeight`.
+2. **Consolidated retention to one source of truth.**
+   `WizardPage.tsx`'s `RETAINED_CONTEXT_FIELDS` now gates both the
+   same-session "next lot" carry-forward (unchanged) and the
+   across-reload `localStorage` write (new) — previously
+   `StepMetadata.tsx` wrote 5 of the 7 fields to `localStorage`
+   unconditionally on every keystroke, independent of the checkbox, so
+   unchecking it never actually stopped those 5 from surviving a reload.
+   `StepMetadata.tsx` keeps its `localStorage` reads (now covering
+   `profileId`/`gloveWeight` too, previously missing) but no longer
+   writes on its own.
+3. **Config-deletion safety check added:** a retained
+   `productCode`/`profileId` that's since been deleted from Product
+   Engine/Quality Rules now shows a visible toast and resets to blank
+   instead of silently staying set with no matching dropdown option —
+   scoped to those two fields specifically (the only ones actually
+   deletable via admin config surfaces); `size` (sourced from a flat
+   global list) is left as a known remaining gap.
+
+Verified checked/unchecked and simulated-reload behavior against the
+actual retain/clear logic (mocked `localStorage`).
+
+## 30. AQL Category Analysis Panel — Width/Clipping Root-Cause Saga — Shipped 2026-08-25
+
+A reported hard-clip bug in `HistoryFeed.tsx`'s expanded row (status
+pills, the profile-name label, and the AMEND RECORD button all cut off)
+took four rounds of fixes that each addressed a real defect but missed
+the actual cause before round 5 found and fixed it, measured rather than
+theorized. The eventual fix ships alongside this project's first
+automated test infrastructure. Full arc, in order:
+
+1. **`dc0cea4`** — padding mismatch fix (`px-6` → `px-3` to match the
+   table's own `py-3 px-3` per `UI_DESIGN_SYSTEM.md` §4.2). Did not
+   resolve the report.
+2. **`dd23d60`** — "partial confidence" fix: found and fixed a real
+   `whitespace-nowrap` inheritance defect (the table's nowrap, needed so
+   collapsed-row cells don't wrap, was cascading into the expanded panel
+   and fighting its own `flex-wrap` rows). Confirmed via a live static
+   repro using real category/defect data. Explicitly reported as a
+   genuine improvement, not a proven fix for the exact screenshot —
+   could not reproduce the specific clip.
+3. **`cc651bb`** — structural rebuild (extracted
+   `AqlCategoryAnalysisPanel.tsx`), theorizing the cause was
+   subpixel-rounding-sensitive interaction between three overlapping
+   horizontal-overflow containers (`App.tsx`'s root, `<main>`'s
+   incidental `overflow-y-scroll`-implies-`overflow-x-auto`, and the
+   table's own wrapper) — consistent with the bug reproducing at
+   1920×1080 but not 3840×2400 on identical data. Removed all
+   `overflow-hidden`/fixed pixel widths/`whitespace-nowrap` from the
+   panel. Verified by code review and static selector checks only, per
+   that round's instruction — not a rendered screenshot.
+4. **`8dcaed6`** — Jerry confirmed via a real screenshot the rebuild
+   still clipped. Replaced the `<table>` entirely with CSS Grid
+   (`display: contents` rows, `col-span-full` on the detail cell) to
+   eliminate table auto-layout's independent width negotiation. This
+   round shipped a regression (`min-w-max` pushed INSPECTOR/AMEND RECORD
+   off-screen) that was caught in round 5.
+5. **`3e8592b`** — **the actual root cause, measured rather than
+   theorized**: a `<td colSpan={10}>`'s max-content width feeds directly
+   into the table's own width calculation. The detail panel's content
+   (every AQL chip/badge on one unwrapped line) was far wider than the
+   viewport, dragging the whole table out to match — proven with a live
+   measurement (a grid declaring 1360px of columns rendered at 2381px).
+   Nothing was ever being clipped; the table was simply wider than the
+   window, with the overflow columns and the panel's right-aligned
+   content sitting off-screen past the horizontal scrollbar — which is
+   exactly why it looked fine on a wide-enough monitor. All three prior
+   fixes had patched things that were never the cause. Fix (Jerry's
+   direction via `/grill-me`): the detail panel became a sibling of the
+   table (master-detail layout, rendered below it, outside the table's
+   own scroll wrapper, so it structurally cannot contribute to any
+   column's width), the CSS Grid experiment was reverted back to a plain
+   `<table>`, and the table itself became `table-fixed` with explicit
+   percentage `COLUMN_WIDTHS` (a second, independent guarantee — under
+   fixed layout, cell content cannot influence column widths at all)
+   plus a fixed `TABLE_MIN_WIDTH_PX=1100` floor. Verified via live
+   `getBoundingClientRect()` measurement across a 900–3200px width
+   sweep, not a code read-through.
+6. **`dcd95da`** — usability follow-up: "below the whole row list" put
+   the panel far from whichever row was clicked. Pinned it to the
+   viewport bottom via a React portal instead, with bounds tracked by a
+   new `useContentAreaBounds()` hook, a height-reported spacer so the
+   fixed panel can never hide the last row, and a persistent
+   selected-row accent bar. Verified via direct DOM measurement in a
+   temporary test harness (deleted after) — the harness tab's own
+   visibility couldn't be confirmed in the host UI this round, so
+   verification is stated as geometry measurements, not a screenshot,
+   explicitly flagged as a gap.
+7. **`6d5d76d`** — reverted round 6's viewport-pinned placement per
+   Jerry's preference for the original inline-under-row interaction, now
+   safe to restore because round 5's `table-fixed`/`COLUMN_WIDTHS`
+   safety net (never removed across round 6) independently prevents the
+   original bug regardless of placement. Added a fixed
+   `DETAIL_MAX_HEIGHT_PX` (420px) with internal scroll so a
+   heavily-failed record (~25 defects/6 categories) scrolls in place
+   instead of pushing the table an arbitrary distance down.
+8. **`7622b2e`** — **first test infrastructure in this project**
+   (confirmed via discovery: no vitest/jest/playwright/cypress config or
+   test files existed anywhere before this commit). Vitest in browser
+   mode via the Playwright/Chromium provider — not jsdom, which has no
+   layout engine and would make a width-leak test pass unconditionally
+   regardless of whether the bug was present. `history.widthRegression.
+   test.tsx`: two isolated control tests proving the test method itself
+   can discriminate broken from fixed layout, plus the real guard —
+   renders the actual `HistoryFeed` component with a mocked worst-case
+   submission and asserts the table's width is unchanged after expanding
+   a row. Proven non-vacuous by temporarily re-reverting the real fix by
+   hand and confirming the guard actually fails (2539.75px vs 1398px)
+   before restoring it. New `frontend/vitest.config.ts` (kept separate
+   from `vite.config.ts`'s mkcert HTTPS setup); `npm run test` added to
+   `frontend/package.json`.
+
+## 31. Amendment Modal Polish Arc — Shipped 2026-08-25
+
+Four small, unrelated fixes bundled here as a single entry per their
+combined scope:
+
+- **`bce7500`** — reverted §30 round 7's 420px internal-scroll cap on
+  the AQL Category Analysis panel per updated guidance: a heavily-failed
+  record now pushes the row list down instead of scrolling internally,
+  an accepted trade-off.
+- **`33ddad5`** — dropped the redundant "detail"/"hide" text label next
+  to the Inspection Records row's expand chevron — the chevron itself
+  already communicates state; kept the chevron and defect count only.
+- **`7bace35`** — two `diffTree.ts` fixes in the amendment review modal:
+  (1) `buildDiffTree()` now strips `fails`/`isMin`/`isGraded` from
+  `dimensionMins.<dimId>` before diffing, so the modal no longer renders
+  a noise row (e.g. "`<DIM>` — Graded") for every graded dimension —
+  these are internal computed flags, never a substantive edit; (2) fixed
+  a bug where a dimension present on only one side of an amendment (e.g.
+  removed from the product's active dimension list between original
+  submission and amendment) rendered as one leaf holding the entire raw
+  stat object dumped as formatted JSON — `diffObject()`'s added/removed
+  branches built a flat leaf instead of recursing, unlike the two-sided
+  path; new `oneSidedNode()` recurses the same way, so each field gets
+  its own row. Both confirmed against real amendment records.
+- **`9837904`**, **`2467ee6`** — Staff PIN Access placeholder text
+  updates: corrected Employee ID/Job Title placeholder examples, and
+  fixed the field's uppercase `text-transform` incorrectly uppercasing
+  its own placeholder text ("e.g." → "E.G.") by exempting the
+  placeholder specifically.
+
+## 32. PIN Security Redesign — Identity-First Login, mustChangePin, Admin PIN Reset — Shipped 2026-08-25
+
+Commit `e6b9145`. Kiosk PIN login no longer resolves identity from a
+scan-all PIN match — the worker now picks their own account from a
+searchable directory before entering a PIN.
+
+**Identity-first login:** new `GET /api/auth/pin-directory` (ungated,
+name + employeeId only) backs a searchable account picker on the kiosk
+screen; `POST /api/auth/pin-login` now verifies the entered PIN against
+only that one chosen account instead of scanning every active row for a
+match. This removes the need for PIN uniqueness across staff entirely —
+a shared PIN between two workers is unambiguous once identity is chosen
+first — so the active-row collision checks on create and self-change are
+dropped outright (reporting a collision was a pure enumeration-leak
+vector anyway, telling an attacker a guessed PIN was already in use by
+*someone*).
+
+**`mustChangePin`:** new `PinUser.mustChangePin` flag. An ADMIN/MANAGER-
+issued PIN — at creation, or via the new `PATCH
+/api/pin-users/:id/reset-pin` (Group A/B, `PinAdminPanel`'s "Reset PIN"
+row action) — is only ever a one-time temp credential. New
+`SetPinPage.tsx` forces a self-service change before the app shell
+renders (gated in `App.tsx`'s `ProtectedRoute`), so an admin never
+actually knows the account's real working PIN. Existing rows were
+backfilled to `false` so current staff aren't retroactively forced
+through the gate. `pin-change` is now identity-scoped
+(`{userId, currentPin, newPin}`) too, since dropping PIN uniqueness made
+its old bare-scan resolution ambiguous.
+
+Add Staff PIN's PIN input is now masked (`type="password"`).
+
+**Live-verified** (§33 below) via a real Playwright click-through against
+the live dev backend: directory search/filter, account selection, PIN
+pad entry, wrong-PIN failure, the forced `mustChangePin` gate,
+self-service PIN change, and "not you? go back" navigation.
+
+## 33. AI_RULES.md §6 — Confirmed Group C Playwright Self-Test Capability — Shipped 2026-08-25
+
+Commit `6a0536c`. This session click-tested the full identity-first PIN
+login flow from §32 (directory search, PIN pad, wrong-PIN handling,
+`mustChangePin` gate, self-service change, back-navigation) directly
+against the live dev backend via Playwright, not just via `curl`.
+`AI_RULES.md` §6 now documents this as a confirmed capability: Group C
+(PIN-based login) UI flows are self-testable end-to-end going forward,
+rather than reflexively deferred to "needs Jerry's manual browser check."
+That fallback is reserved specifically for Group A/B (MSAL popup OAuth),
+which remains confirmed blocked in this sandbox — the popup flow cannot
+be completed here regardless of which account it targets.
+
+## 34. AQL Level PASS/FAIL + RECORD ONLY — Shipped 2026-08-25
+
+Seven-commit build removing the NIL option from two distinct places it
+existed, and adding a new AQL Level for categories that should record
+defects without ever gating the lot verdict.
+
+**Removing NIL** (two unrelated things sharing one name, both fixed in
+the same pass, per discovery that treating them as one change risked
+silently breaking whichever one was assumed dead):
+- **`16824bd`** — the per-defect qualitative toggle collapsed from a
+  3-way `PASS`/`FAIL`/`NIL` encoding (0/1/2) to 2-way `PASS`/`FAIL`
+  (1/2). An untouched defect is now simply absent from the
+  qualitative-states map (implicit 0/"not recorded"), mirroring how an
+  untouched quantitative count already worked, instead of explicitly
+  encoding a `NIL` state. `StepDefects.tsx`, `WizardPage.tsx`,
+  `wizardDirty.ts`, `SubmissionSummary.tsx`, `fieldDiff.tsx` all updated
+  to match.
+- **`4123fe9`** — the separate category-level AQL Level string
+  `'PASS/FAIL/NIL'` renamed to `'PASS/FAIL'` across every call site in
+  one commit (a partial rename would have silently broken
+  qualitative-category detection): the whitelist, default-profile
+  fixtures, auto-lock checks, and the regex-based detector in
+  `AqlCategoryAnalysisPanel.tsx` (which dropped its now-dead `/nil/i`
+  branch). Doc references in `DATA_SCHEMAS_AND_TYPES.md`/
+  `ISO2859_MATH_ENGINE.md` updated to match.
+
+**Adding RECORD ONLY:**
+- **`69e6550`** — new `'RECORD ONLY'` AQL Level entry in
+  `QualityRules.tsx`'s whitelist. Selecting it auto-locks Eval Mode and
+  writes `evaluationMode: ''` (empty string) — deliberately *not* the
+  string `'N/A'` — so it hits `aqlEvaluator.ts`'s pre-existing
+  true-exclusion skip path (`if (!category.evaluationMode) continue;`),
+  which the engine already supported but no UI path could previously
+  reach. No engine change was needed. Defects in a RECORD ONLY category
+  still use the normal quantitative counter cards (only the exact string
+  `'PASS/FAIL'` triggers the qualitative toggle) — they're tallied and
+  displayed, just never compared against a threshold. Mirrors the
+  dimension-level Graded/Record-only Ruler/Eye icon convention
+  (`ProductConfigAccordion.tsx`, §20) in the category table, the Kanban
+  column headers, and the wizard's per-category Eval Mode badge — the
+  last of which also fixed a latent bug where an empty-string
+  `evaluationMode` rendered as a blank emerald pill instead of a real
+  label.
+- **`acf7edc`** — `AqlCategoryAnalysisPanel.tsx`'s verdict badge
+  (previously binary: real PASS/FAIL, or a gray "N/A" pill shared with
+  true-null/loading categories) gained a third branch: RECORD ONLY
+  categories now render a gray Eye-icon "RECORD ONLY" badge plus a
+  left-side "record only" chip, instead of reusing the ambiguous "N/A"
+  pill.
+- **`488b69a`** — fixed half of a pre-existing hardcoded-default drift
+  (`AUDIT_REPORT.md` #10): `ConfigContext.tsx`'s zero-profile fallback
+  set PACKAGING's `evaluationMode` to `'N/A'` (evaluated) while
+  `resolveVerdict.ts`'s equivalent set `''` (skipped) — same intended
+  default, drifted apart. Both now set `''`. The other half of #10
+  (BARRIER disagreeing between the same two fallbacks) and a third,
+  newly-discovered copy of the same stale pattern in `QualityRules.tsx`'s
+  own `defaultProfiles` seed were logged, not fixed — out of scope for
+  this pass.
+- **`53ae79e`** → **`3c88bb5`** — follow-up fix, same day:
+  `StepReviewSubmit.tsx`'s pre-submit Category Breakdown table built its
+  rows purely from `POST /api/verdict/preview`'s `categoryResults`,
+  which structurally omits any category the engine's skip path drops
+  entirely — so a RECORD ONLY category's recorded defect count never
+  appeared anywhere in the wizard's own pre-submit review (only in
+  `HistoryFeed.tsx`'s equivalent panel, post-submit). Logged as
+  `AUDIT_REPORT.md` #22, then fixed: `categoryVerdicts` now iterates the
+  local profile's category order (preserving existing PASS/FAIL row
+  order) and synthesizes a client-computed row for any RECORD ONLY
+  category missing from the server's results, rendered with the same
+  gray Eye-badge convention as `acf7edc`. Verified via a new permanent
+  Vitest browser-mode regression test (`StepReviewSubmit.recordOnly.
+  test.tsx`) rather than a live click-through — the dev database has
+  zero PIN accounts and creating one requires Group A/B (MSAL), which
+  the sandbox can't complete.
