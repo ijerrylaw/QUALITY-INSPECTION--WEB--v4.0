@@ -221,7 +221,7 @@ export function PinAdminPanel() {
               required
               value={employeeId}
               onChange={(e) => setEmployeeId(e.target.value.toUpperCase())}
-              className="w-full bg-canvas border border-gray-700 text-sm font-mono uppercase text-primary rounded-lg px-4 py-2.5 focus:border-brand-primary outline-none"
+              className="w-full bg-canvas border border-gray-700 text-sm font-mono uppercase placeholder:normal-case text-primary rounded-lg px-4 py-2.5 focus:border-brand-primary outline-none"
               placeholder="e.g. OT1234 or FOT1234"
             />
           </div>
