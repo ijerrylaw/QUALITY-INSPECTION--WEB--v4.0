@@ -55,3 +55,10 @@ Model selection is controlled at the **Claude Code app level** (model picker in 
 * **Pre-Refactor Commit Reminders:** Proactively remind the user to execute a Git commit (`git commit`) prior to performing cross-file deletions or major architectural refactoring.
 * **Zero Silent Breaking Changes:** Do not rename, remove, or modify existing exported types, interfaces, or API signatures unless explicitly instructed.
 * **Core Tech Stack Guardrail:** Rely strictly on `React 19`, `Vite`, `Tailwind v4`, and `Lucide Icons`. Do not install unapproved third-party NPM packages.
+
+---
+
+## 6. BROWSER SELF-TESTING CAPABILITY (Confirmed 2026-08-25)
+
+* **Group C (PIN-based login) UI flows — self-testable, confirmed live.** Claude Code has directly click-tested, via Playwright against the real running dev backend, the full identity-first PIN login surface: directory search/filter, account selection, PIN pad entry, wrong-PIN failure/reset, the forced `mustChangePin` gate (`SetPinPage`), self-service PIN change, and "not you? go back" navigation. Going forward, attempt a real Playwright click-through for Group C UI changes as part of verification instead of defaulting to "needs Jerry's manual browser check."
+* **Group A/B (MSAL popup OAuth) — confirmed still blocked.** The Microsoft 365 SSO popup flow cannot be completed in this sandbox. Reserve the "needs Jerry's manual browser check" fallback for Group A/B (MSAL-authenticated) work only — it is not a blanket excuse to skip self-testing for Group C.
