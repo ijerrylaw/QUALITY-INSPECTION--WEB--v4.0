@@ -175,19 +175,6 @@ const COLUMN_WIDTHS = ['4%', '13%', '14%', '10%', '11%', '14%', '10%', '6%', '8%
  */
 const TABLE_MIN_WIDTH_PX = 1100;
 
-/**
- * Cap on the expanded detail panel's own content height, independent of the
- * table — a heavily-failed record (~25 defects across 6 AQL categories) must
- * not be able to make one row's expansion push the rest of the table so far
- * down that scanning other rows becomes impractical. ~420px comfortably fits
- * a header plus 2-3 category blocks before the panel's own scrollbar kicks
- * in; deliberately a fixed pixel value, same reasoning as
- * TABLE_MIN_WIDTH_PX — never derived from content. Governs HEIGHT only; the
- * panel's WIDTH is fixed regardless (it's a `<td colSpan>` inside a
- * `table-fixed` table — see the note above the table's render).
- */
-const DETAIL_MAX_HEIGHT_PX = 420;
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function parseDefects(raw: Record<string, number> | string | undefined): Record<string, number> {
@@ -458,17 +445,12 @@ function DefectBreakdownPanel({
 
   return (
     <td colSpan={COLUMN_WIDTHS.length} className="p-0 border-b border-gray-700/50 bg-canvas shadow-inner">
-      {/* Scrollable content — capped at DETAIL_MAX_HEIGHT_PX (fixed, never
-          content-derived — see that constant's comment) so a heavily-
-          failed record's ~25 defect chips across 6 AQL categories scrolls
-          internally instead of pushing the rest of the table an arbitrary
-          distance down the page. This governs HEIGHT only; WIDTH comes
-          entirely from the table's own table-fixed + COLUMN_WIDTHS (this
-          <td>'s colSpan spans them, it doesn't negotiate its own width),
-          so no amount of content here can widen the table — see the note
-          above DefectBreakdownPanel and the automated regression test
+      {/* WIDTH comes entirely from the table's own table-fixed + COLUMN_WIDTHS
+          (this <td>'s colSpan spans them, it doesn't negotiate its own
+          width), so no amount of content here can widen the table — see the
+          note above DefectBreakdownPanel and the automated regression test
           (history.widthRegression.test.tsx) that checks this directly. */}
-      <div className="px-3 py-4 space-y-3 overflow-y-auto" style={{ maxHeight: `${DETAIL_MAX_HEIGHT_PX}px` }}>
+      <div className="px-3 py-4 space-y-3">
 
         {/* ── §5.3 Info/Cyan alert — legacy row, no frozen snapshot ──────────── */}
         {/* AUDIT_REPORT.md #18: predates gradingSnapshot, deliberately not
