@@ -32,7 +32,7 @@
 
 import { useMemo, useState } from 'react';
 import { Box, Ruler, ShieldAlert, ArrowRight, ClipboardList, ChevronRight, ChevronDown } from 'lucide-react';
-import { useConfig } from '../../context/ConfigContext';
+import { useConfig, isWizardVisible } from '../../context/ConfigContext';
 import type { ProductDimensionDef } from '../../context/ConfigContext';
 import { hasFieldChanged } from '../../utils/fieldDiff';
 
@@ -171,14 +171,18 @@ export function SubmissionSummary({ inspectionData, originalData }: SubmissionSu
 
   const activeDimensions = useMemo((): ProductDimensionDef[] => {
     const fixed: ProductDimensionDef[] = [
-      { id: FIXED_DIM_LENGTH, name: 'GLOVE LENGTH', unit: 'mm' },
-      { id: FIXED_DIM_PALM, name: 'PALM WIDTH', unit: 'mm' },
+      { id: FIXED_DIM_LENGTH, name: 'GLOVE LENGTH', unit: 'mm', wizardVisible: matrixEntry?.lengthWizardVisible },
+      { id: FIXED_DIM_PALM, name: 'PALM WIDTH', unit: 'mm', wizardVisible: matrixEntry?.palmWidthWizardVisible },
     ];
     const dynamic =
       matrixEntry?.dimensionDefs && matrixEntry.dimensionDefs.length > 0
         ? matrixEntry.dimensionDefs
         : config?.dimensions ?? [];
-    return [...fixed, ...dynamic];
+    // An OFF ("wizard-invisible") dimension was never actually captured in
+    // this submission (StepDimensions.tsx already excluded it from
+    // `inspectionData.dimensions`) — filtered here too so this independent
+    // summary can't show a leftover row for it.
+    return [...fixed, ...dynamic].filter(isWizardVisible);
   }, [matrixEntry, config?.dimensions]);
 
   const currentDimensions: Record<string, string[]> = inspectionData?.dimensions ?? {};
