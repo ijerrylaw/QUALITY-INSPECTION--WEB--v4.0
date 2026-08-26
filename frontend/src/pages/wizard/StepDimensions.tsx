@@ -36,7 +36,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Ruler, CheckCircle2, AlertTriangle, AlertCircle, Info } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastProvider';
-import { useConfig, hasUsableProductMatrix, resolveProductMatrix, isDimensionGraded, isWizardVisible, mergeCanonicalDimensionDefs } from '../../context/ConfigContext';
+import { useConfig, hasUsableProductMatrix, resolveProductMatrix, isDimensionGraded, isWizardVisible, mergeCanonicalDimensionDefs, isCanonicalThicknessDim } from '../../context/ConfigContext';
 import { OriginalValueNote, hasFieldChanged } from '../../utils/fieldDiff';
 import { FIXED_DIM_LENGTH, FIXED_DIM_PALM, FIXED_DIMENSION_LABELS } from '../../lib/fixedDimensions';
 import type { ProductDimensionDef } from '../../context/ConfigContext';
@@ -393,9 +393,18 @@ export function StepDimensions({
 
                 {/* Card Header */}
                 <div className="flex items-center justify-between border-b border-gray-700/50 pb-3 mb-4">
-                  {/* Title + inline spec */}
-                  <span className={`text-sm font-bold uppercase tracking-wider flex items-baseline gap-2 ${
-                    dim.id === FIXED_DIM_LENGTH || dim.id === FIXED_DIM_PALM ? 'text-brand-secondary' : 'text-primary'
+                  {/* Title + inline spec — permanent dims (Length/Palm Width's
+                      fixed rows, plus Cuff/Palm/Finger Thickness via the same
+                      isCanonicalThicknessDim() check ProductConfigAccordion.tsx
+                      uses for its Trash-button/label treatment) get white/
+                      semibold/full opacity; optional dims (Beading, future
+                      custom adds) get white at reduced weight/opacity — same
+                      hue, not a new color, matching the config table's
+                      convention. */}
+                  <span className={`text-sm uppercase tracking-wider flex items-baseline gap-2 ${
+                    dim.id === FIXED_DIM_LENGTH || dim.id === FIXED_DIM_PALM || isCanonicalThicknessDim(dim)
+                      ? 'font-semibold text-primary'
+                      : 'font-medium text-primary/60'
                   }`}>
                     {dim.name}
                     {/* A record-only dimension has no spec to meet, so showing

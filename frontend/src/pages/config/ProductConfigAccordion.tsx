@@ -422,7 +422,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
             
             {/* GLOVE WEIGHT */}
             <tr className="hover:bg-surface-light/40 transition-colors border-b border-gray-800/50">
-              <td className="py-2.5 px-3 border-r border-gray-800/50 text-sm font-semibold text-brand-secondary uppercase">
+              <td className="py-2.5 px-3 border-r border-gray-800/50 text-sm font-semibold text-primary uppercase">
                 GLOVE WEIGHT
               </td>
               <td className="py-2 px-2 border-r border-gray-800/50 text-center align-top">
@@ -481,7 +481,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
               const lengthGraded = lengthMode === 'GRADED';
               return (
             <tr className="hover:bg-surface-light/40 transition-colors border-b border-gray-800/50">
-              <td className="py-2.5 px-3 border-r border-gray-800/50 text-sm font-semibold text-brand-secondary uppercase">
+              <td className="py-2.5 px-3 border-r border-gray-800/50 text-sm font-semibold text-primary uppercase">
                 <span className="flex items-center gap-2">
                   GLOVE LENGTH
                   <DimensionModeCycle
@@ -556,7 +556,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
               const palmGraded = palmMode === 'GRADED';
               return (
             <tr className="hover:bg-surface-light/40 transition-colors border-b border-gray-800/50">
-              <td className="py-2.5 px-3 border-r border-gray-800/50 text-sm font-semibold text-brand-secondary uppercase">
+              <td className="py-2.5 px-3 border-r border-gray-800/50 text-sm font-semibold text-primary uppercase">
                 <span className="flex items-center gap-2">
                   PALM WIDTH
                   <DimensionModeCycle
@@ -679,23 +679,23 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                       <div className="flex items-center justify-between">
                         <span className="flex items-center gap-2">
                           {/* Permanent (non-deletable) dims — Cuff/Palm/Finger
-                              Thickness — get the same cyan/semibold treatment
-                              as the fixed GLOVE WEIGHT/LENGTH/PALM WIDTH rows,
-                              extending that convention consistently rather
-                              than leaving it fixed-rows-only. Optional/
-                              deletable dims (Beading, future custom adds) get
-                              the same brand-secondary hue at reduced opacity
-                              and weight — same design language, visibly
+                              Thickness — get the same white/semibold
+                              treatment as the fixed GLOVE WEIGHT/LENGTH/PALM
+                              WIDTH rows (all now text-primary, not cyan —
+                              cyan was walked back to keep the label signal
+                              from competing with the state-icon's own cyan/
+                              amber/grey). Optional/deletable dims (Beading,
+                              future custom adds) get the same white at
+                              reduced opacity and weight — same hue, visibly
                               softer — so presence/permanence reads at a
-                              glance without a new color or the state-icon's
-                              own colors (cyan/amber/grey) being confused for
-                              this signal. Inter throughout (no font-mono) —
-                              field names are UI Chrome/labels, not User Data,
-                              per UI_DESIGN_SYSTEM.md §1.3's Golden Rule. */}
+                              glance via weight/opacity only, not a new hue.
+                              Inter throughout (no font-mono) — field names
+                              are UI Chrome/labels, not User Data, per
+                              UI_DESIGN_SYSTEM.md §1.3's Golden Rule. */}
                           <span className={`text-sm uppercase ${
                             isCanonical
-                              ? 'font-semibold text-brand-secondary'
-                              : 'font-medium text-brand-secondary/60'
+                              ? 'font-semibold text-primary'
+                              : 'font-medium text-primary/60'
                           }`}>
                             {def.name}
                           </span>

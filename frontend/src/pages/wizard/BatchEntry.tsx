@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
-import { useConfig, API_BASE_URL, hasUsableCategories, hasUsableProductMatrix, resolveProductMatrix, isDimensionGraded, isWizardVisible, mergeCanonicalDimensionDefs } from '../../context/ConfigContext';
+import { useConfig, API_BASE_URL, hasUsableCategories, hasUsableProductMatrix, resolveProductMatrix, isDimensionGraded, isWizardVisible, mergeCanonicalDimensionDefs, isCanonicalThicknessDim } from '../../context/ConfigContext';
 import { useAuth, authHeader, authIdentity } from '../../context/AuthContext';
 import { useToast } from '../../components/ui/ToastProvider';
 import {
@@ -203,7 +203,16 @@ function BatchModalDimensions({ row, updateRow, config, productCode, size }: any
             <div key={dim.id} className="bg-surface border border-gray-700/50 rounded-lg p-4 shadow-sm hover:border-gray-700 transition-colors">
               {/* Card Header */}
               <div className="flex items-center justify-between border-b border-gray-700/50 pb-3 mb-4">
-                <span className={`text-sm font-bold uppercase tracking-wider flex items-baseline gap-2 ${dim.id.startsWith('__fixed_') ? 'text-brand-secondary' : 'text-primary'}`}>
+                {/* Permanent dims (fixed rows + Cuff/Palm/Finger Thickness via
+                    isCanonicalThicknessDim()) get white/semibold/full
+                    opacity; optional dims (Beading, future custom adds) get
+                    white at reduced weight/opacity — matches
+                    StepDimensions.tsx and the config table's convention. */}
+                <span className={`text-sm uppercase tracking-wider flex items-baseline gap-2 ${
+                  dim.id.startsWith('__fixed_') || isCanonicalThicknessDim(dim)
+                    ? 'font-semibold text-primary'
+                    : 'font-medium text-primary/60'
+                }`}>
                   {dim.name}
                   {/* Same treatment as StepDimensions: a record-only dimension
                       shows no TARGET, since its stored spec is never applied. */}
