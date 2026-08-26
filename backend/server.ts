@@ -26,6 +26,7 @@ import configRouter from './src/routes/config.routes';
 import submissionsRouter, { amendmentsRouter, verdictRouter } from './src/routes/submissions.routes';
 import { pinUsersRouter, pinAuthRouter } from './src/routes/pinUsers.routes';
 import { m365UsersRouter, m365AuthRouter } from './src/routes/m365Users.routes';
+import accessLogRouter from './src/routes/accessLog.routes';
 import devToolsRouter from './src/routes/devTools.routes';
 
 const app = express();
@@ -80,6 +81,7 @@ app.use('/api/pin-users', pinUsersRouter);
 app.use('/api/auth', pinAuthRouter);
 app.use('/api/m365-users', m365UsersRouter);
 app.use('/api/auth', m365AuthRouter);
+app.use('/api/access-log', accessLogRouter);
 
 // Dev-only destructive testing utilities — never mounted in production, on
 // top of that router's own internal NODE_ENV check (devTools.routes.ts):
@@ -112,4 +114,5 @@ https.createServer(httpsOptions, app).listen(PORT, '0.0.0.0', () => {
   console.log(`  M365 Users:  GET   https://localhost:${PORT}/api/m365-users`);
   console.log(`  M365 Users:  PATCH https://localhost:${PORT}/api/m365-users/:id`);
   console.log(`  M365 Login:  POST  https://localhost:${PORT}/api/auth/m365-login`);
+  console.log(`  Access Log:  GET   https://localhost:${PORT}/api/access-log`);
 });

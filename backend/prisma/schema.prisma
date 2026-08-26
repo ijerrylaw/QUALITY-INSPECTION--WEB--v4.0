@@ -441,3 +441,38 @@ model AppConfig {
   /// GET /api/submissions/new-indicator's effectiveLastViewedAt calc).
   lastHistoryViewedAt DateTime?
 }
+
+// ============================================================
+// ACCESS LOG
+// Audit trail for logins (M365 + PIN) and configuration writes. Written
+// from three call sites — m365Users.routes.ts's POST /m365-login,
+// pinUsers.routes.ts's POST /pin-login, and config.routes.ts's
+// PATCH /api/config — via the shared backend/src/lib/accessLog.ts helper.
+// Read-only surface: GET /api/access-log (Group A only, System Admin).
+// ============================================================
+model AccessLog {
+  id        String   @id @default(cuid())
+
+  /// Resolved identity for the event — the AAD object id for an M365 row,
+  /// or PinUser.id for a PIN row. Nullable: a failed M365 login before
+  /// identity resolution (malformed request), or a PIN login attempt
+  /// against an unknown/inactive userId, may not resolve to a real user.
+  userId    String?
+  /// 'OPERATOR' | 'LEADER' | 'SUPERVISOR' | 'INTERN' | 'MANAGER' | 'ADMIN' —
+  /// same nullability reasoning as userId (some M365 states, e.g. a pending
+  /// or bootstrap-eligible login, genuinely have no role assigned yet).
+  role      String?
+  /// 'M365_LOGIN_SUCCESS' | 'M365_LOGIN_FAILURE' | 'PIN_LOGIN_SUCCESS' |
+  /// 'PIN_LOGIN_FAILURE' | 'CONFIG_WRITE' — enforced in route code, not the DB.
+  action    String
+  /// CONFIG_WRITE only — a short label of the configuration section touched
+  /// (e.g. "Product Engine"), derived from which top-level AppConfig fields
+  /// the PATCH payload supplied. Not a diff — see config.routes.ts's
+  /// inferConfigWriteDetail().
+  detail    String?
+  ipAddress String?
+
+  timestamp DateTime @default(now())
+
+  @@index([timestamp])
+}

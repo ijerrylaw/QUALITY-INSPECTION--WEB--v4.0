@@ -59,6 +59,7 @@ import { Router, Request, Response } from 'express';
 import prisma from '../lib/prismaClient';
 import { requireGroup } from '../middleware/auth';
 import { hashPin, verifyPin, isValidSixDigitPin } from '../lib/pin';
+import { logAccess } from '../lib/accessLog';
 
 /// True if `err` is a Prisma unique-constraint violation (code P2002) on the
 /// given column — mirrors submissions.routes.ts's isUniqueConstraintViolation,
@@ -352,15 +353,19 @@ pinAuthRouter.post('/pin-login', async (req: Request, res: Response) => {
     const userId = typeof body.userId === 'string' ? body.userId : '';
 
     if (!userId || !isValidSixDigitPin(body.pin)) {
+      await logAccess(req, { userId: userId || null, role: null, action: 'PIN_LOGIN_FAILURE' });
       res.status(401).json({ error: 'Invalid PIN' });
       return;
     }
 
     const match = await prisma.pinUser.findFirst({ where: { id: userId, active: true } });
     if (!match || !verifyPin(body.pin as string, match.pinHash, match.pinSalt)) {
+      await logAccess(req, { userId, role: match?.role ?? null, action: 'PIN_LOGIN_FAILURE' });
       res.status(401).json({ error: 'Invalid PIN' });
       return;
     }
+
+    await logAccess(req, { userId: match.id, role: match.role, action: 'PIN_LOGIN_SUCCESS' });
 
     res.json({
       id: match.id,

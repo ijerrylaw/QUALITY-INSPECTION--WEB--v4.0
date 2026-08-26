@@ -85,7 +85,7 @@ For floor staff without a company email/Microsoft account (high-turnover roles).
 | `/analytics` | QUALITY ANALYTICS | A, B | Dynamic Pareto charts, defect trends, and machine comparisons. *[PLANNED — partial implementation]* |
 | `/config` | CONFIGURATION CONTROL | A, B | Submenus for Factory Setup, Product Engine, and Quality Rules (profiles, AQL categories, defect definitions). |
 | `/pin-admin` | STAFF PIN ACCESS | A, B | Create/deactivate PIN logins for floor staff (§3.2). |
-| `/system` | SYSTEM ADMIN | A only | Azure AD / SharePoint sync settings (decorative — §1), enterprise user management. |
+| `/system` | SYSTEM ADMIN | A only | Azure AD / SharePoint sync settings (decorative — §1), enterprise user management, read-only access log (M365/PIN logins + config writes, `GET /api/access-log`). |
 
 * **Default landing route:** all roles land on `/wizard` after login.
 * **Unauthorized direct navigation** — typing a gated URL directly, not just having the nav link hidden — bounces to `/wizard`, enforced by `RoleRoute` in `frontend/src/App.tsx`. `RoleRoute`'s allow-lists and `Sidebar.tsx`'s nav-visibility filter are now both derived from the same `rolesInGroups(...)` source (`AuthContext.tsx`), so they cannot silently disagree with each other the way they previously did (`Sidebar` and `RoleRoute` used independently hand-maintained role arrays that had drifted apart on `/analytics`, `/approvals`, and `/config` — see `AUDIT_REPORT.md` §11.1).
@@ -110,7 +110,8 @@ Every mutating backend route is gated by `requireRole(...)`/`requireGroup(...)` 
 | `GET /api/pin-users`, `POST /api/pin-users`, `PATCH /api/pin-users/:id/deactivate` | Group A/B |
 | `POST /api/auth/pin-login` | Ungated — this *is* the login step |
 | `POST /api/auth/pin-change` | Ungated — the correct current PIN *is* the identity check (§3.2) |
-| All `GET` routes (`/api/health`, `/api/config`, `/api/submissions`) and `POST /api/verdict/preview` | Ungated — non-mutating |
+| `GET /api/access-log` | Group A only — the one gated `GET` route; see below |
+| All other `GET` routes (`/api/health`, `/api/config`, `/api/submissions`) and `POST /api/verdict/preview` | Ungated — non-mutating |
 
 Missing header → `401`. Header present but not a recognized role string → `401`. Recognized role outside the route's allow-list → `403`.
 

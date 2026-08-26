@@ -13,6 +13,7 @@ import { Router, Request, Response } from 'express';
 import prisma from '../lib/prismaClient';
 import type { AppConfig } from '../../generated/prisma/client';
 import { requireRole } from '../middleware/auth';
+import { logAccess } from '../lib/accessLog';
 // resolveProductRegistry lives in lib/productEntry.ts as of B4 — shared with
 // the grading engine (resolveVerdict.ts) so both read the registry through
 // exactly one implementation and one fallback policy.
@@ -289,6 +290,36 @@ router.get('/', async (_req: Request, res: Response) => {
   }
 });
 
+/**
+ * Buckets a PATCH /api/config payload into the admin-UI section(s) it
+ * touched, purely from which top-level keys are present — no diff engine,
+ * per the AccessLog CONFIG_WRITE spec. Mirrors which ConfigPage.tsx/
+ * SystemPage.tsx panel actually sends each field (see each panel's
+ * triggerChange()/handleSave()). Joined with ", " on the rare request that
+ * touches more than one bucket (shouldn't normally happen — each panel
+ * saves independently — but a hand-crafted request could).
+ */
+const CONFIG_WRITE_SECTIONS: { label: string; keys: string[] }[] = [
+  { label: 'Factory Setup', keys: ['lines', 'shifts', 'sides'] },
+  { label: 'Quality Rules', keys: ['inspectionProfiles', 'sampleSizes', 'aqlCategories', 'defectDefinitions'] },
+  {
+    label: 'Product Engine',
+    keys: [
+      'productCodes', 'productMatrixConfig', 'productProfileMap', 'productAttributes',
+      'skuMaterials', 'skuWeights', 'skuColors', 'skuTreatments', 'skuLengths', 'skuTextures',
+      'dimensions', 'targetWeight', 'sizes',
+    ],
+  },
+  { label: 'System Admin', keys: ['companyName', 'portalTitle', 'logoImage', 'accentColor'] },
+];
+
+function inferConfigWriteDetail(payload: Record<string, unknown>): string {
+  const sections = CONFIG_WRITE_SECTIONS
+    .filter((section) => section.keys.some((key) => payload[key] !== undefined))
+    .map((section) => section.label);
+  return sections.length > 0 ? sections.join(', ') : 'Configuration';
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PATCH /api/config
 // ─────────────────────────────────────────────────────────────────────────────
@@ -537,6 +568,13 @@ router.patch('/', requireRole('MANAGER', 'ADMIN'), async (req: Request, res: Res
         id: '1',
         ...updateData,
       },
+    });
+
+    await logAccess(req, {
+      userId: null,
+      role: req.header('X-User-Role') ?? null,
+      action: 'CONFIG_WRITE',
+      detail: inferConfigWriteDetail(payload),
     });
 
     res.json({
