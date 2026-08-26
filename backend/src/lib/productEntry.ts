@@ -39,6 +39,18 @@ export interface ProductDimensionDef {
    * engine/dimensionEvaluator.ts for the full rationale.
    */
   isGraded?: boolean;
+  /**
+   * Wizard-visibility mode when explicitly `false`: the field is completely
+   * hidden from the operator in StepDimensions.tsx/BatchEntry.tsx — not
+   * greyed out, absent from the rendered list, never captured, never
+   * evaluated. Independent of `isGraded`: switching this to `false` does
+   * NOT touch or clear `isGraded`, so a field's prior Graded/Record-only
+   * state is preserved and simply resumes once wizard-visibility is
+   * restored. Absent/true = visible — same "default never materialized"
+   * convention as isGraded, for the same locked-code deep-diff reason. See
+   * isWizardVisible() in engine/dimensionEvaluator.ts.
+   */
+  wizardVisible?: boolean;
   /** Format precision for this dynamic dimension (0–3 decimals). */
   decimals?: number;
 }
@@ -70,6 +82,15 @@ export interface ProductConfig {
    */
   lengthIsGraded?: boolean;
   palmWidthIsGraded?: boolean;
+  /**
+   * Wizard-visibility for the fixed GLOVE LENGTH / PALM WIDTH rows — same
+   * semantics as ProductDimensionDef.wizardVisible above (independent of
+   * lengthIsGraded/palmWidthIsGraded, default never materialized). No
+   * `weightWizardVisible` counterpart — Glove Weight is out of scope for
+   * this feature entirely.
+   */
+  lengthWizardVisible?: boolean;
+  palmWidthWizardVisible?: boolean;
 }
 
 /**

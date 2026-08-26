@@ -89,6 +89,12 @@ export interface ProductDimensionDef {
    * PALM WIDTH) are always graded and never carry this flag.
    */
   isGraded?: boolean;
+  /**
+   * Wizard-visibility mode when explicitly `false`: hidden from the
+   * operator entirely (not just record-only) — see isWizardVisible() below.
+   * Independent of isGraded; toggling this never touches isGraded.
+   */
+  wizardVisible?: boolean;
   /** Legacy flat-format fallback fields — rarely populated, mirrored for parity. */
   minSpec?: string;
   tolerance?: string;
@@ -141,6 +147,9 @@ export interface ProductConfig {
    */
   lengthIsGraded?: boolean;
   palmWidthIsGraded?: boolean;
+  /** Wizard-visibility for the fixed rows — see ProductDimensionDef.wizardVisible. No Weight counterpart. */
+  lengthWizardVisible?: boolean;
+  palmWidthWizardVisible?: boolean;
 }
 
 /**
