@@ -10,3 +10,6 @@ __screenshots__/
 # Real One Glove Group production data exports (monthly) — must never enter git history
 *.xlsx
 *.xls
+
+# Local Claude Code session config (launch config, permission allowlist)
+.claude/
