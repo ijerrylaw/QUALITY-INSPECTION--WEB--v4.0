@@ -43,6 +43,10 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
 * **Section Headers (H2):** `text-xl font-bold uppercase text-primary`
 * **Card Headers (H3):** `text-lg font-semibold uppercase text-primary`
 * **Form Labels / Table Headers (`<th>`):** `text-xs font-semibold uppercase tracking-wider text-muted`
+* **Dimension Field Name Labels** (Product Engine's Registered Products table, `ProductConfigAccordion.tsx`; Quality Entry Wizard's Physical Dimensions cards, `StepDimensions.tsx`/`BatchEntry.tsx`): `Inter`, never `font-mono` — the field's *name* (e.g. "CUFF THICKNESS") is a UI Chrome label, not User Data, per the Golden Rule; only its numeric measurement values are `font-mono`. Permanence (whether the field is a permanent, non-deletable slot vs. an optional/deletable one) is signaled by weight and opacity only, never by a distinct hue, so it never competes with the per-row Dimension Mode control's own state colors (Ruler/cyan = Graded, Eye/amber = Record Only, EyeOff/grey = Off — §4.14):
+  - **Permanent** (Glove Weight, Glove Length, Palm Width, Cuff/Palm/Finger Thickness): `text-sm font-semibold text-primary uppercase` — full-opacity white.
+  - **Optional/deletable** (Beading Thickness, any future admin-added custom dimension): `text-sm font-medium text-primary/60 uppercase` — same white, reduced weight and 60% opacity.
+  - Both files derive "permanent vs. optional" from the same `isCanonicalThicknessDim()` check already used to gate the Trash/rename controls — never a second, independently-maintained list.
 
 ### 1.4 Iconography
 * **Library:** `lucide-react` exclusively.
@@ -244,6 +248,16 @@ To maintain absolute consistency, all small contextual overlays MUST adhere to t
   - **Used, below the cap:** A muted `text-[10px] font-mono text-muted` counter (`"{N} of {MAX} amendments used"`) sits beside the still-active action button.
   - **Cap reached:** The action button is replaced entirely by an Amber label (`text-[10px] font-bold uppercase tracking-wider text-amber-400/70`, `"Maximum amendments reached ({N}/{MAX})"`) — Amber per §4.9's Action Required semantic, not Rose, since this is an expected lifecycle end-state, not a failure.
 * **Use case:** `HistoryFeed.tsx`'s AMEND RECORD button/counter, gated by the 3-approved-amendment lifetime cap (`DATA_SCHEMAS_AND_TYPES.md` §1's Business Rule).
+
+### 4.14 Dimension Mode Control (Cycling Icon)
+* **Purpose:** A single, compact control per dimension row in Product Engine's Registered Products table (`ProductConfigAccordion.tsx`) that sets a 3-state mode — whether the field is graded, captured-but-not-graded, or hidden from the operator entirely. No dropdown/menu and no visible text in the row itself; the state name is a hover-only `title` tooltip.
+* **Interaction:** A single icon button. Click advances the state forward only, in a fixed cycle with no reverse shortcut: **Graded → Record Only → Off → Graded**.
+* **Icons & Colors (`lucide-react`, `w-3.5 h-3.5`, `strokeWidth={2}` per §1.4):**
+  - **Graded:** `Ruler`, `text-brand-secondary` (cyan).
+  - **Record Only:** `Eye`, `text-amber-400`.
+  - **Off:** `EyeOff`, `text-gray-500` — hidden from the operator's wizard view entirely (not merely greyed out); the stored spec is preserved and restored unchanged if the field is switched back.
+* **Applies to:** Glove Length, Palm Width, and every dynamic dimension (Cuff/Palm/Finger Thickness, Beading Thickness, any future admin-added custom dimension). Glove Weight is exempt — no control, always graded, no record-only or off mode exists for it.
+* **Distinct from the field-name label itself** (§1.3's Dimension Field Name Labels): the label's white/weight/opacity treatment signals *permanence* (can this field be deleted), while this control's cyan/amber/grey signals *mode* (is this field currently graded) — two independent signals on the same row, deliberately never sharing a color so neither is mistaken for the other.
 
 ---
 
