@@ -245,13 +245,13 @@ export function PinAdminPanel() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
       {/* Create Form */}
-      <div className="lg:col-span-1 bg-surface border border-gray-800 rounded-xl shadow-sm overflow-hidden h-fit">
-        <div className="bg-canvas border-b border-gray-800 p-6 flex items-center gap-3">
-          <UserPlus className="w-5 h-5 text-brand-secondary" />
-          <h3 className="text-lg font-bold text-primary uppercase">Add Staff PIN</h3>
+      <div className="lg:col-span-1 bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm h-fit">
+        <div className="bg-surface border-b border-gray-800 p-4 flex items-center gap-3">
+          <UserPlus className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
+          <h3 className="text-lg font-semibold text-primary uppercase">Add Staff PIN</h3>
         </div>
 
-        <form onSubmit={handleCreate} className="p-6 space-y-5">
+        <form onSubmit={handleCreate} className="p-4 space-y-5">
           <div className="space-y-2">
             <label className="text-xs font-semibold uppercase tracking-wider text-muted">Name</label>
             <input
@@ -327,9 +327,9 @@ export function PinAdminPanel() {
       </div>
 
       {/* Roster List */}
-      <div className="lg:col-span-2 bg-surface border border-gray-800 rounded-xl shadow-sm overflow-hidden">
-        <div className="bg-canvas border-b border-gray-800 p-6 flex items-center justify-between gap-3">
-          <h3 className="text-lg font-bold text-primary uppercase">Staff Roster</h3>
+      <div className="lg:col-span-2 bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
+        <div className="bg-surface border-b border-gray-800 p-4 flex items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold text-primary uppercase">Staff Roster</h3>
           <div className="flex items-center gap-2">
             <Button
               variant="secondary"
@@ -434,34 +434,41 @@ export function PinAdminPanel() {
                     </div>
                   </td>
                   <td className="px-6 py-3 text-right">
+                    {/* Icon-only + title tooltip (matches M365UserRolesPanel.tsx's
+                        Actions column) — full-text buttons here pushed the table
+                        past the card's width and forced horizontal scroll to
+                        reach these actions. */}
                     <div className="inline-flex items-center gap-2">
                       {pu.active && (
                         <Button
                           variant="secondary"
-                          className="px-3 h-8 inline-flex items-center gap-1.5"
+                          size="icon"
                           onClick={() => startResetPin(pu)}
+                          title="Reset PIN"
                         >
-                          <KeyRound className="w-3.5 h-3.5" /> Reset PIN
+                          <KeyRound className="w-3.5 h-3.5" />
                         </Button>
                       )}
                       {pu.active && (
                         <Button
                           variant="danger"
-                          className="px-3 h-8 inline-flex items-center gap-1.5"
+                          size="icon"
                           onClick={() => handleDeactivate(pu.id)}
+                          title="Deactivate"
                         >
-                          <UserX className="w-3.5 h-3.5" /> Deactivate
+                          <UserX className="w-3.5 h-3.5" />
                         </Button>
                       )}
                       <Button
                         variant="danger"
-                        className="px-3 h-8 inline-flex items-center gap-1.5"
+                        size="icon"
                         onClick={() => {
                           setDeleteError(null);
                           setConfirmDeleteId(pu.id);
                         }}
+                        title="Delete"
                       >
-                        <Trash2 className="w-3.5 h-3.5" /> Delete
+                        <Trash2 className="w-3.5 h-3.5" />
                       </Button>
                     </div>
                   </td>
