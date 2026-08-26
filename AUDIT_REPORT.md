@@ -447,3 +447,38 @@ with its full original context, reasoning, and verification trail.
     new evaluation mode. Deliberately not edited as part of this build, per
     standing convention.
 
+28. **Doc update deferred for dimension field label styling, across two
+    builds (2026-08-26).** `UI_DESIGN_SYSTEM.md` §1.3 needs a pass to
+    formally document the current label convention for dimension field
+    names in `ProductConfigAccordion.tsx` and `StepDimensions.tsx`/
+    `BatchEntry.tsx`:
+    - **Color:** labels were cyan (`text-brand-secondary`) as of item #27's
+      build; a later pass in this same session switched all of them to
+      white (`text-primary`) instead, so the label no longer competes with
+      the cycling-icon control's own state colors (cyan=GRADED, amber=
+      RECORD ONLY, grey=OFF — see item #27) sitting on the same row.
+    - **Permanent vs. optional distinction:** now expressed purely via
+      weight/opacity, not hue — full-opacity `font-semibold text-primary`
+      for permanent, non-deletable fields (Glove Weight/Length/Palm Width,
+      Cuff/Palm/Finger Thickness) vs. `font-medium text-primary/60` for
+      optional/deletable fields (Beading Thickness, any future custom
+      dim). Both `ProductConfigAccordion.tsx` and `StepDimensions.tsx`/
+      `BatchEntry.tsx` now apply this identically, driven by the same
+      `isCanonicalThicknessDim()` check already used elsewhere (e.g. to
+      gate the Trash button) — the wizard files previously had no such
+      distinction at all before this pass.
+    - **Font family:** confirmed font-mono-free on these labels in all
+      three files — field names are UI Chrome/labels, not User Data, per
+      §1.3's Golden Rule, so `JetBrains Mono` never applies here regardless
+      of category. (`ProductConfigAccordion.tsx`'s dynamic-dim label was
+      actually still `font-mono` before item #27's build corrected it —
+      already fixed, just calling it out as part of what needs documenting.)
+
+    Note item #27's dropdown-control mention is itself now superseded — a
+    later session in this same day replaced `DimensionModeSelect` (the
+    dropdown) with a single cycling icon (`DimensionModeCycle`); whichever
+    doc pass addresses these two follow-ups should describe the current
+    icon-based control, not the dropdown. Deliberately not edited as part
+    of either build, per standing convention — doc updates are their own
+    explicit follow-up step.
+
