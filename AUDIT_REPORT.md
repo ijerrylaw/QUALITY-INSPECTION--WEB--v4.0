@@ -383,3 +383,48 @@ with its full original context, reasoning, and verification trail.
     and `/api/dev` mount outright rather than relying on the gate
     indefinitely.
 
+25. **`N035MNV-OC-24FT`'s stored `dimensionDefs` have swapped ids/names —
+    pre-existing data bug, unrelated to and not fixed by the
+    Weight/Length/Palm Width/Cuff/Palm/Finger unification (2026-08-26).**
+    Discovered while auditing `dev.db` for the canonical-id convention that
+    build's presence-axis work relies on. Every other product with a
+    `cuffThickness`/`palmThickness`/`fingerThickness` triplet has each id
+    correctly paired with its matching name, e.g. `{id: "cuffThickness",
+    name: "CUFF THICKNESS"}`. `N035MNV-OC-24FT` instead has:
+    ```json
+    {"id": "fingerThickness", "name": "CUFF THICKNESS", ...}
+    {"id": "palmThickness",   "name": "PALM THICKNESS", ...}
+    {"id": "dim_1785494533463", "name": "FINGER THICKNESS", ...}
+    ```
+    — i.e. the row labeled "CUFF THICKNESS" is actually stored under the
+    `fingerThickness` id, and "FINGER THICKNESS" is under an unrelated
+    random id, not `fingerThickness`. Any historical submission measurements
+    for this product are keyed by whichever id was live at entry time, so
+    they display under the id's stored *name*, not necessarily the physically
+    correct dimension. Left untouched deliberately: the canonical-merge logic
+    added in this build (`mergeCanonicalDimensionDefs()`,
+    `ConfigContext.tsx`/`dimensionEvaluator.ts`) matches by *name*, so this
+    product's "CUFF THICKNESS" and "FINGER THICKNESS" rows both already
+    satisfy presence under their current (mismatched) ids — renaming/re-iding
+    them to fix the swap would orphan whatever historical measurements
+    already point at those ids. Needs a human decision (and likely a
+    one-off, data-only correction script, not a config-save) before it can
+    be fixed safely.
+
+26. **Doc updates deferred following the Weight/Length/Palm Width/Cuff/Palm/
+    Finger unification build (2026-08-26).** `DATA_SCHEMAS_AND_TYPES.md` §3
+    (`ProductDimensionDef`/`ProductConfig`/`SizeConfig`) needs a pass to
+    document the new `ProductConfig.lengthIsGraded`/`palmWidthIsGraded`
+    fields (mirroring `ProductDimensionDef.isGraded`'s existing docs, same
+    "only literal `false` is ever written" convention) and to note that
+    Glove Weight now has a real grading evaluator (always-on, no
+    record-only mode — deliberately no `weightIsGraded` counterpart).
+    `ISO2859_MATH_ENGINE.md` §5 needs an update describing
+    `evaluateWeight()` (`backend/src/engine/dimensionEvaluator.ts`) — a
+    scalar single-value threshold check, distinct from every other
+    dimension's 5-slot measurement — and the presence-axis rule that Cuff/
+    Palm/Finger Thickness (not Beading) are now permanent, non-deletable
+    slots on every product via `mergeCanonicalDimensionDefs()`. Deliberately
+    not edited as part of this build, per standing convention (doc updates
+    are their own explicit follow-up step, not a silent mid-task revision).
+
