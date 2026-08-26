@@ -36,9 +36,10 @@ import {
   Eye,
 } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastProvider';
-import { useConfig, API_BASE_URL } from '../../context/ConfigContext';
+import { useConfig, API_BASE_URL, resolveProductMatrix } from '../../context/ConfigContext';
 import type { AQLCategory, DefectDefinition } from '../../context/ConfigContext';
 import { SubmissionSummary } from './SubmissionSummary';
+import { evaluateGloveWeightClient } from '../../lib/fixedDimensions';
 
 /**
  * Returns true when the category is RECORD ONLY — excluded from verdict
@@ -134,7 +135,7 @@ interface CategoryVerdictRow {
 
 export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpdate }: StepReviewSubmitProps) {
   const { addToast } = useToast();
-  const { getResolvedProfile } = useConfig();
+  const { config, getResolvedProfile } = useConfig();
 
   const [retainContext, setRetainContext] = useState<boolean>(true);
   const [previewState, setPreviewState] = useState<VerdictPreviewState>({ status: 'loading' });
@@ -208,8 +209,23 @@ export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpd
       if (dim?.isGraded === false) return;
       if (dim?.fails?.some((f: boolean) => f === true)) failed++;
     });
+
+    // Glove Weight is a scalar (Submission.gloveWeight), never part of the
+    // 5-slot `dimensionStats` map, and always graded — no isGraded check
+    // needed here, unlike the loop above. Mirrors evaluateWeight()
+    // (backend/src/engine/dimensionEvaluator.ts) via the shared client
+    // formula in fixedDimensions.ts.
+    const gloveWeight = inspectionData?.gloveWeight;
+    if (typeof gloveWeight === 'number') {
+      const matrixEntry = resolveProductMatrix(config, inspectionData?.productCode);
+      const sizeEntry = matrixEntry?.sizes?.[inspectionData?.size];
+      if (evaluateGloveWeightClient(gloveWeight, sizeEntry?.weightTarget, sizeEntry?.weightTolerance)) {
+        failed++;
+      }
+    }
+
     return failed;
-  }, [inspectionData?.dimensionStats]);
+  }, [inspectionData?.dimensionStats, inspectionData?.gloveWeight, inspectionData?.productCode, inspectionData?.size, config]);
 
   // ── Derive render-facing verdict values from server state + dimensions ────
   const overallVerdict: 'PASS' | 'FAIL' | null =

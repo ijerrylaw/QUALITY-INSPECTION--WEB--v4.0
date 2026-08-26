@@ -198,6 +198,21 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
    * Purely a mode flag: no minSpec or tolerance is read, written, cleared or
    * zeroed here, in either direction, however many times it is toggled.
    */
+  /**
+   * Same toggle rule as handleToggleGraded, but for the fixed GLOVE LENGTH /
+   * PALM WIDTH rows, whose graded flag lives directly on ProductConfig
+   * (lengthIsGraded/palmWidthIsGraded) rather than inside a dimensionDefs
+   * array element. Reverting to Graded sends `undefined` for the field —
+   * JSON.stringify/JSON serialization drops an undefined-valued key
+   * entirely, the same net effect as handleToggleGraded's rest-destructure,
+   * so a toggle-then-toggle-back round-trip is still byte-identical.
+   */
+  const handleToggleFixedGraded = (field: 'lengthIsGraded' | 'palmWidthIsGraded') => {
+    if (isReadOnly) return;
+    const graded = isDimensionGraded({ isGraded: config[field] });
+    triggerChange({ [field]: graded ? false : undefined });
+  };
+
   const handleToggleGraded = (dimId: string) => {
     if (isReadOnly) return;
     const updatedDefs = dimensionDefs.map(d => {
@@ -339,9 +354,32 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
             </tr>
 
             {/* GLOVE LENGTH */}
+            {(() => {
+              const lengthGraded = isDimensionGraded({ isGraded: config.lengthIsGraded });
+              return (
             <tr className="hover:bg-surface-light/40 transition-colors border-b border-gray-800/50">
               <td className="py-2.5 px-3 border-r border-gray-800/50 text-sm font-semibold text-brand-secondary uppercase">
-                GLOVE LENGTH
+                <span className="flex items-center gap-2">
+                  GLOVE LENGTH
+                  <button
+                    onClick={() => handleToggleFixedGraded('lengthIsGraded')}
+                    disabled={isReadOnly}
+                    className={`w-6 h-6 rounded flex items-center justify-center shrink-0 outline-none transition-colors ${
+                      isReadOnly
+                        ? `cursor-default ${lengthGraded ? 'text-emerald-400/60' : 'text-gray-500'}`
+                        : lengthGraded
+                          ? 'text-emerald-400 hover:bg-emerald-500/20'
+                          : 'text-gray-400 hover:bg-gray-500/20'
+                    }`}
+                    title={isReadOnly
+                      ? (lengthGraded ? 'Graded' : 'Record-only')
+                      : lengthGraded
+                        ? 'Graded — click to make Record-only'
+                        : 'Record-only — click to make Graded'}
+                  >
+                    {lengthGraded ? <Ruler className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </span>
               </td>
               <td className="py-2 px-2 border-r border-gray-800/50 text-center align-top">
                 <span className="text-[11px] font-bold uppercase text-muted font-mono block">mm</span>
@@ -350,41 +388,48 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                   onChange={dec => handleFixedRowFormatChange('lengthDecimals', 'lengthTarget', 'lengthTolerance', dec)}
                 />
               </td>
-              
+
               {STANDARD_SIZES.map(size => {
                 const isActive = !!sizes[size];
                 const lenTarget = sizes[size]?.lengthTarget || '';
                 const lenTol = sizes[size]?.lengthTolerance || '';
+                const specDisabled = !isActive || isReadOnly || !lengthGraded;
 
                 return (
                   <React.Fragment key={size}>
                     <td className={`py-2.5 px-2 border-r border-gray-800/50 transition-colors ${isActive ? 'bg-canvas/10' : 'bg-canvas/50'}`}>
-                      <input 
+                      <input
                         type="text"
                         value={lenTarget}
-                        disabled={!isActive || isReadOnly}
+                        disabled={specDisabled}
+                        title={!lengthGraded ? 'Record-only — this dimension is not graded, so its spec is not applied' : undefined}
                         onChange={e => handleUpdateFixed(size, 'lengthTarget', formatTarget(e.target.value))}
                         onFocus={handleFocusSnapshot}
                         onBlur={e => handleRoundOnBlur(e, config.lengthDecimals ?? 0, v => handleUpdateFixed(size, 'lengthTarget', v))}
                         className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
-                          isActive 
-                            ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary' 
-                            : 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
+                          !isActive
+                            ? 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
+                            : !lengthGraded
+                              ? 'bg-canvas/40 border border-gray-800 text-gray-600 cursor-not-allowed'
+                              : 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary'
                         }`}
                       />
                     </td>
                     <td className={`py-2.5 px-2 border-r border-gray-800/50 transition-colors ${!isActive ? 'bg-canvas/50' : 'bg-canvas/10'}`}>
-                      <input 
+                      <input
                         type="text"
                         value={lenTol}
-                        disabled={!isActive || isReadOnly}
+                        disabled={specDisabled}
+                        title={!lengthGraded ? 'Record-only — this dimension is not graded, so its spec is not applied' : undefined}
                         onChange={e => handleUpdateFixed(size, 'lengthTolerance', formatTolerance(e.target.value))}
                         onFocus={handleFocusSnapshot}
                         onBlur={e => handleRoundOnBlur(e, config.lengthDecimals ?? 0, v => handleUpdateFixed(size, 'lengthTolerance', v))}
                         className={`w-full h-9 rounded-md px-1 text-sm font-mono text-center outline-none transition-all ${
-                          isActive 
-                            ? `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${lenTol.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}` 
-                            : 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
+                          !isActive
+                            ? 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
+                            : !lengthGraded
+                              ? 'bg-canvas/40 border border-gray-800 text-gray-600 cursor-not-allowed'
+                              : `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${lenTol.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}`
                         }`}
                       />
                     </td>
@@ -392,11 +437,36 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                 );
               })}
             </tr>
+              );
+            })()}
 
             {/* PALM WIDTH */}
+            {(() => {
+              const palmGraded = isDimensionGraded({ isGraded: config.palmWidthIsGraded });
+              return (
             <tr className="hover:bg-surface-light/40 transition-colors border-b border-gray-800/50">
               <td className="py-2.5 px-3 border-r border-gray-800/50 text-sm font-semibold text-brand-secondary uppercase">
-                PALM WIDTH
+                <span className="flex items-center gap-2">
+                  PALM WIDTH
+                  <button
+                    onClick={() => handleToggleFixedGraded('palmWidthIsGraded')}
+                    disabled={isReadOnly}
+                    className={`w-6 h-6 rounded flex items-center justify-center shrink-0 outline-none transition-colors ${
+                      isReadOnly
+                        ? `cursor-default ${palmGraded ? 'text-emerald-400/60' : 'text-gray-500'}`
+                        : palmGraded
+                          ? 'text-emerald-400 hover:bg-emerald-500/20'
+                          : 'text-gray-400 hover:bg-gray-500/20'
+                    }`}
+                    title={isReadOnly
+                      ? (palmGraded ? 'Graded' : 'Record-only')
+                      : palmGraded
+                        ? 'Graded — click to make Record-only'
+                        : 'Record-only — click to make Graded'}
+                  >
+                    {palmGraded ? <Ruler className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </span>
               </td>
               <td className="py-2 px-2 border-r border-gray-800/50 text-center align-top">
                 <span className="text-[11px] font-bold uppercase text-muted font-mono block">mm</span>
@@ -405,41 +475,48 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                   onChange={dec => handleFixedRowFormatChange('palmWidthDecimals', 'palmWidthTarget', 'palmWidthTolerance', dec)}
                 />
               </td>
-              
+
               {STANDARD_SIZES.map(size => {
                 const isActive = !!sizes[size];
                 const palmTarget = sizes[size]?.palmWidthTarget || '';
                 const palmTol = sizes[size]?.palmWidthTolerance || '';
+                const specDisabled = !isActive || isReadOnly || !palmGraded;
 
                 return (
                   <React.Fragment key={size}>
                     <td className={`py-2.5 px-2 border-r border-gray-800/50 transition-colors ${isActive ? 'bg-canvas/10' : 'bg-canvas/50'}`}>
-                      <input 
+                      <input
                         type="text"
                         value={palmTarget}
-                        disabled={!isActive || isReadOnly}
+                        disabled={specDisabled}
+                        title={!palmGraded ? 'Record-only — this dimension is not graded, so its spec is not applied' : undefined}
                         onChange={e => handleUpdateFixed(size, 'palmWidthTarget', formatTarget(e.target.value))}
                         onFocus={handleFocusSnapshot}
                         onBlur={e => handleRoundOnBlur(e, config.palmWidthDecimals ?? 0, v => handleUpdateFixed(size, 'palmWidthTarget', v))}
                         className={`w-full h-9 rounded-md px-2 text-sm font-mono text-center outline-none transition-all ${
-                          isActive 
-                            ? 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary' 
-                            : 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
+                          !isActive
+                            ? 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
+                            : !palmGraded
+                              ? 'bg-canvas/40 border border-gray-800 text-gray-600 cursor-not-allowed'
+                              : 'bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary text-primary'
                         }`}
                       />
                     </td>
                     <td className={`py-2.5 px-2 border-r border-gray-800/50 transition-colors ${!isActive ? 'bg-canvas/50' : 'bg-canvas/10'}`}>
-                      <input 
+                      <input
                         type="text"
                         value={palmTol}
-                        disabled={!isActive || isReadOnly}
+                        disabled={specDisabled}
+                        title={!palmGraded ? 'Record-only — this dimension is not graded, so its spec is not applied' : undefined}
                         onChange={e => handleUpdateFixed(size, 'palmWidthTolerance', formatTolerance(e.target.value))}
                         onFocus={handleFocusSnapshot}
                         onBlur={e => handleRoundOnBlur(e, config.palmWidthDecimals ?? 0, v => handleUpdateFixed(size, 'palmWidthTolerance', v))}
                         className={`w-full h-9 rounded-md px-1 text-sm font-mono text-center outline-none transition-all ${
-                          isActive 
-                            ? `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${palmTol.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}` 
-                            : 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
+                          !isActive
+                            ? 'bg-transparent border-transparent text-gray-700 cursor-not-allowed'
+                            : !palmGraded
+                              ? 'bg-canvas/40 border border-gray-800 text-gray-600 cursor-not-allowed'
+                              : `bg-canvas border border-gray-700 focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary ${palmTol.toUpperCase() === 'MIN' ? 'text-rose-400 font-bold' : 'text-primary'}`
                         }`}
                       />
                     </td>
@@ -447,6 +524,8 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                 );
               })}
             </tr>
+              );
+            })()}
 
             {/* DYNAMIC DIMENSIONS */}
             {dimensionDefs.map((def, index) => {

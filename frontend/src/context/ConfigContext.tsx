@@ -125,6 +125,14 @@ export interface ProductConfig {
   weightDecimals?: number;
   lengthDecimals?: number;
   palmWidthDecimals?: number;
+  /**
+   * Graded/Record-only for the fixed GLOVE LENGTH / PALM WIDTH rows — same
+   * "only literal `false` means record-only, default never materialized"
+   * convention as ProductDimensionDef.isGraded (see isDimensionGraded()
+   * above). No `weightIsGraded`: Glove Weight has no record-only mode.
+   */
+  lengthIsGraded?: boolean;
+  palmWidthIsGraded?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

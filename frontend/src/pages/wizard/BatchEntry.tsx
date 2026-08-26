@@ -43,6 +43,7 @@ function BatchModalDimensions({ row, updateRow, config, productCode, size }: any
         unit:     'mm',
         isMin:    false,
         decimals: matrixEntry?.lengthDecimals ?? 0,
+        isGraded: matrixEntry?.lengthIsGraded,
       },
       {
         id:       '__fixed_palm__',
@@ -50,6 +51,7 @@ function BatchModalDimensions({ row, updateRow, config, productCode, size }: any
         unit:     'mm',
         isMin:    false,
         decimals: matrixEntry?.palmWidthDecimals ?? 0,
+        isGraded: matrixEntry?.palmWidthIsGraded,
       },
       ...(matrixEntry?.dimensionDefs || config?.dimensions || [])
     ];

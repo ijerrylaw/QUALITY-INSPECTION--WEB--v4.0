@@ -92,6 +92,7 @@ export function StepDimensions({
         unit:     'mm',
         isMin:    false,
         decimals: matrixEntry?.lengthDecimals ?? 0,
+        isGraded: matrixEntry?.lengthIsGraded,
       },
       {
         id:       FIXED_DIM_PALM,
@@ -99,6 +100,7 @@ export function StepDimensions({
         unit:     'mm',
         isMin:    false,
         decimals: matrixEntry?.palmWidthDecimals ?? 0,
+        isGraded: matrixEntry?.palmWidthIsGraded,
       },
     ];
   }, [matrixEntry]);
