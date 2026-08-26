@@ -301,3 +301,51 @@ with its full original context, reasoning, and verification trail.
     total stays server-verdict-derived (doesn't double-count the RECORD ONLY
     quantity). Both tests pass.
 
+23. **RESOLVED 2026-08-26.** ~~Stale dimension state on product switch
+    (`WizardPage.tsx` `handleUpdate`).~~ Switching products mid-wizard (Batch
+    Setup → Dimensions → back → different product → Dimensions) left MIN/MAX
+    badges and pre-filled sample values stuck on the previous product's spec,
+    while the TARGET label correctly updated. Caused false OUT OF SPEC
+    grading against stale numbers.
+
+    **Severity:** Medium (false grading, not data corruption — no submission
+    was affected, caught during manual wizard testing before real
+    config/real users).
+
+    **Root cause:** `WizardPage.tsx:160` `handleUpdate` did a naive
+    `{...prev, ...partial}` merge; `StepDimensions.tsx:184` trusted
+    non-empty `initialData.dimensions` verbatim on every mount instead of
+    re-deriving from the current product spec.
+
+    **Fix:** `WizardPage.tsx:160-174` — `handleUpdate` now strips
+    `dimensions`/`dimensionStats`/`dimensionDirtySlots` from `prev` when
+    `productCode` or `size` changes in the incoming partial, forcing
+    `StepDimensions` to reseed fresh defaults on next visit.
+
+    **Verification status: CLOSED.** Fix confirmed fully general via kiosk
+    PIN login (Jason Tan) across 4 products spanning every structural
+    variant in the current 18-product config:
+    - N035MNV-OC-24FT, N035MBK-OC-24FT, N050MNV-OC-24FT — standard
+      3-dimension fully-specced products.
+    - N025SKB-OC-24FT — the one structural outlier in config: 4
+      `dimensionDefs` (vs. the usual 3) including a RECORD-ONLY dimension
+      ("BEADING THICKNESS", `isGraded: false`, `minSpec`/`tolerance` stored
+      as empty strings). Confirmed via direct DOM read that all 5 Beading
+      slots reset to genuine empty strings (not stale carryover) on entry,
+      and the card fully disappears (6→5 dimension count, not orphaned) on
+      switching away. Compliance tracker correctly excluded ungraded slots
+      from the pass count throughout.
+
+    No other product in config has a RECORD-ONLY dimension, a differing
+    dimension count, or any other structural variance — so no further edge
+    cases remain to test against the current catalog. Fix mechanism (clears
+    the whole dimensions/dimensionStats/dimensionDirtySlots bucket keyed
+    only on productCode/size change) is dimension-count- and
+    grading-mode-agnostic, so it should hold automatically for any future
+    product added to config, RECORD-ONLY or otherwise.
+
+    **Related (not a bug):** Cuff Thickness's "1,2,3,4,5" placeholder text
+    is generic `placeholder={(idx+1)}` slot-index hint
+    (`StepDimensions.tsx:471`), unrelated to spec data, applies to every
+    dimension card by design.
+

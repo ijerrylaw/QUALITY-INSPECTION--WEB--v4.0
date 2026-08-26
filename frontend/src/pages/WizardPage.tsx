@@ -158,7 +158,20 @@ export function WizardPage() {
   // ── Auto-save: partial merge into inspectionData on every change ──────────
   // All step components call this instead of waiting for the "Next" button.
   const handleUpdate = useCallback((partial: Record<string, any>) => {
-    setInspectionData((prev) => ({ ...prev, ...partial }));
+    setInspectionData((prev) => {
+      // Product/size switch invalidates any dimension measurements already
+      // recorded against the OLD product's spec — StepDimensions re-seeds
+      // sample inputs from `initialData.dimensions` on mount, so a stale,
+      // non-empty value here would otherwise survive the switch and get
+      // graded against the new product's MIN/MAX (false OUT OF SPEC counts).
+      const productChanged = 'productCode' in partial && partial.productCode !== prev.productCode;
+      const sizeChanged = 'size' in partial && partial.size !== prev.size;
+      if ((productChanged || sizeChanged) && (prev.dimensions || prev.dimensionStats || prev.dimensionDirtySlots)) {
+        const { dimensions: _d, dimensionStats: _ds, dimensionDirtySlots: _dds, ...rest } = prev;
+        return { ...rest, ...partial };
+      }
+      return { ...prev, ...partial };
+    });
   }, []);
 
   // ── Sidebar navigation guard: share "is this entry dirty" with Sidebar.tsx ─
