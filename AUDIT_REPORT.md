@@ -428,3 +428,22 @@ with its full original context, reasoning, and verification trail.
     not edited as part of this build, per standing convention (doc updates
     are their own explicit follow-up step, not a silent mid-task revision).
 
+27. **Doc updates deferred following the wizard-visibility (OFF/RECORD ONLY/
+    GRADED) build (2026-08-26).** `DATA_SCHEMAS_AND_TYPES.md` §3 needs a pass
+    to document the new `ProductDimensionDef.wizardVisible` and
+    `ProductConfig.lengthWizardVisible`/`palmWidthWizardVisible` fields —
+    same "only literal `false` is ever written, default never materialized"
+    convention as `isGraded`, but a genuinely independent flag (toggling one
+    never touches the other). `UI_DESIGN_SYSTEM.md` needs an update
+    documenting the `DimensionModeSelect` dropdown control
+    (`ProductConfigAccordion.tsx`) that replaced the Ruler/Eye icon toggle
+    for Length/Palm Width/Cuff/Palm/Finger/Beading (Glove Weight's row is
+    unaffected, no control) — a single combined 3-state control per row,
+    same interaction pattern as the existing per-row decimals FormatSelect.
+    Also worth noting once documented: an OFF dimension is filtered out of
+    `StepDimensions.tsx`/`BatchEntry.tsx`'s rendered list entirely (not
+    greyed out), and never reaches `dimensionEvaluator.ts`'s evaluation loop
+    at all — a strict superset of the existing RECORD ONLY skip-path, not a
+    new evaluation mode. Deliberately not edited as part of this build, per
+    standing convention.
+
