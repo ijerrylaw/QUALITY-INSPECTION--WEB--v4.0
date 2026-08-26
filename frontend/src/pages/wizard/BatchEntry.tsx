@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
-import { useConfig, API_BASE_URL, hasUsableCategories, hasUsableProductMatrix, resolveProductMatrix, isDimensionGraded } from '../../context/ConfigContext';
+import { useConfig, API_BASE_URL, hasUsableCategories, hasUsableProductMatrix, resolveProductMatrix, isDimensionGraded, mergeCanonicalDimensionDefs } from '../../context/ConfigContext';
 import { useAuth, authHeader, authIdentity } from '../../context/AuthContext';
 import { useToast } from '../../components/ui/ToastProvider';
 import {
@@ -53,7 +53,9 @@ function BatchModalDimensions({ row, updateRow, config, productCode, size }: any
         decimals: matrixEntry?.palmWidthDecimals ?? 0,
         isGraded: matrixEntry?.palmWidthIsGraded,
       },
-      ...(matrixEntry?.dimensionDefs || config?.dimensions || [])
+      // Merged so Cuff/Palm/Finger Thickness always appear as measurable
+      // cards, even for a product that has never explicitly stored them.
+      ...mergeCanonicalDimensionDefs(matrixEntry?.dimensionDefs || config?.dimensions || [])
     ];
   }, [matrixEntry, config]);
 
@@ -80,7 +82,7 @@ function BatchModalDimensions({ row, updateRow, config, productCode, size }: any
         isMin,
       };
     }
-    const dimDef = activeDimensions.find((d: any) => d.id === dimId);
+    const dimDef = (activeDimensions as any[]).find((d: any) => d.id === dimId);
     return {
       minSpec:   parseFloat(dimDef?.minSpec ?? '0') || 0,
       tolerance: parseFloat(dimDef?.tolerance ?? '0') || 0,

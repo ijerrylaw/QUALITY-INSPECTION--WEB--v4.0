@@ -36,7 +36,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Ruler, CheckCircle2, AlertTriangle, AlertCircle, Info } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastProvider';
-import { useConfig, hasUsableProductMatrix, resolveProductMatrix, isDimensionGraded } from '../../context/ConfigContext';
+import { useConfig, hasUsableProductMatrix, resolveProductMatrix, isDimensionGraded, mergeCanonicalDimensionDefs } from '../../context/ConfigContext';
 import { OriginalValueNote, hasFieldChanged } from '../../utils/fieldDiff';
 import { FIXED_DIM_LENGTH, FIXED_DIM_PALM, FIXED_DIMENSION_LABELS } from '../../lib/fixedDimensions';
 import type { ProductDimensionDef } from '../../context/ConfigContext';
@@ -106,14 +106,17 @@ export function StepDimensions({
   }, [matrixEntry]);
 
   // ── Dynamic dimension definitions from Product Engine ─────────────────────
+  // Merged so Cuff/Palm/Finger Thickness always appear as measurable cards,
+  // even for a product that has never explicitly stored them — see
+  // mergeCanonicalDimensionDefs()'s docs.
   const dynamicDimensions = useMemo((): ProductDimensionDef[] => {
     if (matrixEntry?.dimensionDefs && matrixEntry.dimensionDefs.length > 0) {
-      return matrixEntry.dimensionDefs;
+      return mergeCanonicalDimensionDefs(matrixEntry.dimensionDefs);
     }
     if (config?.dimensions && config.dimensions.length > 0) {
-      return config.dimensions;
+      return mergeCanonicalDimensionDefs(config.dimensions);
     }
-    return [];
+    return mergeCanonicalDimensionDefs([]);
   }, [config, matrixEntry]);
 
   // ── All dimensions: fixed first, then dynamic ─────────────────────────────

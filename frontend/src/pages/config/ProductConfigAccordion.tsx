@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, Edit2, Trash, Check, X, ToggleLeft, ToggleRight, ArrowUp, ArrowDown, Ruler, Eye } from 'lucide-react';
-import { isDimensionGraded } from '../../context/ConfigContext';
+import { Plus, Edit2, Trash, Check, X, ToggleLeft, ToggleRight, ArrowUp, ArrowDown, Ruler, Eye, AlertCircle } from 'lucide-react';
+import { isDimensionGraded, mergeCanonicalDimensionDefs, isCanonicalThicknessDim } from '../../context/ConfigContext';
 import type { ProductConfig, ProductDimensionDef, ProductDimensionValue } from '../../context/ConfigContext';
 
 interface Props {
@@ -12,7 +12,12 @@ interface Props {
 const STANDARD_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 
 export function ProductConfigAccordion({ config, onChange, isReadOnly = false }: Props) {
-  const dimensionDefs = config.dimensionDefs || [];
+  // Merged so Cuff/Palm/Finger Thickness always render as permanent rows —
+  // see mergeCanonicalDimensionDefs()'s docs. A virtual (not-yet-stored)
+  // canonical entry only reaches storage once the admin actually saves some
+  // edit to this product, same self-healing pattern as
+  // resolveProductRegistry()'s legacy-column fallback.
+  const dimensionDefs = mergeCanonicalDimensionDefs(config.dimensionDefs || []);
   const sizes = config.sizes || {};
 
   const [editingDim, setEditingDim] = useState<{ id: string; name: string; unit: string } | null>(null);
@@ -258,8 +263,37 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
     triggerChange({ sizes: updatedSizes });
   };
 
+  // ── Zero-graded-dimensions warning ──────────────────────────────────────
+  // Glove Weight is always graded (no isGraded/record-only mode exists for
+  // it), so it's excluded here — a product can never reach "zero graded
+  // across all 7"; this checks only the 6 toggleable fields (Length, Palm
+  // Width, and every dim in the merged list — Cuff/Palm/Finger plus Beading
+  // if the product has it). Non-blocking: informational only, never
+  // prevents Save.
+  const allTogglableFieldsRecordOnly =
+    !isDimensionGraded({ isGraded: config.lengthIsGraded }) &&
+    !isDimensionGraded({ isGraded: config.palmWidthIsGraded }) &&
+    dimensionDefs.length > 0 &&
+    dimensionDefs.every((d) => !isDimensionGraded(d));
+
   return (
-    <div className="bg-canvas border-t border-gray-800 p-4 animate-in slide-in-from-top-2">
+    <div className="bg-canvas border-t border-gray-800 p-4 animate-in slide-in-from-top-2 space-y-3">
+      {allTogglableFieldsRecordOnly && (
+        <div className="p-3 rounded-lg border border-l-4 border-amber-500/30 border-l-amber-500 bg-amber-500/5 flex gap-3 text-sm">
+          <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" strokeWidth={2} />
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-amber-400">
+              ALL DIMENSIONS ARE RECORD-ONLY
+            </p>
+            <p className="text-xs text-muted mt-1">
+              Every gradeable dimension on this product (Glove Length, Palm Width, and all
+              custom dimensions) is set to Record-only. Measurements will still be captured,
+              but no physical dimension can fail this product's verdict. This does not block
+              saving — confirm this is intentional.
+            </p>
+          </div>
+        </div>
+      )}
       <div className="w-full overflow-x-auto bg-surface border border-gray-800 rounded-xl shadow-xl">
         <table className="w-full table-fixed text-left border-collapse whitespace-nowrap">
           <thead>
@@ -531,6 +565,13 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
             {dimensionDefs.map((def, index) => {
               const isEditing = editingDim?.id === def.id;
               const graded = isDimensionGraded(def);
+              // Cuff/Palm/Finger Thickness are permanent, non-deletable slots
+              // (Beading Thickness is NOT one of these and keeps its Trash
+              // button). Rename is also hidden for them: the merge above
+              // identifies canonical presence by normalized NAME, so renaming
+              // one away from its canonical name would make the next merge
+              // pass think it's missing and inject a duplicate.
+              const isCanonical = isCanonicalThicknessDim(def);
 
               return (
                 <tr key={def.id} className="hover:bg-surface-light/40 transition-colors group/row">
@@ -628,12 +669,16 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                             >
                               <ArrowDown className="w-3 h-3" />
                             </button>
-                            <button onClick={() => setEditingDim(def)} className="w-6 h-6 rounded flex items-center justify-center text-muted hover:text-white hover:bg-gray-800 outline-none">
-                              <Edit2 className="w-3 h-3" />
-                            </button>
-                            <button onClick={() => handleRemoveDimension(def.id)} className="w-6 h-6 rounded flex items-center justify-center text-muted hover:text-rose-400 hover:bg-rose-500/10 outline-none">
-                              <Trash className="w-3 h-3" />
-                            </button>
+                            {!isCanonical && (
+                              <button onClick={() => setEditingDim(def)} className="w-6 h-6 rounded flex items-center justify-center text-muted hover:text-white hover:bg-gray-800 outline-none">
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                            )}
+                            {!isCanonical && (
+                              <button onClick={() => handleRemoveDimension(def.id)} className="w-6 h-6 rounded flex items-center justify-center text-muted hover:text-rose-400 hover:bg-rose-500/10 outline-none">
+                                <Trash className="w-3 h-3" />
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
