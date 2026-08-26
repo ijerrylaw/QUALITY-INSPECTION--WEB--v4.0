@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Edit2, Trash, Check, X, ToggleLeft, ToggleRight, ArrowUp, ArrowDown, AlertCircle } from 'lucide-react';
+import { Plus, Edit2, Trash, Check, X, ToggleLeft, ToggleRight, ArrowUp, ArrowDown, AlertCircle, Ruler, Eye, EyeOff } from 'lucide-react';
 import { isDimensionGraded, isWizardVisible, mergeCanonicalDimensionDefs, isCanonicalThicknessDim } from '../../context/ConfigContext';
 import type { ProductConfig, ProductDimensionDef, ProductDimensionValue } from '../../context/ConfigContext';
 
@@ -13,26 +13,42 @@ function getDimensionMode(dim: { isGraded?: boolean; wizardVisible?: boolean }):
   return 'GRADED';
 }
 
-const DIMENSION_MODE_TEXT_CLASS: Record<DimensionMode, string> = {
-  GRADED: 'text-emerald-400',
-  RECORD_ONLY: 'text-gray-400',
-  OFF: 'text-gray-600',
+/** Forward-only cycle order: GRADED -> RECORD ONLY -> OFF -> GRADED. No reverse. */
+const NEXT_DIMENSION_MODE: Record<DimensionMode, DimensionMode> = {
+  GRADED: 'RECORD_ONLY',
+  RECORD_ONLY: 'OFF',
+  OFF: 'GRADED',
 };
 
-const DIMENSION_MODE_TITLE: Record<DimensionMode, string> = {
-  GRADED: 'Graded — measurements are checked against this row’s spec.',
-  RECORD_ONLY: 'Record-only — measurements are captured but never graded.',
-  OFF: 'Off — hidden from the operator entirely. Not captured, not graded, not part of the submission. Spec is preserved.',
+const DIMENSION_MODE_ICON: Record<DimensionMode, typeof Ruler> = {
+  GRADED: Ruler,
+  RECORD_ONLY: Eye,
+  OFF: EyeOff,
+};
+
+const DIMENSION_MODE_COLOR_CLASS: Record<DimensionMode, string> = {
+  GRADED: 'text-brand-secondary hover:bg-brand-secondary/20',
+  RECORD_ONLY: 'text-amber-400 hover:bg-amber-500/20',
+  OFF: 'text-gray-500 hover:bg-gray-500/20',
+};
+
+const DIMENSION_MODE_LABEL: Record<DimensionMode, string> = {
+  GRADED: 'Graded',
+  RECORD_ONLY: 'Record Only',
+  OFF: 'Off',
 };
 
 /**
- * Compact dropdown replacing Arc 1's icon-only Ruler/Eye toggle — a single
- * combined control per dimension row, same interaction pattern as the
- * per-row decimals FormatSelect elsewhere in this table. Dropdown chosen
- * over a click-to-cycle icon because the state (OFF vs Record-only) isn't
- * visually obvious from an icon alone once there are 3 states instead of 2.
+ * Single cycling icon replacing the dropdown — click advances the mode
+ * forward only (GRADED -> RECORD ONLY -> OFF -> GRADED, no reverse
+ * shortcut). No dropdown/menu, no visible text in the row itself; the
+ * plain state name is a hover-only tooltip via the native `title`
+ * attribute, matching this file's existing tooltip convention (no custom
+ * tooltip component exists elsewhere in this codebase). Read/write state
+ * is unchanged from the dropdown version — same `mode`/`onChange` contract,
+ * so callers (handleSetFixedMode/handleSetDimMode) needed no changes.
  */
-function DimensionModeSelect({
+function DimensionModeCycle({
   mode,
   onChange,
   disabled,
@@ -41,22 +57,21 @@ function DimensionModeSelect({
   onChange: (mode: DimensionMode) => void;
   disabled?: boolean;
 }) {
+  const Icon = DIMENSION_MODE_ICON[mode];
   return (
-    <select
-      value={mode}
+    <button
+      type="button"
+      onClick={() => onChange(NEXT_DIMENSION_MODE[mode])}
       disabled={disabled}
-      onChange={(e) => onChange(e.target.value as DimensionMode)}
-      title={DIMENSION_MODE_TITLE[mode]}
-      className={`h-6 rounded px-1 text-[10px] font-bold uppercase tracking-wider outline-none border transition-colors shrink-0 ${
+      title={DIMENSION_MODE_LABEL[mode]}
+      className={`w-6 h-6 rounded flex items-center justify-center shrink-0 outline-none transition-colors ${
         disabled
-          ? 'bg-transparent border-transparent cursor-default opacity-60'
-          : 'bg-canvas border-gray-700 hover:border-brand-secondary focus:border-brand-secondary cursor-pointer'
-      } ${DIMENSION_MODE_TEXT_CLASS[mode]}`}
+          ? 'cursor-default opacity-60'
+          : 'cursor-pointer'
+      } ${DIMENSION_MODE_COLOR_CLASS[mode]}`}
     >
-      <option value="GRADED">GRADED</option>
-      <option value="RECORD_ONLY">RECORD ONLY</option>
-      <option value="OFF">OFF</option>
-    </select>
+      <Icon className="w-3.5 h-3.5" strokeWidth={2} />
+    </button>
   );
 }
 
@@ -469,7 +484,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
               <td className="py-2.5 px-3 border-r border-gray-800/50 text-sm font-semibold text-brand-secondary uppercase">
                 <span className="flex items-center gap-2">
                   GLOVE LENGTH
-                  <DimensionModeSelect
+                  <DimensionModeCycle
                     mode={lengthMode}
                     onChange={(m) => handleSetFixedMode('length', m)}
                     disabled={isReadOnly}
@@ -544,7 +559,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
               <td className="py-2.5 px-3 border-r border-gray-800/50 text-sm font-semibold text-brand-secondary uppercase">
                 <span className="flex items-center gap-2">
                   PALM WIDTH
-                  <DimensionModeSelect
+                  <DimensionModeCycle
                     mode={palmMode}
                     onChange={(m) => handleSetFixedMode('palmWidth', m)}
                     disabled={isReadOnly}
@@ -655,7 +670,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                             like the format dropdown beside it; it is not
                             staged through editingDim, which only carries
                             name/unit. */}
-                        <DimensionModeSelect
+                        <DimensionModeCycle
                           mode={mode}
                           onChange={(m) => handleSetDimMode(def.id, m)}
                         />
@@ -670,7 +685,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                               at a glance. Disabled (not hidden) on a locked/
                               read-only code, so the mode stays visible even
                               where it cannot be changed. */}
-                          <DimensionModeSelect
+                          <DimensionModeCycle
                             mode={mode}
                             onChange={(m) => handleSetDimMode(def.id, m)}
                             disabled={isReadOnly}
