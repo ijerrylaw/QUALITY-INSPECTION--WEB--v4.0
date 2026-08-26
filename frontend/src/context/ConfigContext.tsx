@@ -102,6 +102,55 @@ export function isDimensionGraded(dim: { isGraded?: boolean } | null | undefined
   return dim?.isGraded !== false;
 }
 
+/**
+ * Canonical ids for the 3 dynamic dimensions that become permanent,
+ * non-deletable presence slots on every product — Cuff/Palm/Finger
+ * Thickness ONLY. Beading Thickness is deliberately excluded and stays a
+ * fully optional, admin-added, deletable custom dimension. These specific
+ * ids were chosen because 18/19 real products in dev.db already converge
+ * on them independently (a pre-existing de-facto convention).
+ */
+export const CANONICAL_THICKNESS_DEFS: { id: string; name: string }[] = [
+  { id: 'cuffThickness', name: 'CUFF THICKNESS' },
+  { id: 'palmThickness', name: 'PALM THICKNESS' },
+  { id: 'fingerThickness', name: 'FINGER THICKNESS' },
+];
+
+/** Normalizes a dimension name for identity comparison: uppercased, whitespace-collapsed. */
+function normalizeDimName(name: string): string {
+  return name.trim().toUpperCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * Ensures the 3 canonical thickness dims are present in a product's
+ * dimension list, WITHOUT renaming or re-iding any existing entry. Matches
+ * by normalized name, not id — a product whose canonical dim already
+ * exists under a legacy/mismatched id (e.g. a `dim_<timestamp>` id, or the
+ * N035MNV-OC-24FT id/name-swap data bug) already satisfies presence and is
+ * left completely untouched. Only a name with no match at all gets a new
+ * virtual def appended, carrying no stored spec.
+ *
+ * Server-side twin: backend/src/engine/dimensionEvaluator.ts's own
+ * mergeCanonicalDimensionDefs() — kept in sync deliberately, same
+ * duplication convention as isDimensionGraded().
+ */
+export function mergeCanonicalDimensionDefs(dimensionDefs: ProductDimensionDef[]): ProductDimensionDef[] {
+  const existingNames = new Set(dimensionDefs.map((d) => normalizeDimName(d.name)));
+  const merged = [...dimensionDefs];
+  for (const canonical of CANONICAL_THICKNESS_DEFS) {
+    if (!existingNames.has(normalizeDimName(canonical.name))) {
+      merged.push({ id: canonical.id, name: canonical.name, unit: 'mm', decimals: 0 });
+    }
+  }
+  return merged;
+}
+
+/** True if `def`'s (normalized) name matches one of the 3 canonical, non-deletable thickness dims. */
+export function isCanonicalThicknessDim(def: { name: string }): boolean {
+  const normalized = normalizeDimName(def.name);
+  return CANONICAL_THICKNESS_DEFS.some((c) => normalizeDimName(c.name) === normalized);
+}
+
 export interface ProductDimensionValue {
   minSpec: string;
   tolerance: string;

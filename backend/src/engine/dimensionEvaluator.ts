@@ -28,6 +28,56 @@ const FIXED_DIM_LENGTH = '__fixed_length__';
 const FIXED_DIM_PALM = '__fixed_palm__';
 const FIXED_DIM_WEIGHT = '__fixed_weight__';
 
+/**
+ * Canonical ids for the 3 dynamic dimensions that become permanent,
+ * non-deletable presence slots on every product — Cuff/Palm/Finger
+ * Thickness ONLY. Beading Thickness is deliberately excluded and stays a
+ * fully optional, admin-added, deletable custom dimension.
+ *
+ * These specific ids were chosen because 18/19 real products in dev.db
+ * already converge on them independently (a pre-existing de-facto
+ * convention, not something invented for this feature).
+ */
+const CANONICAL_THICKNESS_DEFS: { id: string; name: string }[] = [
+  { id: 'cuffThickness', name: 'CUFF THICKNESS' },
+  { id: 'palmThickness', name: 'PALM THICKNESS' },
+  { id: 'fingerThickness', name: 'FINGER THICKNESS' },
+];
+
+/** Normalizes a dimension name for identity comparison: uppercased, whitespace-collapsed. */
+function normalizeDimName(name: string): string {
+  return name.trim().toUpperCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * Ensures the 3 canonical thickness dims are present in a product's
+ * resolved dimension list, WITHOUT renaming or re-iding any existing entry.
+ * Matches by normalized name, not id — a product whose canonical dim
+ * already exists under a legacy/mismatched id (e.g. a `dim_<timestamp>` id,
+ * or the N035MNV-OC-24FT id/name-swap data bug) already satisfies presence
+ * and is left completely untouched. Only a name with NO match at all gets
+ * a new virtual def appended, carrying no stored spec (minSpec/tolerance
+ * are resolved separately, per-size, by getDimSpec()'s existing empty-value
+ * fallback — nothing is fabricated here beyond the identity/label).
+ *
+ * Client-side twin: frontend/src/context/ConfigContext.tsx's
+ * mergeCanonicalDimensionDefs() — kept in sync deliberately, same
+ * duplication convention as isDimensionGraded().
+ */
+export function mergeCanonicalDimensionDefs(dimensionDefs: ProductDimensionDef[]): ProductDimensionDef[] {
+  const existingNames = new Set(dimensionDefs.map((d) => normalizeDimName(d.name)));
+  const merged = [...dimensionDefs];
+  for (const canonical of CANONICAL_THICKNESS_DEFS) {
+    if (!existingNames.has(normalizeDimName(canonical.name))) {
+      // This module's local ProductDimensionDef is a grading-only subset
+      // (no unit/decimals — those are display-only fields the evaluator
+      // never reads); the frontend twin's virtual def carries them instead.
+      merged.push({ id: canonical.id, name: canonical.name });
+    }
+  }
+  return merged;
+}
+
 export interface ProductDimensionDef {
   id: string;
   name: string;
@@ -216,12 +266,13 @@ export function evaluateDimensions(params: DimensionEvalParams): DimensionEvalRe
     { id: FIXED_DIM_PALM, name: 'PALM WIDTH', isGraded: matrixEntry?.palmWidthIsGraded },
   ];
 
-  const dynamicDimensions: ProductDimensionDef[] =
+  const dynamicDimensions: ProductDimensionDef[] = mergeCanonicalDimensionDefs(
     matrixEntry?.dimensionDefs && matrixEntry.dimensionDefs.length > 0
       ? matrixEntry.dimensionDefs
       : globalDimensionDefs && globalDimensionDefs.length > 0
         ? globalDimensionDefs
-        : [];
+        : [],
+  );
 
   const activeDimensions = [...fixedDimensions, ...dynamicDimensions];
 
