@@ -19,6 +19,7 @@ import { AnalyticsPage } from './pages/AnalyticsPage';
 import { ConfigPage } from './pages/ConfigPage';
 import { SystemPage } from './pages/SystemPage';
 import { PinAdminPage } from './pages/PinAdminPage';
+import { DevToolsPage } from './pages/DevToolsPage';
 import { IdleSessionGuard } from './components/auth/IdleSessionGuard';
 
 // Group A/B/C role lists (AUDIT_REPORT.md §11) — single source of truth in
@@ -132,6 +133,11 @@ export function App() {
                         <SystemPage />
                       </RoleRoute>
                     } />
+                    {/* Dev-only destructive testing tool (see DevToolsPage.tsx) —
+                        deliberately NOT in Sidebar.tsx's nav list and NOT wrapped in
+                        RoleRoute/System Admin. The component itself renders null in a
+                        production build regardless of how this URL is reached. */}
+                    <Route path="/dev-tools" element={<DevToolsPage />} />
                     <Route path="*" element={<Navigate to="/wizard" replace />} />
                   </Routes>
                 </ProtectedRoute>

@@ -349,3 +349,37 @@ with its full original context, reasoning, and verification trail.
     (`StepDimensions.tsx:471`), unrelated to spec data, applies to every
     dimension card by design.
 
+24. **A dev-only "Delete All Submissions" tool exists (2026-08-26) and must be
+    manually confirmed dead/removed before go-live.** `DELETE
+    /api/dev/submissions/all` (`backend/src/routes/devTools.routes.ts`) wipes
+    every `Submission` + `AmendmentLog` row (FK-safe order, single
+    transaction) for dev/test cleanup — never touches `PinUser` or
+    `M365UserRole`. The frontend surface is `/dev-tools`
+    (`frontend/src/pages/DevToolsPage.tsx`), deliberately unlinked from
+    `Sidebar.tsx` and not inside System Admin, gated behind a typed
+    `"DELETE ALL"` confirmation.
+
+    **Structural production gates (double-layered, both verified live):**
+    - Backend: `server.ts` only mounts `/api/dev` when `NODE_ENV !==
+      'production'` at startup, and the router's own `blockInProduction`
+      middleware re-checks `NODE_ENV` on every request and 404s first,
+      before any other logic. Verified live: a second backend instance
+      started with `NODE_ENV=production` returned `404 {"error":"Route not
+      found"}` on the delete endpoint while `/api/health` kept working
+      normally.
+    - Frontend: `DevToolsPage` reads `import.meta.env.PROD` (Vite's
+      build-time mirror of `NODE_ENV === 'production'`) and renders `null`
+      regardless of how `/dev-tools` is reached. Verified live: a real `npm
+      run build` output contained zero occurrences of the page's UI strings
+      (dead-code-eliminated), and serving that build + logging in showed a
+      genuinely blank content pane at `/dev-tools`.
+
+    **Why this is still an open item despite the gate being verified:** an
+    env-gated dev tool that deletes all inspection data is exactly the kind
+    of thing that must be a conscious pre-launch checklist item, not
+    something trusted to a flag alone. Before go-live: confirm the
+    deployment's `NODE_ENV` is actually set to `production`, and consider
+    deleting `devTools.routes.ts`/`DevToolsPage.tsx`/the `/dev-tools` route
+    and `/api/dev` mount outright rather than relying on the gate
+    indefinitely.
+

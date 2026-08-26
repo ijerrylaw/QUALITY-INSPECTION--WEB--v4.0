@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ShieldCheck, Building2, Server } from 'lucide-react';
 import { M365UserRolesPanel } from '../components/system/M365UserRolesPanel';
 import { CompanyBrandingPanel } from '../components/system/CompanyBrandingPanel';
@@ -78,6 +79,19 @@ export function SystemPage() {
       <div className={activeTab === 'environment' ? 'pt-2' : 'hidden'}>
         <EnvironmentInfoPanel />
       </div>
+
+      {/* Dev-only discoverability pointer to /dev-tools (DevToolsPage.tsx) —
+          deliberately not a nav item or button, just a barely-there text
+          link. Same import.meta.env.PROD gate as DevToolsPage.tsx itself:
+          a link to a dev-only destructive tool must not exist in a
+          production build even as a dead link. */}
+      {!import.meta.env.PROD && (
+        <div className="pt-8 text-right">
+          <Link to="/dev-tools" className="text-[11px] text-muted/60 hover:text-muted transition-colors">
+            Dev Tools
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

@@ -26,6 +26,7 @@ import configRouter from './src/routes/config.routes';
 import submissionsRouter, { amendmentsRouter, verdictRouter } from './src/routes/submissions.routes';
 import { pinUsersRouter, pinAuthRouter } from './src/routes/pinUsers.routes';
 import { m365UsersRouter, m365AuthRouter } from './src/routes/m365Users.routes';
+import devToolsRouter from './src/routes/devTools.routes';
 
 const app = express();
 const PORT = process.env['PORT'] ? Number(process.env['PORT']) : 4009;
@@ -79,6 +80,14 @@ app.use('/api/pin-users', pinUsersRouter);
 app.use('/api/auth', pinAuthRouter);
 app.use('/api/m365-users', m365UsersRouter);
 app.use('/api/auth', m365AuthRouter);
+
+// Dev-only destructive testing utilities — never mounted in production, on
+// top of that router's own internal NODE_ENV check (devTools.routes.ts):
+// structural double-guard so a slipped/misconfigured env var can't leave
+// only one layer standing between this and prod data.
+if (process.env['NODE_ENV'] !== 'production') {
+  app.use('/api/dev', devToolsRouter);
+}
 
 // ── 404 Fallback ──────────────────────────────────────────────────────────────
 app.use((_req, res) => {
