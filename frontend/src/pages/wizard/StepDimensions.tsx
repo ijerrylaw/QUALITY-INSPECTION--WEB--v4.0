@@ -36,7 +36,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Ruler, CheckCircle2, AlertTriangle, AlertCircle, Info } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastProvider';
-import { useConfig, hasUsableProductMatrix, resolveProductMatrix, isDimensionGraded, mergeCanonicalDimensionDefs } from '../../context/ConfigContext';
+import { useConfig, hasUsableProductMatrix, resolveProductMatrix, isDimensionGraded, isWizardVisible, mergeCanonicalDimensionDefs } from '../../context/ConfigContext';
 import { OriginalValueNote, hasFieldChanged } from '../../utils/fieldDiff';
 import { FIXED_DIM_LENGTH, FIXED_DIM_PALM, FIXED_DIMENSION_LABELS } from '../../lib/fixedDimensions';
 import type { ProductDimensionDef } from '../../context/ConfigContext';
@@ -93,6 +93,7 @@ export function StepDimensions({
         isMin:    false,
         decimals: matrixEntry?.lengthDecimals ?? 0,
         isGraded: matrixEntry?.lengthIsGraded,
+        wizardVisible: matrixEntry?.lengthWizardVisible,
       },
       {
         id:       FIXED_DIM_PALM,
@@ -101,6 +102,7 @@ export function StepDimensions({
         isMin:    false,
         decimals: matrixEntry?.palmWidthDecimals ?? 0,
         isGraded: matrixEntry?.palmWidthIsGraded,
+        wizardVisible: matrixEntry?.palmWidthWizardVisible,
       },
     ];
   }, [matrixEntry]);
@@ -120,8 +122,12 @@ export function StepDimensions({
   }, [config, matrixEntry]);
 
   // ── All dimensions: fixed first, then dynamic ─────────────────────────────
+  // A wizard-invisible ("OFF") dimension is filtered out here — genuinely
+  // absent from the rendered list, not greyed out. It never enters
+  // `measurements`/`stats` below, so it can't appear in dimensionStats, the
+  // review step, or the submitted payload at all.
   const activeDimensions = useMemo(
-    () => [...fixedDimensions, ...dynamicDimensions],
+    () => [...fixedDimensions, ...dynamicDimensions].filter(isWizardVisible),
     [fixedDimensions, dynamicDimensions]
   );
 

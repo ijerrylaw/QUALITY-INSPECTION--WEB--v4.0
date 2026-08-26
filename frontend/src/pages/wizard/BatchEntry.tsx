@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
-import { useConfig, API_BASE_URL, hasUsableCategories, hasUsableProductMatrix, resolveProductMatrix, isDimensionGraded, mergeCanonicalDimensionDefs } from '../../context/ConfigContext';
+import { useConfig, API_BASE_URL, hasUsableCategories, hasUsableProductMatrix, resolveProductMatrix, isDimensionGraded, isWizardVisible, mergeCanonicalDimensionDefs } from '../../context/ConfigContext';
 import { useAuth, authHeader, authIdentity } from '../../context/AuthContext';
 import { useToast } from '../../components/ui/ToastProvider';
 import {
@@ -36,7 +36,7 @@ function BatchModalDimensions({ row, updateRow, config, productCode, size }: any
   const sizeEntry = matrixEntry?.sizes?.[size] ?? null;
   
   const activeDimensions = React.useMemo(() => {
-    return [
+    const all = [
       {
         id:       '__fixed_length__',
         name:     'GLOVE LENGTH',
@@ -44,6 +44,7 @@ function BatchModalDimensions({ row, updateRow, config, productCode, size }: any
         isMin:    false,
         decimals: matrixEntry?.lengthDecimals ?? 0,
         isGraded: matrixEntry?.lengthIsGraded,
+        wizardVisible: matrixEntry?.lengthWizardVisible,
       },
       {
         id:       '__fixed_palm__',
@@ -52,11 +53,15 @@ function BatchModalDimensions({ row, updateRow, config, productCode, size }: any
         isMin:    false,
         decimals: matrixEntry?.palmWidthDecimals ?? 0,
         isGraded: matrixEntry?.palmWidthIsGraded,
+        wizardVisible: matrixEntry?.palmWidthWizardVisible,
       },
       // Merged so Cuff/Palm/Finger Thickness always appear as measurable
       // cards, even for a product that has never explicitly stored them.
       ...mergeCanonicalDimensionDefs(matrixEntry?.dimensionDefs || config?.dimensions || [])
     ];
+    // A wizard-invisible ("OFF") dimension is filtered out here — genuinely
+    // absent from the rendered list, not greyed out.
+    return all.filter(isWizardVisible);
   }, [matrixEntry, config]);
 
   const getDimSpec = (dimId: string): { minSpec: number; tolerance: number; isMin: boolean } => {
