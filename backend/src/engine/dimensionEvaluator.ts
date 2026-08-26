@@ -23,9 +23,10 @@
 /** 5 measurement slots per dimension — mirrors StepDimensions.tsx's SLOTS_PER_DIM. */
 const SLOTS_PER_DIM = 5;
 
-/** Sentinel IDs for the two always-visible fixed-row dimensions. */
+/** Sentinel IDs for the always-visible fixed-row dimensions. */
 const FIXED_DIM_LENGTH = '__fixed_length__';
 const FIXED_DIM_PALM = '__fixed_palm__';
+const FIXED_DIM_WEIGHT = '__fixed_weight__';
 
 export interface ProductDimensionDef {
   id: string;
@@ -70,6 +71,8 @@ export interface ProductDimensionValue {
 }
 
 export interface SizeConfig {
+  weightTarget?: string;
+  weightTolerance?: string;
   lengthTarget?: string;
   lengthTolerance?: string;
   palmWidthTarget?: string;
@@ -80,6 +83,14 @@ export interface SizeConfig {
 export interface ProductConfig {
   dimensionDefs?: ProductDimensionDef[];
   sizes?: Record<string, SizeConfig>;
+  /**
+   * Graded/Record-only for the fixed GLOVE LENGTH / PALM WIDTH rows — same
+   * "only literal `false` means record-only" convention as
+   * ProductDimensionDef.isGraded. No `weightIsGraded`: Glove Weight has no
+   * record-only mode, see evaluateWeight() below.
+   */
+  lengthIsGraded?: boolean;
+  palmWidthIsGraded?: boolean;
 }
 
 /**
@@ -201,8 +212,8 @@ export function evaluateDimensions(params: DimensionEvalParams): DimensionEvalRe
   const sizeEntry = matrixEntry?.sizes?.[size];
 
   const fixedDimensions: ProductDimensionDef[] = [
-    { id: FIXED_DIM_LENGTH, name: 'GLOVE LENGTH' },
-    { id: FIXED_DIM_PALM, name: 'PALM WIDTH' },
+    { id: FIXED_DIM_LENGTH, name: 'GLOVE LENGTH', isGraded: matrixEntry?.lengthIsGraded },
+    { id: FIXED_DIM_PALM, name: 'PALM WIDTH', isGraded: matrixEntry?.palmWidthIsGraded },
   ];
 
   const dynamicDimensions: ProductDimensionDef[] =
@@ -249,4 +260,52 @@ export function evaluateDimensions(params: DimensionEvalParams): DimensionEvalRe
   });
 
   return { failedDimensions, dimensionResults };
+}
+
+export interface WeightEvalParams {
+  /** The single recorded glove weight value (Submission.gloveWeight) — never a 5-slot measurement. */
+  gloveWeight: number;
+  weightTarget?: string;
+  weightTolerance?: string;
+}
+
+/**
+ * Evaluates GLOVE WEIGHT pass/fail — a single scalar value against
+ * weightTarget/weightTolerance, unlike every other dimension's 5-slot
+ * measurement. No evaluator existed for Weight before this; `weightTolerance`
+ * was stored but never read for grading. Reuses the exact threshold formula
+ * `evaluateDimensions` already uses (including the `'MIN'` tolerance
+ * sentinel) — just a 1-value input instead of 5.
+ *
+ * Deliberately has NO isGraded parameter and no record-only skip-path:
+ * Glove Weight is always graded once this is wired in (see
+ * ProductConfig.lengthIsGraded/palmWidthIsGraded docs — there is no
+ * `weightIsGraded` counterpart, by design).
+ */
+export function evaluateWeight(params: WeightEvalParams): DimensionResult {
+  const { gloveWeight, weightTarget, weightTolerance } = params;
+
+  const target = parseFloat(weightTarget ?? '0') || 0;
+  const tolRaw = weightTolerance ?? '0';
+  const isMin = tolRaw.toUpperCase() === 'MIN';
+  const tolerance = isMin ? 0 : (parseFloat(tolRaw) || 0);
+  const threshold = target > 0 ? target - tolerance : 0;
+  const maxThreshold = target > 0 && tolerance > 0 && !isMin ? target + tolerance : Infinity;
+
+  const fails = [gloveWeight < threshold || (!isMin && tolerance > 0 && gloveWeight > maxThreshold)];
+  const failed = fails[0];
+
+  return {
+    id: FIXED_DIM_WEIGHT,
+    name: 'GLOVE WEIGHT',
+    min: gloveWeight,
+    max: gloveWeight,
+    avg: gloveWeight,
+    fails,
+    failed,
+    threshold,
+    maxThreshold,
+    isMin,
+    isGraded: true,
+  };
 }

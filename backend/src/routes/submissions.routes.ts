@@ -334,6 +334,7 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
         defectCounts,
         size: String(body['size']),
         dimensionMeasurements: body['dimensions'] as Record<string, string[]>,
+        gloveWeight: body['gloveWeight'] != null ? Number(body['gloveWeight']) : undefined,
       });
       verdict = result.verdict;
       categoryResults = result.categoryResults;
@@ -885,6 +886,10 @@ router.post('/:id/amendments', requireRole(...ALL_ROLES), async (req: Request, r
         defectCounts: parseJSONObjectField<number>(newValues['defects'] ?? originalSubmission.defects),
         size: String(newValues['size'] ?? originalSubmission.size),
         dimensionMeasurements: parseJSONObjectField<string[]>(newValues['dimensions'] ?? originalSubmission.dimensions),
+        gloveWeight: (() => {
+          const v = newValues['gloveWeight'] ?? originalSubmission.gloveWeight;
+          return v != null ? Number(v) : undefined;
+        })(),
       });
       recomputedVerdict = preview.verdict;
       recomputedCategoryResults = JSON.stringify(preview.categoryResults);
@@ -1078,6 +1083,10 @@ amendmentsRouter.post('/:id/approve', requireRole('MANAGER', 'ADMIN'), async (re
         defectCounts: parseJSONObjectField<number>(newValues['defects'] ?? existingSubmission.defects),
         size: String(newValues['size'] ?? existingSubmission.size),
         dimensionMeasurements: parseJSONObjectField<string[]>(newValues['dimensions'] ?? existingSubmission.dimensions),
+        gloveWeight: (() => {
+          const v = newValues['gloveWeight'] ?? existingSubmission.gloveWeight;
+          return v != null ? Number(v) : undefined;
+        })(),
       });
     } catch (err) {
       if (err instanceof VerdictProfileNotFoundError) {

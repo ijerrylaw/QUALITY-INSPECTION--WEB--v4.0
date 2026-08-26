@@ -18,7 +18,7 @@
 
 import { evaluateAQLVerdict } from './aqlEvaluator';
 import type { CategoryResult } from './aqlEvaluator';
-import { evaluateDimensions, hasUsableProductMatrix } from './dimensionEvaluator';
+import { evaluateDimensions, evaluateWeight, hasUsableProductMatrix } from './dimensionEvaluator';
 import type { DimensionResult, ProductConfig, ProductDimensionDef } from './dimensionEvaluator';
 import { resolveProductRegistry } from '../lib/productEntry';
 import prisma from '../lib/prismaClient';
@@ -273,6 +273,17 @@ export interface ResolveVerdictParams {
   size?: string;
   dimensionMeasurements?: Record<string, string[]>;
   /**
+   * The single recorded glove weight value (Submission.gloveWeight) —
+   * evaluated via evaluateWeight() against the resolved product/size's
+   * weightTarget/weightTolerance and folded into failedDimensions/
+   * dimensionResults alongside the 5-slot dimensions. Independent of
+   * dimensionMeasurements (Weight is never a 5-slot measurement) — only
+   * requires `size` to resolve the per-size target. Always graded, no
+   * record-only mode (see ProductConfig.lengthIsGraded/palmWidthIsGraded
+   * docs for why Weight has no counterpart flag).
+   */
+  gloveWeight?: number;
+  /**
    * How to handle an explicit profileId that doesn't resolve to any known
    * profile:
    *   - 'throw' (default) — surface VerdictProfileNotFoundError to the
@@ -446,13 +457,14 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
   let failedDimensions = 0;
   let dimensionResults: DimensionResult[] = [];
 
+  // B4: per-code dimension specs now come from `products` via the shared
+  // registry resolver above, instead of the productMatrixConfig column.
+  const productMatrixConfig = registry.productMatrixConfig as Record<string, ProductConfig>;
+
   if (params.size && params.dimensionMeasurements) {
-    // B4: per-code dimension specs now come from `products` via the shared
-    // registry resolver above, instead of the productMatrixConfig column.
     // globalDimensionDefs stays on AppConfig.dimensions — that is a global
     // fallback list, not per-product data, and was never part of the three
     // consolidated structures.
-    const productMatrixConfig = registry.productMatrixConfig as Record<string, ProductConfig>;
     const globalDimensionDefs = safeParseJSON<ProductDimensionDef[]>(appConfig?.dimensions, []);
 
     if (!hasUsableProductMatrix(productMatrixConfig[productCode ?? ''], params.size)) {
@@ -471,6 +483,20 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
     });
     failedDimensions = dimResult.failedDimensions;
     dimensionResults = dimResult.dimensionResults;
+  }
+
+  // ── Glove Weight evaluation — independent of dimensionMeasurements
+  //    (Weight is a scalar, never a 5-slot measurement). Always graded, no
+  //    record-only mode — see evaluateWeight()'s own docs.
+  if (params.size && params.gloveWeight != null) {
+    const sizeEntry = productMatrixConfig[productCode ?? '']?.sizes?.[params.size];
+    const weightResult = evaluateWeight({
+      gloveWeight: params.gloveWeight,
+      weightTarget: sizeEntry?.weightTarget,
+      weightTolerance: sizeEntry?.weightTolerance,
+    });
+    dimensionResults.push(weightResult);
+    if (weightResult.failed) failedDimensions++;
   }
 
   const verdict: 'PASSED' | 'FAILED' =
