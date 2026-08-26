@@ -323,11 +323,14 @@ export const pinAuthRouter = Router();
 // name + employeeId, active accounts only — explicitly `select`-scoped
 // (never toPublicPinUser(), which is a superset) so pinHash/pinSalt/
 // jobTitle/role can never leak here even by future accident.
+// Sorted by employeeId (not name) to match the kiosk picker's ID-first
+// display order — this orderBy is the single source of truth for directory
+// ordering; LoginPage.tsx filters this array but never re-sorts it.
 pinAuthRouter.get('/pin-directory', async (_req: Request, res: Response) => {
   try {
     const pinUsers = await prisma.pinUser.findMany({
       where: { active: true },
-      orderBy: { name: 'asc' },
+      orderBy: { employeeId: 'asc' },
       select: { id: true, name: true, employeeId: true },
     });
     res.json({ pinUsers });
