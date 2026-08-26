@@ -677,8 +677,28 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                       </div>
                     ) : (
                       <div className="flex items-center justify-between">
-                        <span className="font-mono text-sm text-primary uppercase flex items-center gap-2">
-                          {def.name}
+                        <span className="flex items-center gap-2">
+                          {/* Permanent (non-deletable) dims — Cuff/Palm/Finger
+                              Thickness — get the same cyan/semibold treatment
+                              as the fixed GLOVE WEIGHT/LENGTH/PALM WIDTH rows,
+                              extending that convention consistently rather
+                              than leaving it fixed-rows-only. Optional/
+                              deletable dims (Beading, future custom adds) get
+                              the same brand-secondary hue at reduced opacity
+                              and weight — same design language, visibly
+                              softer — so presence/permanence reads at a
+                              glance without a new color or the state-icon's
+                              own colors (cyan/amber/grey) being confused for
+                              this signal. Inter throughout (no font-mono) —
+                              field names are UI Chrome/labels, not User Data,
+                              per UI_DESIGN_SYSTEM.md §1.3's Golden Rule. */}
+                          <span className={`text-sm uppercase ${
+                            isCanonical
+                              ? 'font-semibold text-brand-secondary'
+                              : 'font-medium text-brand-secondary/60'
+                          }`}>
+                            {def.name}
+                          </span>
                           {/* Persistent mode control — deliberately NOT inside
                               the hover-reveal action group below: which
                               dimensions are record-only/off must be legible
