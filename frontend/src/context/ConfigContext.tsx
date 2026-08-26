@@ -80,6 +80,16 @@ export interface ProductDimensionDef {
    * isDimensionGraded() below, which is the single place that rule lives.
    */
   isGraded?: boolean;
+  /**
+   * Wizard-visibility mode when explicitly `false`: the field is completely
+   * hidden from the operator in StepDimensions.tsx/BatchEntry.tsx — not
+   * greyed out, absent from the rendered list entirely. Independent of
+   * `isGraded`: toggling this never touches or clears isGraded, so a
+   * field's prior Graded/Record-only state is preserved and resumes as-is
+   * once visibility is restored. Absent/true = visible — same "default
+   * never materialized" convention as isGraded. See isWizardVisible() below.
+   */
+  wizardVisible?: boolean;
   /** Number of decimal places (0–3). Controls both the config setup grid and the Wizard entry inputs. Default: 0 (integer). */
   decimals?: number;
 }
@@ -100,6 +110,20 @@ export interface ProductDimensionDef {
  */
 export function isDimensionGraded(dim: { isGraded?: boolean } | null | undefined): boolean {
   return dim?.isGraded !== false;
+}
+
+/**
+ * Wizard-visibility rule, in exactly one place — same shape/rationale as
+ * isDimensionGraded() above, but an independent flag: a field can be
+ * RECORD ONLY and still wizard-visible (Arc 1 behavior, unchanged), or
+ * wizard-invisible regardless of its Graded/Record-only state. Only the
+ * explicit literal `false` hides a field.
+ *
+ * Server-side twin: backend/src/engine/dimensionEvaluator.ts's own
+ * isWizardVisible() — kept in sync deliberately.
+ */
+export function isWizardVisible(dim: { wizardVisible?: boolean } | null | undefined): boolean {
+  return dim?.wizardVisible !== false;
 }
 
 /**
@@ -182,6 +206,9 @@ export interface ProductConfig {
    */
   lengthIsGraded?: boolean;
   palmWidthIsGraded?: boolean;
+  /** Wizard-visibility for the fixed rows — see ProductDimensionDef.wizardVisible. No Weight counterpart. */
+  lengthWizardVisible?: boolean;
+  palmWidthWizardVisible?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

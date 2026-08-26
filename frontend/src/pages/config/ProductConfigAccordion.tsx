@@ -1,7 +1,64 @@
 import React, { useState } from 'react';
-import { Plus, Edit2, Trash, Check, X, ToggleLeft, ToggleRight, ArrowUp, ArrowDown, Ruler, Eye, AlertCircle } from 'lucide-react';
-import { isDimensionGraded, mergeCanonicalDimensionDefs, isCanonicalThicknessDim } from '../../context/ConfigContext';
+import { Plus, Edit2, Trash, Check, X, ToggleLeft, ToggleRight, ArrowUp, ArrowDown, AlertCircle } from 'lucide-react';
+import { isDimensionGraded, isWizardVisible, mergeCanonicalDimensionDefs, isCanonicalThicknessDim } from '../../context/ConfigContext';
 import type { ProductConfig, ProductDimensionDef, ProductDimensionValue } from '../../context/ConfigContext';
+
+/** The 3-state wizard-visibility/grading mode a dimension row can be in. */
+type DimensionMode = 'OFF' | 'RECORD_ONLY' | 'GRADED';
+
+/** Derives the 3-state mode from the two independent underlying flags. */
+function getDimensionMode(dim: { isGraded?: boolean; wizardVisible?: boolean }): DimensionMode {
+  if (!isWizardVisible(dim)) return 'OFF';
+  if (!isDimensionGraded(dim)) return 'RECORD_ONLY';
+  return 'GRADED';
+}
+
+const DIMENSION_MODE_TEXT_CLASS: Record<DimensionMode, string> = {
+  GRADED: 'text-emerald-400',
+  RECORD_ONLY: 'text-gray-400',
+  OFF: 'text-gray-600',
+};
+
+const DIMENSION_MODE_TITLE: Record<DimensionMode, string> = {
+  GRADED: 'Graded — measurements are checked against this row’s spec.',
+  RECORD_ONLY: 'Record-only — measurements are captured but never graded.',
+  OFF: 'Off — hidden from the operator entirely. Not captured, not graded, not part of the submission. Spec is preserved.',
+};
+
+/**
+ * Compact dropdown replacing Arc 1's icon-only Ruler/Eye toggle — a single
+ * combined control per dimension row, same interaction pattern as the
+ * per-row decimals FormatSelect elsewhere in this table. Dropdown chosen
+ * over a click-to-cycle icon because the state (OFF vs Record-only) isn't
+ * visually obvious from an icon alone once there are 3 states instead of 2.
+ */
+function DimensionModeSelect({
+  mode,
+  onChange,
+  disabled,
+}: {
+  mode: DimensionMode;
+  onChange: (mode: DimensionMode) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <select
+      value={mode}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value as DimensionMode)}
+      title={DIMENSION_MODE_TITLE[mode]}
+      className={`h-6 rounded px-1 text-[10px] font-bold uppercase tracking-wider outline-none border transition-colors shrink-0 ${
+        disabled
+          ? 'bg-transparent border-transparent cursor-default opacity-60'
+          : 'bg-canvas border-gray-700 hover:border-brand-secondary focus:border-brand-secondary cursor-pointer'
+      } ${DIMENSION_MODE_TEXT_CLASS[mode]}`}
+    >
+      <option value="GRADED">GRADED</option>
+      <option value="RECORD_ONLY">RECORD ONLY</option>
+      <option value="OFF">OFF</option>
+    </select>
+  );
+}
 
 interface Props {
   config: ProductConfig;
@@ -190,43 +247,55 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
   };
 
   /**
-   * Flips one custom dimension between Graded and Record-only.
+   * Sets one custom dimension's 3-state mode (OFF / RECORD ONLY / GRADED).
    *
-   * Toggling to Record-only WRITES `isGraded: false`. Toggling back REMOVES
-   * the key rather than writing `isGraded: true` — so a def that was flipped
-   * and flipped back is byte-identical to how it started. That matters twice:
-   * ProductEngine's `actuallyChanged` JSON comparison then correctly reports
-   * "nothing changed" (no spurious lastAmended stamp, no dirty page), and the
-   * server's locked-code deep diff sees no phantom field. See
-   * isDimensionGraded() for why the default is never materialized.
+   * OFF preserves whatever `isGraded` currently holds untouched — wiring
+   * OFF and unwiring it later restores the exact Graded/Record-only state
+   * the field was in before, with no re-entry needed. RECORD ONLY and
+   * GRADED both clear `wizardVisible` (restoring visibility); GRADED
+   * additionally clears `isGraded` rather than writing `true` — so a def
+   * cycled through any sequence of modes and landed back on GRADED is
+   * byte-identical to how it started. That matters twice: ProductEngine's
+   * `actuallyChanged` JSON comparison then correctly reports "nothing
+   * changed", and the server's locked-code deep diff sees no phantom field.
+   * See isDimensionGraded()/isWizardVisible() for why neither default is
+   * ever materialized.
    *
-   * Purely a mode flag: no minSpec or tolerance is read, written, cleared or
-   * zeroed here, in either direction, however many times it is toggled.
+   * Purely a pair of mode flags: no minSpec or tolerance is read, written,
+   * cleared or zeroed here, in either direction, however many times toggled.
    */
-  /**
-   * Same toggle rule as handleToggleGraded, but for the fixed GLOVE LENGTH /
-   * PALM WIDTH rows, whose graded flag lives directly on ProductConfig
-   * (lengthIsGraded/palmWidthIsGraded) rather than inside a dimensionDefs
-   * array element. Reverting to Graded sends `undefined` for the field —
-   * JSON.stringify/JSON serialization drops an undefined-valued key
-   * entirely, the same net effect as handleToggleGraded's rest-destructure,
-   * so a toggle-then-toggle-back round-trip is still byte-identical.
-   */
-  const handleToggleFixedGraded = (field: 'lengthIsGraded' | 'palmWidthIsGraded') => {
-    if (isReadOnly) return;
-    const graded = isDimensionGraded({ isGraded: config[field] });
-    triggerChange({ [field]: graded ? false : undefined });
-  };
-
-  const handleToggleGraded = (dimId: string) => {
+  const handleSetDimMode = (dimId: string, mode: DimensionMode) => {
     if (isReadOnly) return;
     const updatedDefs = dimensionDefs.map(d => {
       if (d.id !== dimId) return d;
-      if (isDimensionGraded(d)) return { ...d, isGraded: false };
-      const { isGraded: _dropped, ...rest } = d;
-      return rest as ProductDimensionDef;
+      if (mode === 'OFF') return { ...d, wizardVisible: false };
+      const { isGraded: _ig, wizardVisible: _wv, ...rest } = d;
+      if (mode === 'RECORD_ONLY') return { ...rest, isGraded: false };
+      return rest as ProductDimensionDef; // GRADED: neither key present
     });
     triggerChange({ dimensionDefs: updatedDefs });
+  };
+
+  /**
+   * Same rule as handleSetDimMode, but for the fixed GLOVE LENGTH / PALM
+   * WIDTH rows, whose flags live directly on ProductConfig
+   * (lengthIsGraded/lengthWizardVisible, palmWidthIsGraded/
+   * palmWidthWizardVisible) rather than inside a dimensionDefs array
+   * element. Reverting a field sends `undefined` — JSON serialization drops
+   * an undefined-valued key entirely, the same net effect as
+   * handleSetDimMode's rest-destructure.
+   */
+  const handleSetFixedMode = (field: 'length' | 'palmWidth', mode: DimensionMode) => {
+    if (isReadOnly) return;
+    const isGradedField = `${field}IsGraded` as 'lengthIsGraded' | 'palmWidthIsGraded';
+    const wizardVisibleField = `${field}WizardVisible` as 'lengthWizardVisible' | 'palmWidthWizardVisible';
+    if (mode === 'OFF') {
+      triggerChange({ [wizardVisibleField]: false });
+    } else if (mode === 'RECORD_ONLY') {
+      triggerChange({ [wizardVisibleField]: undefined, [isGradedField]: false });
+    } else {
+      triggerChange({ [wizardVisibleField]: undefined, [isGradedField]: undefined });
+    }
   };
 
   const handleRemoveDimension = (id: string) => {
@@ -264,17 +333,20 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
   };
 
   // ── Zero-graded-dimensions warning ──────────────────────────────────────
-  // Glove Weight is always graded (no isGraded/record-only mode exists for
-  // it), so it's excluded here — a product can never reach "zero graded
-  // across all 7"; this checks only the 6 toggleable fields (Length, Palm
-  // Width, and every dim in the merged list — Cuff/Palm/Finger plus Beading
-  // if the product has it). Non-blocking: informational only, never
-  // prevents Save.
+  // Glove Weight is always graded (no isGraded/wizardVisible mode exists
+  // for it), so it's excluded here — a product can never reach "zero
+  // graded across all 7"; this checks only the 6 toggleable fields (Length,
+  // Palm Width, and every dim in the merged list — Cuff/Palm/Finger plus
+  // Beading if the product has it). An OFF field counts as "not graded"
+  // here too, same as Record-only — it's even further from contributing to
+  // the verdict (hidden from the wizard entirely), so a product that's all
+  // OFF, all Record-only, or any mix of the two must still trigger this.
+  // Non-blocking: informational only, never prevents Save.
   const allTogglableFieldsRecordOnly =
-    !isDimensionGraded({ isGraded: config.lengthIsGraded }) &&
-    !isDimensionGraded({ isGraded: config.palmWidthIsGraded }) &&
+    getDimensionMode({ isGraded: config.lengthIsGraded, wizardVisible: config.lengthWizardVisible }) !== 'GRADED' &&
+    getDimensionMode({ isGraded: config.palmWidthIsGraded, wizardVisible: config.palmWidthWizardVisible }) !== 'GRADED' &&
     dimensionDefs.length > 0 &&
-    dimensionDefs.every((d) => !isDimensionGraded(d));
+    dimensionDefs.every((d) => getDimensionMode(d) !== 'GRADED');
 
   return (
     <div className="bg-canvas border-t border-gray-800 p-4 animate-in slide-in-from-top-2 space-y-3">
@@ -283,13 +355,14 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
           <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" strokeWidth={2} />
           <div>
             <p className="text-xs font-bold uppercase tracking-wider text-amber-400">
-              ALL DIMENSIONS ARE RECORD-ONLY
+              NO DIMENSION ON THIS PRODUCT IS GRADED
             </p>
             <p className="text-xs text-muted mt-1">
-              Every gradeable dimension on this product (Glove Length, Palm Width, and all
-              custom dimensions) is set to Record-only. Measurements will still be captured,
-              but no physical dimension can fail this product's verdict. This does not block
-              saving — confirm this is intentional.
+              Every dimension on this product (Glove Length, Palm Width, and all custom
+              dimensions) is set to Record-only or Off. Measurements for Record-only fields
+              will still be captured; Off fields won't appear in the wizard at all. Either
+              way, no physical dimension can fail this product's verdict. This does not
+              block saving — confirm this is intentional.
             </p>
           </div>
         </div>
@@ -389,30 +462,18 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
 
             {/* GLOVE LENGTH */}
             {(() => {
-              const lengthGraded = isDimensionGraded({ isGraded: config.lengthIsGraded });
+              const lengthMode = getDimensionMode({ isGraded: config.lengthIsGraded, wizardVisible: config.lengthWizardVisible });
+              const lengthGraded = lengthMode === 'GRADED';
               return (
             <tr className="hover:bg-surface-light/40 transition-colors border-b border-gray-800/50">
               <td className="py-2.5 px-3 border-r border-gray-800/50 text-sm font-semibold text-brand-secondary uppercase">
                 <span className="flex items-center gap-2">
                   GLOVE LENGTH
-                  <button
-                    onClick={() => handleToggleFixedGraded('lengthIsGraded')}
+                  <DimensionModeSelect
+                    mode={lengthMode}
+                    onChange={(m) => handleSetFixedMode('length', m)}
                     disabled={isReadOnly}
-                    className={`w-6 h-6 rounded flex items-center justify-center shrink-0 outline-none transition-colors ${
-                      isReadOnly
-                        ? `cursor-default ${lengthGraded ? 'text-emerald-400/60' : 'text-gray-500'}`
-                        : lengthGraded
-                          ? 'text-emerald-400 hover:bg-emerald-500/20'
-                          : 'text-gray-400 hover:bg-gray-500/20'
-                    }`}
-                    title={isReadOnly
-                      ? (lengthGraded ? 'Graded' : 'Record-only')
-                      : lengthGraded
-                        ? 'Graded — click to make Record-only'
-                        : 'Record-only — click to make Graded'}
-                  >
-                    {lengthGraded ? <Ruler className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                  </button>
+                  />
                 </span>
               </td>
               <td className="py-2 px-2 border-r border-gray-800/50 text-center align-top">
@@ -436,7 +497,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         type="text"
                         value={lenTarget}
                         disabled={specDisabled}
-                        title={!lengthGraded ? 'Record-only — this dimension is not graded, so its spec is not applied' : undefined}
+                        title={!lengthGraded ? "Not graded — this dimension's spec is not applied" : undefined}
                         onChange={e => handleUpdateFixed(size, 'lengthTarget', formatTarget(e.target.value))}
                         onFocus={handleFocusSnapshot}
                         onBlur={e => handleRoundOnBlur(e, config.lengthDecimals ?? 0, v => handleUpdateFixed(size, 'lengthTarget', v))}
@@ -454,7 +515,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         type="text"
                         value={lenTol}
                         disabled={specDisabled}
-                        title={!lengthGraded ? 'Record-only — this dimension is not graded, so its spec is not applied' : undefined}
+                        title={!lengthGraded ? "Not graded — this dimension's spec is not applied" : undefined}
                         onChange={e => handleUpdateFixed(size, 'lengthTolerance', formatTolerance(e.target.value))}
                         onFocus={handleFocusSnapshot}
                         onBlur={e => handleRoundOnBlur(e, config.lengthDecimals ?? 0, v => handleUpdateFixed(size, 'lengthTolerance', v))}
@@ -476,30 +537,18 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
 
             {/* PALM WIDTH */}
             {(() => {
-              const palmGraded = isDimensionGraded({ isGraded: config.palmWidthIsGraded });
+              const palmMode = getDimensionMode({ isGraded: config.palmWidthIsGraded, wizardVisible: config.palmWidthWizardVisible });
+              const palmGraded = palmMode === 'GRADED';
               return (
             <tr className="hover:bg-surface-light/40 transition-colors border-b border-gray-800/50">
               <td className="py-2.5 px-3 border-r border-gray-800/50 text-sm font-semibold text-brand-secondary uppercase">
                 <span className="flex items-center gap-2">
                   PALM WIDTH
-                  <button
-                    onClick={() => handleToggleFixedGraded('palmWidthIsGraded')}
+                  <DimensionModeSelect
+                    mode={palmMode}
+                    onChange={(m) => handleSetFixedMode('palmWidth', m)}
                     disabled={isReadOnly}
-                    className={`w-6 h-6 rounded flex items-center justify-center shrink-0 outline-none transition-colors ${
-                      isReadOnly
-                        ? `cursor-default ${palmGraded ? 'text-emerald-400/60' : 'text-gray-500'}`
-                        : palmGraded
-                          ? 'text-emerald-400 hover:bg-emerald-500/20'
-                          : 'text-gray-400 hover:bg-gray-500/20'
-                    }`}
-                    title={isReadOnly
-                      ? (palmGraded ? 'Graded' : 'Record-only')
-                      : palmGraded
-                        ? 'Graded — click to make Record-only'
-                        : 'Record-only — click to make Graded'}
-                  >
-                    {palmGraded ? <Ruler className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                  </button>
+                  />
                 </span>
               </td>
               <td className="py-2 px-2 border-r border-gray-800/50 text-center align-top">
@@ -523,7 +572,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         type="text"
                         value={palmTarget}
                         disabled={specDisabled}
-                        title={!palmGraded ? 'Record-only — this dimension is not graded, so its spec is not applied' : undefined}
+                        title={!palmGraded ? "Not graded — this dimension's spec is not applied" : undefined}
                         onChange={e => handleUpdateFixed(size, 'palmWidthTarget', formatTarget(e.target.value))}
                         onFocus={handleFocusSnapshot}
                         onBlur={e => handleRoundOnBlur(e, config.palmWidthDecimals ?? 0, v => handleUpdateFixed(size, 'palmWidthTarget', v))}
@@ -541,7 +590,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                         type="text"
                         value={palmTol}
                         disabled={specDisabled}
-                        title={!palmGraded ? 'Record-only — this dimension is not graded, so its spec is not applied' : undefined}
+                        title={!palmGraded ? "Not graded — this dimension's spec is not applied" : undefined}
                         onChange={e => handleUpdateFixed(size, 'palmWidthTolerance', formatTolerance(e.target.value))}
                         onFocus={handleFocusSnapshot}
                         onBlur={e => handleRoundOnBlur(e, config.palmWidthDecimals ?? 0, v => handleUpdateFixed(size, 'palmWidthTolerance', v))}
@@ -564,7 +613,8 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
             {/* DYNAMIC DIMENSIONS */}
             {dimensionDefs.map((def, index) => {
               const isEditing = editingDim?.id === def.id;
-              const graded = isDimensionGraded(def);
+              const mode = getDimensionMode(def);
+              const graded = mode === 'GRADED';
               // Cuff/Palm/Finger Thickness are permanent, non-deletable slots
               // (Beading Thickness is NOT one of these and keeps its Trash
               // button). Rename is also hidden for them: the merge above
@@ -599,57 +649,32 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                             </button>
                           </div>
                         </div>
-                        {/* Full labeled grading-mode toggle — the expanded
-                            counterpart to the icon-only control shown on the
-                            collapsed row. Commits immediately via
-                            triggerChange, exactly like the format dropdown
-                            beside it; it is not staged through editingDim,
-                            which only carries name/unit. */}
-                        <button
-                          onClick={() => handleToggleGraded(def.id)}
-                          className={`w-full h-8 rounded flex items-center justify-center gap-1.5 border text-[10px] font-bold uppercase tracking-wider transition-colors outline-none ${
-                            graded
-                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                              : 'bg-gray-500/10 border-gray-500/30 text-gray-400 hover:bg-gray-500/20'
-                          }`}
-                          title={graded
-                            ? 'Graded — measurements are checked against this row’s spec. Click to make Record-only.'
-                            : 'Record-only — measurements are captured but never graded. Click to make Graded.'}
-                        >
-                          {graded ? <Ruler className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                          <span>{graded ? 'Graded' : 'Record-only'}</span>
-                        </button>
+                        {/* 3-state mode control — the expanded counterpart to
+                            the same control shown on the collapsed row.
+                            Commits immediately via triggerChange, exactly
+                            like the format dropdown beside it; it is not
+                            staged through editingDim, which only carries
+                            name/unit. */}
+                        <DimensionModeSelect
+                          mode={mode}
+                          onChange={(m) => handleSetDimMode(def.id, m)}
+                        />
                       </div>
                     ) : (
                       <div className="flex items-center justify-between">
                         <span className="font-mono text-sm text-primary uppercase flex items-center gap-2">
                           {def.name}
-                          {/* Icon-only grading-mode toggle. Deliberately NOT
-                              inside the hover-reveal action group below: this
-                              is a persistent mode INDICATOR, and which
-                              dimensions are record-only must be legible at a
-                              glance. On a locked/read-only code it renders as
-                              a static, non-interactive icon rather than
-                              disappearing, so the mode stays visible even
+                          {/* Persistent mode control — deliberately NOT inside
+                              the hover-reveal action group below: which
+                              dimensions are record-only/off must be legible
+                              at a glance. Disabled (not hidden) on a locked/
+                              read-only code, so the mode stays visible even
                               where it cannot be changed. */}
-                          <button
-                            onClick={() => handleToggleGraded(def.id)}
+                          <DimensionModeSelect
+                            mode={mode}
+                            onChange={(m) => handleSetDimMode(def.id, m)}
                             disabled={isReadOnly}
-                            className={`w-6 h-6 rounded flex items-center justify-center shrink-0 outline-none transition-colors ${
-                              isReadOnly
-                                ? `cursor-default ${graded ? 'text-emerald-400/60' : 'text-gray-500'}`
-                                : graded
-                                  ? 'text-emerald-400 hover:bg-emerald-500/20'
-                                  : 'text-gray-400 hover:bg-gray-500/20'
-                            }`}
-                            title={isReadOnly
-                              ? (graded ? 'Graded' : 'Record-only')
-                              : graded
-                                ? 'Graded — click to make Record-only'
-                                : 'Record-only — click to make Graded'}
-                          >
-                            {graded ? <Ruler className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                          </button>
+                          />
                         </span>
                         {!isReadOnly && (
                           <div className="flex items-center gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity">
@@ -718,7 +743,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                             type="text"
                             value={dimVal.minSpec}
                             disabled={specDisabled}
-                            title={!graded ? 'Record-only — this dimension is not graded, so its spec is not applied' : undefined}
+                            title={!graded ? "Not graded — this dimension's spec is not applied" : undefined}
                             onChange={e => handleUpdateDimensionValue(size, def.id, 'minSpec', formatTarget(e.target.value))}
                             onFocus={handleFocusSnapshot}
                             onBlur={e => handleRoundOnBlur(e, def.decimals ?? 0, v => handleUpdateDimensionValue(size, def.id, 'minSpec', v))}
@@ -736,7 +761,7 @@ export function ProductConfigAccordion({ config, onChange, isReadOnly = false }:
                             type="text"
                             value={dimVal.tolerance}
                             disabled={specDisabled}
-                            title={!graded ? 'Record-only — this dimension is not graded, so its spec is not applied' : undefined}
+                            title={!graded ? "Not graded — this dimension's spec is not applied" : undefined}
                             onChange={e => handleUpdateDimensionValue(size, def.id, 'tolerance', formatTolerance(e.target.value))}
                             onFocus={handleFocusSnapshot}
                             onBlur={e => handleRoundOnBlur(e, def.decimals ?? 0, v => handleUpdateDimensionValue(size, def.id, 'tolerance', v))}
