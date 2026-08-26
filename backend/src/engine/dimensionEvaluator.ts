@@ -121,6 +121,23 @@ export function isDimensionGraded(dim: { isGraded?: boolean } | null | undefined
   return dim?.isGraded !== false;
 }
 
+/**
+ * Wizard-visibility rule, in exactly one place — same shape and rationale
+ * as isDimensionGraded() above, but a distinct, independent flag: a field
+ * can be RECORD ONLY and still wizard-visible (Arc 1 behavior, unchanged),
+ * or wizard-invisible regardless of its Graded/Record-only state. Only the
+ * explicit literal `false` hides a field; absent/undefined/true all show
+ * it, so no pre-existing def (none of which carry this key) changes
+ * behavior until a human toggles it.
+ *
+ * Client-side twin: frontend/src/context/ConfigContext.tsx's own
+ * isWizardVisible() — kept in sync deliberately, same duplication
+ * convention as isDimensionGraded()/mergeCanonicalDimensionDefs().
+ */
+export function isWizardVisible(dim: { wizardVisible?: boolean } | null | undefined): boolean {
+  return dim?.wizardVisible !== false;
+}
+
 export interface ProductDimensionValue {
   minSpec: string;
   tolerance: string; // may be the literal string 'MIN' (case-insensitive)
@@ -271,8 +288,8 @@ export function evaluateDimensions(params: DimensionEvalParams): DimensionEvalRe
   const sizeEntry = matrixEntry?.sizes?.[size];
 
   const fixedDimensions: ProductDimensionDef[] = [
-    { id: FIXED_DIM_LENGTH, name: 'GLOVE LENGTH', isGraded: matrixEntry?.lengthIsGraded },
-    { id: FIXED_DIM_PALM, name: 'PALM WIDTH', isGraded: matrixEntry?.palmWidthIsGraded },
+    { id: FIXED_DIM_LENGTH, name: 'GLOVE LENGTH', isGraded: matrixEntry?.lengthIsGraded, wizardVisible: matrixEntry?.lengthWizardVisible },
+    { id: FIXED_DIM_PALM, name: 'PALM WIDTH', isGraded: matrixEntry?.palmWidthIsGraded, wizardVisible: matrixEntry?.palmWidthWizardVisible },
   ];
 
   const dynamicDimensions: ProductDimensionDef[] = mergeCanonicalDimensionDefs(
@@ -283,7 +300,12 @@ export function evaluateDimensions(params: DimensionEvalParams): DimensionEvalRe
         : [],
   );
 
-  const activeDimensions = [...fixedDimensions, ...dynamicDimensions];
+  // Wizard-invisible ("OFF") dimensions are filtered out here, before any
+  // evaluation happens — a strict superset of the RECORD ONLY skip-path
+  // below: RECORD ONLY still runs (and reports) a no-op comparison, OFF
+  // dimensions never enter dimensionResults at all, exactly as if the
+  // operator's submission never mentioned them.
+  const activeDimensions = [...fixedDimensions, ...dynamicDimensions].filter(isWizardVisible);
 
   const dimensionResults: DimensionResult[] = [];
   let failedDimensions = 0;
