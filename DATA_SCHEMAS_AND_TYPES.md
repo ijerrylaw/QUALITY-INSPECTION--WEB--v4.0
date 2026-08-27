@@ -117,6 +117,24 @@ export interface Submission {
    * with `gradingSnapshot` (both null or both set).
    */
   gradingSnapshotProfileName: string | null;
+  /**
+   * Frozen Glove Weight compliance — a single DimensionResult (JSON), computed
+   * once by evaluateWeight() at submit time (or refrozen at amendment-approval
+   * time, in the same transaction as gradingSnapshot/verdict). Same
+   * never-recompute rule as gradingSnapshot.
+   *
+   * Closes a gap `dimensionMins` never covered: that field is the CLIENT's
+   * own computed stats object and never included Glove Weight (a scalar,
+   * not a 5-slot measurement) — so before this field existed, Weight's
+   * compliance had no frozen record at all, only a live recompute against
+   * whatever weightTarget/weightTolerance the product config holds NOW.
+   *
+   * NULLABLE — null on rows predating this field ("legacy"), deliberately
+   * NOT backfilled, same rationale as AUDIT_REPORT.md finding #18.
+   * HistoryFeed.tsx's DimensionsPanel renders those rows with the recorded
+   * value but no compliance judgment, never a false COMPLIANT.
+   */
+  gloveWeightSnapshot: string | null;
   amendmentLogs: AmendmentLog[];
 }
 

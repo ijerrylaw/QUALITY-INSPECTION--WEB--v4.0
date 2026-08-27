@@ -277,8 +277,26 @@ describe('HistoryFeed: real component, real worst-case data', () => {
     row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     // Confirms the detail actually rendered (not a false-positive from a
-    // click that did nothing) before measuring.
-    await findByText('AQL Category Analysis');
+    // click that did nothing) before measuring. "Inspection Results" is the
+    // panel's own outer header — renders unconditionally, before any
+    // per-category expand state — making it a more reliable marker here
+    // than a sub-section title that might not exist for every data shape.
+    await findByText('Inspection Results');
+
+    // Post-restructure (Inspection Results panel build): the defect-type
+    // pills that make up the worst-case content are no longer all visible by
+    // default — each AQL category row now collapses its pills behind its own
+    // click-to-expand toggle (AqlCategoryAnalysisPanel.tsx's CategoryRow).
+    // Expand every one so all ~25 worst-case chips actually land in the DOM,
+    // preserving this test's original content shape/volume exactly.
+    await waitFor(() => {
+      const toggles = container.querySelectorAll('td[colspan] button[title="Expand defect breakdown"]');
+      expect(toggles.length).toBe(CATEGORY_NAMES.length);
+    });
+    container
+      .querySelectorAll('td[colspan] button[title="Expand defect breakdown"]')
+      .forEach((btn) => btn.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+
     await waitFor(() => {
       const chips = container.querySelectorAll('td[colspan] .rounded-md.px-3.py-1\\.5.border.shadow-sm');
       expect(chips.length).toBeGreaterThanOrEqual(20); // ~25 worst-case chips actually present

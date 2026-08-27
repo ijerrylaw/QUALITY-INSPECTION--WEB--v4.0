@@ -5031,3 +5031,134 @@ max rule is genuinely in effect — the sum would have yielded `6.5`), N/A
 `OTHERS` (`QUALITATIVE`), and RECORD ONLY (`null` in the snapshot,
 structurally absent from `categoryResults`), plus a 25-defect case
 confirming `EXCEEDS_ALL`.
+
+---
+
+## 36. Inspection Results Panel Restructure — Shipped 2026-08-27
+
+Restructures the record detail panel opened from Inspection Records
+(`HistoryFeed.tsx` → `AqlCategoryAnalysisPanel.tsx`), previously titled "AQL
+Category Analysis," into two clearly labeled table sections under one shared
+header, "Inspection Results." Wizard's `StepReviewSubmit.tsx` was explicitly
+out of scope for this build.
+
+**The gap it closes:** the panel showed only defect-category verdicts.
+Physical dimension and Glove Weight results (Length, Palm Width, Cuff/Palm/
+Finger Thickness) had no display anywhere in a submitted record's detail
+view — an operator or supervisor reviewing a historical lot could see
+whether it passed AQL but had no way to see whether its measured dimensions
+were actually in spec. Separately, the just-shipped Actual AQL value (§35)
+read as a minor supporting chip when it was meant to be a primary
+comparison point against the assigned AQL and the verdict.
+
+**Discovery finding, before any code was written:** most of the "Dimensions"
+data already existed, frozen, and simply wasn't being read.
+`Submission.dimensionMins` (`DimensionStats`) stores min/max/avg/threshold/
+maxThreshold/fails/isGraded per dimension, computed once client-side at
+submit time and never recomputed — the exact same freeze guarantee
+`gradingSnapshot` has for AQL. `GET /api/submissions` was already returning
+it (an `include`, not a `select`) — it was simply unused by `HistoryFeed.tsx`.
+Name/unit resolution needed no new code either: `resolveProductMatrix()` +
+`mergeCanonicalDimensionDefs()` (`ConfigContext.tsx`) and
+`FIXED_DIMENSION_LABELS` (`fixedDimensions.ts`) already existed for exactly
+this need (the latter was built for `ApprovalsQueue.tsx`'s amendment diff
+modal, a different consumer with the same "resolve a dimension id to a
+display name with no live wizard context" problem).
+
+**Real gap found and fixed:** Glove Weight had no frozen compliance record
+anywhere. `dimensionMins` is the CLIENT's own computed stats object and
+never included Weight (a scalar, never part of the 5-slot measurement
+shape). The server computes a real weight `DimensionResult` via
+`evaluateWeight()` inside `resolveVerdict()`, but `POST /api/submissions`
+only ever persisted the client's `dimensionMins` and discarded the server's
+full `dimensionResults` array immediately after grading — so a historical
+lot's Glove Weight compliance had no ground truth at all, only a live
+recompute against whatever `weightTarget`/`weightTolerance` the product
+config holds *now*. Raised explicitly to the user before proceeding (per
+this build's process requirement to flag rather than guess a backend
+addition), and confirmed: freeze it, mirroring `gradingSnapshot` exactly.
+- New `Submission.gloveWeightSnapshot String?` column
+  (`backend/prisma/schema.prisma`), applied via `prisma db push` (this
+  project's standing rule — never `migrate dev`).
+- `backend/src/engine/dimensionEvaluator.ts`'s `FIXED_DIM_WEIGHT` sentinel
+  exported (was module-private) so `submissions.routes.ts` can extract the
+  weight entry without a second string-literal copy.
+- Both `resolveVerdict()` call sites in `submissions.routes.ts` — initial
+  submit and amendment-approval — now pull the `id === FIXED_DIM_WEIGHT`
+  entry out of the already-computed `dimensionResults` and freeze it,
+  refrozen at amendment-approval in the same `$transaction` as
+  `gradingSnapshot` so the two frozen-data families can never drift apart.
+- Same "null on legacy rows, deliberately not backfilled" rule as
+  `gradingSnapshot` — a pre-freeze row's Glove Weight row renders its
+  recorded value with a `NOT FROZEN` badge and no compliance judgment,
+  never a false `COMPLIANT`.
+
+**New "Dimensions" table** (`DimensionsPanel.tsx`, new file, same pure
+presentational convention as `AqlCategoryAnalysisPanel.tsx` — fed
+already-resolved rows, no fetching of its own). Data-driven, not a
+hardcoded field list: renders whichever dimension ids are actually present
+in `dimensionMins` plus a leading Glove Weight row — OFF-mode dimensions
+were already filtered out before the wizard ever wrote `dimensionMins`, so
+this is already exactly "what was captured for this lot," matching the AQL
+section's own data-driven convention. Each row: name · measured value (AVG
+primary, MIN–MAX spread secondary, §4.2's stacked-cell convention;
+rose-highlighted when out of range) · spec range (`≥X` or `X – Y`) ·
+Compliant / Out of Spec / Record Only / Not Frozen state badge (§4.8B).
+
+**AQL category rows restructured into a genuine 5-column layout**
+(`AqlCategoryAnalysisPanel.tsx`'s `CategoryRow`): Category → Defect Count
+→ Target AQL (Ac/Re) → Actual AQL → Verdict, replacing the previous
+scattered flex-wrap cluster of chips. Defect Count is now collapsed by
+default (`N found`), with a `ChevronRight`/`ChevronDown` click revealing
+the exact same defect-type pills inline that used to always render — no
+new pill visual, just gated behind a per-row expand toggle, reusing the
+same chevron convention the outer Inspection Records table already uses
+for its own row expand/collapse. Actual AQL is promoted from a minor
+`text-muted` chip to a full `rounded-full` state-badge pill matching
+Verdict's own visual weight, positioned immediately to Verdict's left so
+the two read as one assigned-vs-actual-vs-outcome triple — colors stay
+within the existing semantic set (indigo for a normal achieved level,
+matching Target AQL's own "system parameter" color; rose for `EXCEEDS_ALL`,
+the same semantic weight as a Verdict FAIL). RECORD ONLY and QUALITATIVE
+rows keep their existing distinct treatment (no Ac/Re chip, no Actual AQL
+badge) inside the same row structure as graded rows, not a separate visual
+language. Implemented with flex + `min-w-` columns rather than a literal
+`<table>` or fixed `w-` widths — deliberately, per this file's own
+documented lesson from the original width-clipping saga (§30) that fixed
+pixel widths and literal table layout on this exact panel are what caused
+that bug in the first place.
+
+**Panel container.** The outer bordered header ("AQL Category Analysis")
+moved up one level, from `AqlCategoryAnalysisPanel.tsx` into
+`HistoryFeed.tsx`, renamed to **"Inspection Results"**, now wrapping both
+`DimensionsPanel` and the restructured `AqlCategoryAnalysisPanel` (which
+renders only its own small "AQL Categories" sub-header now) as two labeled
+sections under one shared header — mirroring how the panel already carried
+one header over multiple logical blocks (category rows + unclassified +
+empty state) before this build. The `[&>*:last-child]:rounded-b-lg`
+bottom-corner-rounding convention moved up to this new outer wrapper too,
+so whichever section renders last (a legacy row with zero dimension data
+renders AQL Categories alone) still gets clean corners with no
+`overflow-hidden` — same technique the original width-clipping fix (§30)
+established, now applied one level higher.
+
+No modal, no "full report" button, no photos/amendment history — explicitly
+out of scope, deferred to a future separate project, per this build's
+locked requirements.
+
+**Test update, not a regression fix:** `history.widthRegression.test.tsx`'s
+"THE GUARD" test asserted the literal old title text `'AQL Category
+Analysis'` as its "did the detail panel actually render" marker, and
+counted defect-pill DOM nodes that used to always be present. Updated to
+match the intentional rename (now waits on `'Inspection Results'`, the new
+outer header, which renders unconditionally regardless of any row's
+individual expand state — arguably a more reliable marker than a
+sub-section title that isn't guaranteed to exist for every data shape) and
+to click every category row's new expand toggle before counting pills,
+preserving the test's original worst-case content shape and volume (~25
+unbreakable 400-char chip labels) exactly, just reached through the new
+interaction model instead of always-visible markup.
+
+**Verification:** `tsc` clean both sides; all 12 existing Vitest tests
+green, including the updated width-regression guard; `prisma db push`
+applied cleanly against the real dev.db.

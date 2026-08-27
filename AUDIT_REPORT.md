@@ -495,3 +495,23 @@ with its full original context, reasoning, and verification trail.
     silently resolved) because "every graded category gets an actual AQL"
     does not, and cannot, hold literally for N/A.
     → `CHANGELOG.md` §35.
+
+31. **Dimensions section name/unit resolution is live, not frozen — an
+    accepted, not fixed, gap.** Raised by the Inspection Results panel
+    restructure (2026-08-27), which added a "Dimensions" table to the record
+    detail view (`DimensionsPanel.tsx`). The measured/spec/compliance data
+    itself IS frozen (`Submission.dimensionMins` +
+    `Submission.gloveWeightSnapshot`, both computed once at submit time,
+    never recomputed), but the dimension's display NAME and unit are resolved
+    against the product's CURRENT `dimensionDefs` (`resolveProductMatrix()` +
+    `mergeCanonicalDimensionDefs()`) — the same class of drift risk
+    `gradingSnapshot` eliminated for AQL category names, reintroduced here for
+    dimension names specifically. If a dimension def is renamed or deleted
+    after a lot was submitted, that lot's historical record will show
+    whatever name the def carries NOW (or the raw id, if deleted), not what it
+    was called at submit time. Explicitly accepted rather than fixed in this
+    build: renaming a dimension def post-submission is rare, and freezing
+    names too would mean widening `dimensionMins`'s own JSON shape (a
+    client-written field), a larger change than this build's scope. Revisit
+    if a real historical-accuracy complaint ever surfaces.
+    → `CHANGELOG.md` §36.

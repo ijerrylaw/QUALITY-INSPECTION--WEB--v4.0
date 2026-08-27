@@ -58,6 +58,7 @@
 import { Router, Request, Response } from 'express';
 import { Prisma } from '../../generated/prisma/client';
 import { resolveVerdict, VerdictProfileNotFoundError, VerdictNoUsableProfileError, VerdictNoUsableDimensionConfigError } from '../engine/resolveVerdict';
+import { FIXED_DIM_WEIGHT } from '../engine/dimensionEvaluator';
 import prisma from '../lib/prismaClient';
 import {
   PIN_USER_DISPLAY_SELECT,
@@ -325,6 +326,11 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
     let evaluationProfileName: string | null;
     let evaluationProfileId: string | null;
     let requestedProfileIdEcho: string | null;
+    // Frozen Glove Weight compliance — see schema.prisma's gloveWeightSnapshot doc.
+    // null when no gloveWeight was supplied (result.dimensionResults then has no
+    // FIXED_DIM_WEIGHT entry at all — evaluateWeight() only runs when size + gloveWeight
+    // are both present, resolveVerdict.ts).
+    let gloveWeightSnapshot: string | null;
 
     try {
       const result = await resolveVerdict({
@@ -342,6 +348,8 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
       evaluationProfileName = result.evaluationProfileName;
       evaluationProfileId = result.evaluationProfileId;
       requestedProfileIdEcho = result.requestedProfileId;
+      const weightResult = result.dimensionResults.find((d) => d.id === FIXED_DIM_WEIGHT) ?? null;
+      gloveWeightSnapshot = weightResult ? JSON.stringify(weightResult) : null;
     } catch (err) {
       if (err instanceof VerdictProfileNotFoundError) {
         res.status(404).json({ error: err.message });
@@ -421,6 +429,7 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
           profileId:    validDbProfileId,
           gradingSnapshot:            JSON.stringify(categoryAnalysis),
           gradingSnapshotProfileName: evaluationProfileName,
+          gloveWeightSnapshot,
         },
         include: SUBMISSION_IDENTITY_INCLUDE,
       });
@@ -1178,6 +1187,11 @@ amendmentsRouter.post('/:id/approve', requireRole('MANAGER', 'ADMIN'), async (re
           // written together so they can never drift apart (AUDIT_REPORT.md #18).
           gradingSnapshot:            JSON.stringify(recomputed.categoryAnalysis),
           gradingSnapshotProfileName: recomputed.evaluationProfileName,
+          // Refreeze Glove Weight compliance in the same transaction, same rationale.
+          gloveWeightSnapshot: (() => {
+            const w = recomputed.dimensionResults.find((d) => d.id === FIXED_DIM_WEIGHT);
+            return w ? JSON.stringify(w) : null;
+          })(),
         },
         include: SUBMISSION_IDENTITY_INCLUDE,
       }),

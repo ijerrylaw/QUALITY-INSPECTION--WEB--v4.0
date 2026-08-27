@@ -26,7 +26,7 @@ const SLOTS_PER_DIM = 5;
 /** Sentinel IDs for the always-visible fixed-row dimensions. */
 const FIXED_DIM_LENGTH = '__fixed_length__';
 const FIXED_DIM_PALM = '__fixed_palm__';
-const FIXED_DIM_WEIGHT = '__fixed_weight__';
+export const FIXED_DIM_WEIGHT = '__fixed_weight__';
 
 /**
  * Canonical ids for the 3 dynamic dimensions that become permanent,
