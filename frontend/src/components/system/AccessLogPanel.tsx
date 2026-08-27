@@ -3,6 +3,7 @@ import { ScrollText, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { API_BASE_URL } from '../../context/ConfigContext';
+import { useAuth, authHeader } from '../../context/AuthContext';
 
 // Mirrors ApprovalsQueue.tsx's PAGE_SIZE/loadPage() pagination pattern — same
 // backend page/limit contract (GET /api/access-log).
@@ -40,6 +41,7 @@ function formatAction(action: string): string {
  * (backend/src/lib/accessLog.ts). No filtering/search in v1, per spec.
  */
 export function AccessLogPanel() {
+  const { user } = useAuth();
   const [logs, setLogs] = useState<AccessLogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -52,7 +54,9 @@ export function AccessLogPanel() {
     const fetchPage = options.replace ? 1 : pageNum;
     if (options.replace) setLoading(true); else setLoadingMore(true);
 
-    fetch(`${API_BASE_URL}/api/access-log?page=${fetchPage}&limit=${limit}`)
+    fetch(`${API_BASE_URL}/api/access-log?page=${fetchPage}&limit=${limit}`, {
+      headers: { ...authHeader(user) },
+    })
       .then((res) => {
         if (!res.ok) throw new Error(`Server error: ${res.status}`);
         return res.json();
@@ -86,23 +90,32 @@ export function AccessLogPanel() {
   }, []);
 
   const handleLoadMore = () => loadPage(page + 1, { replace: false });
+  const handleRefresh = () => loadPage(1, { replace: true });
 
   return (
     <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
-      <div className="bg-surface border-b border-gray-800 p-4 flex items-center gap-3">
-        <ScrollText className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
-        <div>
-          <h3 className="text-lg font-semibold uppercase text-primary">Access Log</h3>
-          <p className="text-xs text-muted mt-1 font-normal normal-case">
-            Audit trail of M365/PIN logins and configuration changes.
-          </p>
+      <div className="bg-surface border-b border-gray-800 p-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <ScrollText className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
+          <div>
+            <h3 className="text-lg font-semibold uppercase text-primary">Access Log</h3>
+            <p className="text-xs text-muted mt-1 font-normal normal-case">
+              Audit trail of M365/PIN logins and configuration changes.
+            </p>
+          </div>
         </div>
+        <Button variant="secondary" className="px-4" onClick={handleRefresh} disabled={loading}>
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+        </Button>
       </div>
 
       <div className="p-4 space-y-4">
         {error && (
-          <div className="p-4 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-sm">
-            {error}
+          <div className="p-4 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-sm flex items-center justify-between gap-3">
+            <span>{error}</span>
+            <Button variant="secondary" className="px-4 shrink-0" onClick={handleRefresh} disabled={loading}>
+              {loading ? 'RETRYING…' : 'RETRY'}
+            </Button>
           </div>
         )}
 
