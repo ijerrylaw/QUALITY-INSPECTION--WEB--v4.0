@@ -132,55 +132,61 @@ export function AccessLogPanel() {
             <p className="text-muted text-sm">No access log entries yet.</p>
           </div>
         ) : (
-          <>
-            <div className="border border-gray-800 rounded-lg overflow-x-auto">
-              <table className="w-full text-left whitespace-nowrap">
-                <thead>
-                  <tr>
-                    <th className="bg-surface text-xs font-semibold uppercase tracking-wider text-muted py-3 px-4 border-b border-gray-800 text-left">Timestamp</th>
-                    <th className="bg-surface text-xs font-semibold uppercase tracking-wider text-muted py-3 px-4 border-b border-gray-800 text-left">User / Role</th>
-                    <th className="bg-surface text-xs font-semibold uppercase tracking-wider text-muted py-3 px-4 border-b border-gray-800 text-left">Action</th>
-                    <th className="bg-surface text-xs font-semibold uppercase tracking-wider text-muted py-3 px-4 border-b border-gray-800 text-left">Detail</th>
-                    <th className="bg-surface text-xs font-semibold uppercase tracking-wider text-muted py-3 px-4 border-b border-gray-800 text-left">IP Address</th>
+          // Fixed-height, internally-scrolling box (Jerry's explicit sizing
+          // call — ~7-8 rows visible, both directions via one overflow-auto
+          // so a table wider than the box still scrolls horizontally too).
+          // Sticky `th`s (not `thead`, for consistent cross-browser sticky
+          // behavior with a bordered table) pin the header to the top of
+          // THIS scroll container. Load More lives inside the same box,
+          // below the last row, so its rows land in place — scroll position
+          // is never touched, so appending never jumps the view.
+          <div className="border border-gray-800 rounded-lg overflow-auto max-h-[420px]">
+            <table className="w-full text-left whitespace-nowrap">
+              <thead>
+                <tr>
+                  <th className="sticky top-0 z-10 bg-surface text-xs font-semibold uppercase tracking-wider text-muted py-3 px-4 border-b border-gray-800 text-left">Timestamp</th>
+                  <th className="sticky top-0 z-10 bg-surface text-xs font-semibold uppercase tracking-wider text-muted py-3 px-4 border-b border-gray-800 text-left">User / Role</th>
+                  <th className="sticky top-0 z-10 bg-surface text-xs font-semibold uppercase tracking-wider text-muted py-3 px-4 border-b border-gray-800 text-left">Action</th>
+                  <th className="sticky top-0 z-10 bg-surface text-xs font-semibold uppercase tracking-wider text-muted py-3 px-4 border-b border-gray-800 text-left">Detail</th>
+                  <th className="sticky top-0 z-10 bg-surface text-xs font-semibold uppercase tracking-wider text-muted py-3 px-4 border-b border-gray-800 text-left">IP Address</th>
+                </tr>
+              </thead>
+              <tbody>
+                {logs.map((log) => (
+                  <tr key={log.id} className="hover:bg-white/5 transition-colors">
+                    <td className="py-3 px-4 text-xs border-b border-gray-800/50 font-mono text-muted">
+                      {new Date(log.timestamp).toLocaleString()}
+                    </td>
+                    <td className="py-3 px-4 text-sm border-b border-gray-800/50">
+                      <div className="font-bold text-primary">
+                        {log.userDisplayName ?? '—'}{log.role ? ` · ${log.role}` : ''}
+                      </div>
+                      {log.userId && (
+                        <div className="text-xs text-muted font-mono truncate max-w-[16rem]">{log.userId}</div>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-sm border-b border-gray-800/50">
+                      <Badge variant={actionBadgeVariant(log.action)}>{formatAction(log.action)}</Badge>
+                    </td>
+                    <td className="py-3 px-4 text-sm border-b border-gray-800/50 text-muted">
+                      {log.detail ?? '—'}
+                    </td>
+                    <td className="py-3 px-4 text-xs border-b border-gray-800/50 font-mono text-muted">
+                      {log.ipAddress ?? '—'}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {logs.map((log) => (
-                    <tr key={log.id} className="hover:bg-white/5 transition-colors">
-                      <td className="py-3 px-4 text-xs border-b border-gray-800/50 font-mono text-muted">
-                        {new Date(log.timestamp).toLocaleString()}
-                      </td>
-                      <td className="py-3 px-4 text-sm border-b border-gray-800/50">
-                        <div className="font-bold text-primary">
-                          {log.userDisplayName ?? '—'}{log.role ? ` · ${log.role}` : ''}
-                        </div>
-                        {log.userId && (
-                          <div className="text-xs text-muted font-mono truncate max-w-[16rem]">{log.userId}</div>
-                        )}
-                      </td>
-                      <td className="py-3 px-4 text-sm border-b border-gray-800/50">
-                        <Badge variant={actionBadgeVariant(log.action)}>{formatAction(log.action)}</Badge>
-                      </td>
-                      <td className="py-3 px-4 text-sm border-b border-gray-800/50 text-muted">
-                        {log.detail ?? '—'}
-                      </td>
-                      <td className="py-3 px-4 text-xs border-b border-gray-800/50 font-mono text-muted">
-                        {log.ipAddress ?? '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </table>
 
             {hasMore && (
-              <div className="flex justify-center pt-2">
+              <div className="flex justify-center py-3 border-t border-gray-800/50">
                 <Button variant="secondary" onClick={handleLoadMore} disabled={loadingMore} className="px-8">
                   {loadingMore ? 'LOADING…' : 'LOAD MORE'}
                 </Button>
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
     </div>

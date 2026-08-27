@@ -19,9 +19,13 @@
  */
 
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, render, fireEvent } from '@testing-library/react';
+import { cleanup, render, fireEvent, waitFor } from '@testing-library/react';
 import { AccessLogPanel } from '../AccessLogPanel';
 import type { User } from '../../../context/AuthContext';
+// The REAL compiled Tailwind CSS — the fixed-height/sticky-header test below
+// measures actual box heights and sticky positioning, which are inert
+// without this (same reasoning as history.widthRegression.test.tsx).
+import '../../../index.css';
 
 const ADMIN_USER: User = {
   id: 'test-admin-id',
@@ -194,5 +198,57 @@ describe('AccessLogPanel: refresh control', () => {
 
     await findByText('Product Engine');
     expect(callCount).toBe(2);
+  });
+});
+
+describe('AccessLogPanel: fixed-height scroll container with sticky header', () => {
+  function manyRows(prefix: string, n: number) {
+    return Array.from({ length: n }, (_, i) =>
+      accessLogRow({ id: `${prefix}_${i}`, userId: `${prefix}_${i}`, timestamp: new Date(Date.now() - i * 1000).toISOString() }),
+    );
+  }
+
+  test('the table scrolls internally (bounded box, not page growth), the header stays pinned while scrolled, and Load More appends without resetting scroll position', async () => {
+    let callCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      callCount += 1;
+      const rows = callCount === 1 ? manyRows('p1', 12) : manyRows('p2', 12);
+      return new Response(
+        JSON.stringify({ logs: rows, count: rows.length, page: callCount, limit: 50, totalCount: 24, hasMore: callCount === 1 }),
+        { status: 200 },
+      );
+    }));
+
+    const { container, findByText } = render(<AccessLogPanel />);
+    await findByText('LOAD MORE');
+
+    const table = container.querySelector('table')!;
+    const scrollBox = table.parentElement as HTMLElement;
+
+    // Internal scroll exists: 12 rows' worth of content is taller than the
+    // box itself, proving the box didn't just grow to fit everything.
+    expect(scrollBox.scrollHeight).toBeGreaterThan(scrollBox.clientHeight);
+    // The box's own rendered height is bounded near the ~7-8-row sizing call
+    // (max-h-[420px]), regardless of how many rows are loaded.
+    expect(scrollBox.getBoundingClientRect().height).toBeLessThanOrEqual(421);
+
+    // Scroll down inside the box.
+    scrollBox.scrollTop = 150;
+    scrollBox.dispatchEvent(new Event('scroll', { bubbles: true }));
+
+    const headerCell = scrollBox.querySelector('th')!;
+    // Sticky: the header cell's top edge stays at the scroll box's own top
+    // edge even after scrolling — a non-sticky header would have moved up
+    // out of view by ~150px instead.
+    expect(Math.abs(headerCell.getBoundingClientRect().top - scrollBox.getBoundingClientRect().top)).toBeLessThan(2);
+
+    const loadMoreButton = await findByText('LOAD MORE');
+    fireEvent.click(loadMoreButton);
+
+    await waitFor(() => expect(callCount).toBe(2));
+    await findByText('p2_0'); // second page's rows landed (userId is rendered verbatim)
+
+    // Appending the next page must not reset the scroll position.
+    expect(scrollBox.scrollTop).toBe(150);
   });
 });
