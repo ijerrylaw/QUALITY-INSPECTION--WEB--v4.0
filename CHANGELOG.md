@@ -5443,3 +5443,73 @@ regression.
 assumed — and confirmed still passing under the new shared width values),
 including "THE GUARD" width-regression test confirmed by name in a verbose
 run.
+
+---
+
+## 40. Inspection Results Panel — ACTUAL Column Centering & Hierarchy Swap — Shipped 2026-08-27
+
+Jerry's live browser review of §39 asked for two more display-only fixes:
+ACTUAL sitting too close to TARGET (should read as more centered in the
+row), and Dimensions' ACTUAL content having its emphasis backwards (the
+aggregate MIN/MAX/AVG was the big line; the actual failing values were
+smaller and secondary — the reverse of what an inspector needs first).
+
+**ACTUAL genuinely centered, not just nudged.** Both files' ACTUAL column
+(the button in `AqlCategoryAnalysisPanel.tsx`, the plain `<div>` in
+`DimensionsPanel.tsx`) is now wrapped in a `flex-1 flex justify-center
+min-w-0` spacer sitting between TARGET and RESULT, in both the header row
+and every data row. The fixed-width ACTUAL box centers within whatever
+space the spacer consumes; text inside it stays left-aligned — only the
+column's own position moved. RESULT dropped its `ml-auto`, since the
+spacer already claims all leftover space and pushes RESULT to the row's
+true right edge through ordinary flex flow. ACTUAL was widened again,
+150px→260px, to comfortably hold the richer content both tables now show.
+
+**A real alignment bug found and fixed along the way, not just a
+cosmetic follow-on.** Once `ml-auto` no longer pinned RESULT, its
+`min-w-[90px]` (a floor, not a cap) let badge text length change RESULT's
+own rendered width — "COMPLIANT" vs. "PASS" consumed different amounts of
+the row — which changed how much space was left for the ACTUAL-centering
+spacer, shifting ACTUAL's position depending on which verdict happened to
+render. Exactly the same class of bug TARGET hit in §39 once its own
+`min-w-` stopped being sufficient. Fixed by converting RESULT to a genuine
+`w-[110px]` in both files, restoring the invariant that every column left
+of RESULT's own right-pinned edge has a content-independent width.
+
+**A second, unrelated false positive caught in the regression test
+itself, not the app.** `inspectionResultsColumnAlignment.test.tsx` initially
+reported the header row and data row disagreeing by 38px WITHIN THE SAME
+FILE. Investigation (direct `getBoundingClientRect()` debugging, not
+guessing) traced it to the test's own unconstrained render width: with no
+outer container width set, RTL's default viewport in this test left only
+~382px of usable space — less than NAME+TARGET+RESULT's combined 430px of
+fixed width plus gaps — forcing `flex-wrap` to activate and distribute the
+undersupply differently between the header row and the data row. This is
+exactly the class of problem `history.widthRegression.test.tsx` already
+solved for its own "THE GUARD" test via an explicit `width: '1400px'`
+wrapper; applying that same established convention here (both `render()`
+calls, both tests in the file) fixed it — not a real app bug, since the
+actual `<td colSpan>` this panel renders inside is always desktop-table
+wide.
+
+**Dimensions' ACTUAL hierarchy swapped.** The out-of-spec list (when
+present) is now the PRIMARY line — normal size, red, no longer prefixed
+with a redundant "OUT OF SPEC:" label (the RESULT badge already says
+that) — with MIN/MAX/AVG demoted to a smaller, grey secondary line
+beneath it. A fully compliant row, which has no out-of-spec list at all,
+renders as just that one de-emphasized MIN/MAX/AVG line. Format also
+changed from `MIN x / MAX y / AVG z` to `MIN : x   MAX : y   AVG : z`.
+MIN/MAX/AVG is styled identically regardless of pass/fail now — the
+failure signal lives entirely in the out-of-spec line and the RESULT
+badge, not in this line's own color.
+
+**Tests.** `dimensionsPanel.test.tsx`'s format assertions rewritten for
+the new `MIN : x` syntax and the swapped hierarchy, including an explicit
+DOM-order check (`compareDocumentPosition`) proving the out-of-spec line
+renders before the MIN/MAX/AVG line, and a className check confirming
+their relative size/color weighting. `inspectionResultsColumnAlignment.test.tsx`
+gained the `1400px` wrapper described above.
+
+**Verification:** `tsc` clean both sides; all 28 Vitest tests green,
+including "THE GUARD" width-regression test and the newly-fixed alignment
+tests, confirmed by name in a verbose run.

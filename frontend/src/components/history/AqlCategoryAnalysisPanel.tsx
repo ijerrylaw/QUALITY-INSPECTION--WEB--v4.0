@@ -73,9 +73,96 @@
  * UI_DESIGN_SYSTEM.md compliance carried over unchanged from HistoryFeed.tsx:
  * §4.8A Value Chips (indigo AQL level, gray Ac/Re), §4.8B State Badges
  * (emerald PASS, rose FAIL, gray N/A), §4.9 Amber for unclassified defects.
+ *
+ * RESTRUCTURE (Inspection Results panel build): this component no longer owns
+ * the outer bordered panel/header — that moved up to HistoryFeed.tsx, which
+ * now wraps this component AND the new DimensionsPanel.tsx under one shared
+ * "INSPECTION RESULTS" header, mirroring how this panel already carried one
+ * header over multiple logical blocks (category rows + unclassified + empty
+ * state). This component renders its own small "AQL Categories" sub-header
+ * (same visual weight as DimensionsPanel.tsx's "Dimensions" sub-header) plus
+ * its table body, so it can nest inside that shared wrapper without doubling
+ * the border/background.
+ *
+ * Per-category rows are a genuine 4-column structure — Category / TARGET
+ * (AQL level + eval mode + Ac/Re) / ACTUAL (defect count + Actual AQL badge,
+ * collapsed, click-to-expand for the per-defect pills) / RESULT (Verdict
+ * badge only) — implemented with flex + fixed `w-` widths, per this file's
+ * own documented lesson from the original clipping saga above about literal
+ * table layout (that lesson doesn't extend to a small flex item several DOM
+ * levels inside an already-`table-fixed` `<td>` — see the POST-REVIEW
+ * CLEANUP note below).
+ *
+ * VISUAL CONSISTENCY REWORK (2026-08-27): sub-header renamed "AQL Categories"
+ * → "DEFECTS"; a new TARGET/ACTUAL/RESULT column header row added, sharing
+ * its width scheme with DimensionsPanel.tsx (NAME 140px, TARGET 170px,
+ * ACTUAL 110px, RESULT 90px) so both tables' headers and data rows align
+ * with each other, not just within themselves. Full UI_DESIGN_SYSTEM.md
+ * typography audit applied: category name conforms to §1.3's Dimension
+ * Field Name Label token (`text-sm font-semibold text-primary uppercase`),
+ * every Value Chip now carries the mandated `uppercase` class (§4.8A), the
+ * collapsed defect count matches §4.2's stacked-cell primary size
+ * (`text-sm`, was `text-[11px]`), chevrons meet §1.4's `w-3.5` icon floor
+ * (were `w-3`), and the loading/error helper text drops `font-mono` (UI
+ * Chrome text, not data, per §1.3's Golden Rule). No interaction or logic
+ * changes in that pass — every conditional branch rendered exactly what it
+ * rendered before, only className strings changed.
+ *
+ * POST-REVIEW CLEANUP (2026-08-27): NAME/TARGET/ACTUAL switched from
+ * `min-w-` to a genuine `w-` (see the TARGET column's own comment below for
+ * the full root-cause explanation — `min-w-` is a floor, not a fixed width,
+ * and this column's variable chip-cluster content reliably grew past it,
+ * unlike DimensionsPanel.tsx's always-short TARGET content, misaligning the
+ * two tables). This supersedes this file's older documented "no fixed `w-`
+ * widths" lesson from the original clipping saga above — that lesson is
+ * still correct for the outer table/panel boundary (nothing here changes
+ * that), but does not extend to a small flex item several DOM levels
+ * inside an already-`table-fixed` `<td>`, whose content already wraps
+ * on overflow rather than forcing growth. Also removed from this pass: the
+ * sub-header's ShieldCheck icon (now lives once, on HistoryFeed.tsx's outer
+ * "Inspection Results" header) and the sample-size/profile subtitle line
+ * (moved to that same outer header — it's whole-submission context, not
+ * defects-specific), the "none recorded" placeholder under a 0-found
+ * category, and the "No defects recorded for this lot." footer (the
+ * per-row "0 found" value already says this).
+ *
+ * LAYOUT & CONTENT REVISION (2026-08-27): two prior decisions reversed.
+ * (1) Column widths rebalanced — NAME 140px→100px, TARGET 170px→220px,
+ * ACTUAL 110px→150px (RESULT unchanged) — because the earlier 170px TARGET
+ * still wrapped this file's own worst-case chip cluster (AQL level + eval
+ * mode + Ac/Re) onto two lines; 220px was sized to fit that content on one
+ * line, verified via a real-Chromium test rather than assumed. (2) Actual
+ * AQL moved from RESULT into ACTUAL, beside the defect count — the previous
+ * placement (see the VISUAL CONSISTENCY REWORK note above) is explicitly
+ * superseded, not merely patched: RESULT now holds the Verdict badge only.
+ * `ActualAqlBadge` itself is unchanged (same component, same indigo/rose
+ * pill geometry) — only where it's rendered moved.
+ *
+ * LAYOUT ADJUSTMENT (2026-08-27, follow-up): ACTUAL widened again,
+ * 150px→260px, and repositioned — it now sits inside a `flex-1
+ * justify-center` spacer between TARGET and RESULT (both in the header row
+ * and every `CategoryRow`) instead of hugging TARGET's right edge, so it
+ * reads as genuinely centered in the row rather than crowded against
+ * TARGET. Text inside the ACTUAL button stays left-aligned; only the
+ * column's own position shifted. RESULT dropped its `ml-auto` — the spacer
+ * already consumes all leftover space, so RESULT reaches the row's true
+ * right edge through ordinary flex flow. Same pattern applied identically
+ * in DimensionsPanel.tsx, whose own ACTUAL content (MIN/MAX/AVG, potentially
+ * with an out-of-spec line) also needed the wider box.
+ *
+ * That same follow-up also converted RESULT from `min-w-[90px]` to a
+ * genuine `w-[110px]` — a real bug caught by the alignment test, not a
+ * cosmetic tidy-up. Once `ml-auto` no longer pinned RESULT, its `min-w-`
+ * let badge text length ("PASS" here vs. e.g. "COMPLIANT" in
+ * DimensionsPanel.tsx) change how much of the row RESULT actually
+ * consumed, which changed how much space was left for the ACTUAL-centering
+ * spacer — shifting ACTUAL's position depending on which verdict badge
+ * happened to render. Same root cause as TARGET's own `min-w-`→`w-` fix
+ * above, recurring in a new column once the surrounding layout changed.
  */
 
-import { ShieldCheck, Eye } from 'lucide-react';
+import { useState } from 'react';
+import { Eye, ChevronRight, ChevronDown } from 'lucide-react';
 
 // ── Display-only helpers ─────────────────────────────────────────────────
 // Pass/fail DETERMINATION and threshold VALUES come from the server
@@ -126,6 +213,20 @@ export interface DefectItem {
   failing: boolean;
 }
 
+/**
+ * Display-only mirror of backend/src/engine/aqlEvaluator.ts's ActualAqlAchieved —
+ * the tightest standard ISO 2859-1 AQL level the observed count still satisfied,
+ * computed server-side and frozen into Submission.gradingSnapshot. Same
+ * "display-only inline copy, kept in sync manually" pattern this file's header
+ * documents for the bracket list.
+ */
+export interface ActualAqlAchieved {
+  status: 'ACHIEVED' | 'EXCEEDS_ALL' | 'QUALITATIVE';
+  aqlLevel: string | null;
+  threshold: { ac: number; re: number } | null;
+  evaluatedCount: number | null;
+}
+
 export interface CategoryAnalysis {
   id: string;
   name: string;
@@ -135,15 +236,56 @@ export interface CategoryAnalysis {
   totalCount: number;
   /** true=PASS, false=FAIL, null=qualitative/informational/not-yet-available (no verdict shown) */
   passed: boolean | null;
+  /**
+   * OPTIONAL on purpose: snapshots frozen before this field existed simply don't
+   * carry it (deliberately not backfilled — AUDIT_REPORT.md #18), and those rows
+   * must render cleanly with the chip absent rather than showing a false state.
+   * Null means the category was never graded (RECORD ONLY / OFF).
+   */
+  actualAqlAchieved?: ActualAqlAchieved | null;
   defectItems: DefectItem[];
+}
+
+/**
+ * The "Actual AQL Achieved" badge — full §4.8B State Badge geometry
+ * (`rounded-full`, bold) rather than a minor §4.8A supporting chip, so it
+ * still reads clearly as its own distinct pill now that it sits beside the
+ * plain-text defect count in ACTUAL (moved there from RESULT — layout &
+ * content revision, 2026-08-27; see the file header). Colors stay within
+ * the existing semantic set rather than inventing a new one: indigo
+ * (matches the Target AQL chip's own "system parameter" color) for a normal
+ * achieved level, rose for EXCEEDS_ALL (a real hard-fail).
+ *
+ * Renders nothing for QUALITATIVE (an N/A-mode category has no count to
+ * grade — the row's own "qualitative" chip already covers this) or a
+ * missing/null value (legacy snapshot, or an ungraded RECORD ONLY category).
+ */
+function ActualAqlBadge({ actual }: { actual?: ActualAqlAchieved | null }) {
+  if (!actual || actual.status === 'QUALITATIVE') return null;
+
+  const hardFail = actual.status === 'EXCEEDS_ALL';
+
+  return (
+    <span
+      className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+        hardFail
+          ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+          : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400'
+      }`}
+      title={
+        hardFail
+          ? `Observed ${actual.evaluatedCount} — exceeds Ac ${actual.threshold?.ac} at the loosest standard AQL level (10).`
+          : `Observed ${actual.evaluatedCount} — still within Ac ${actual.threshold?.ac} at AQL ${actual.aqlLevel}, the tightest level met.`
+      }
+    >
+      {hardFail ? 'ACTUAL > 10' : `ACTUAL ${actual.aqlLevel}`}
+    </span>
+  );
 }
 
 export interface AqlCategoryAnalysisPanelProps {
   categoryAnalysis: CategoryAnalysis[];
   unclassified: [string, number][];
-  totalClean: number;
-  sampleSize: number;
-  displayProfileName?: string | null;
   anyFail: boolean;
   noProfileLinked: boolean;
   /** 'snapshot' = a frozen gradingSnapshot is being shown, no live fetch involved. */
@@ -151,208 +293,233 @@ export interface AqlCategoryAnalysisPanelProps {
   previewErrorMessage?: string;
 }
 
-export function AqlCategoryAnalysisPanel({
-  categoryAnalysis,
-  unclassified,
-  totalClean,
-  sampleSize,
-  displayProfileName,
-  anyFail,
-  noProfileLinked,
-  previewStatus,
-  previewErrorMessage,
-}: AqlCategoryAnalysisPanelProps) {
-  const snappedBracket = snapBracket(sampleSize);
+/**
+ * One category's row — NAME / TARGET (AQL level + eval mode + Ac/Re) /
+ * ACTUAL (defect count + Actual AQL badge, click-to-expand for the
+ * per-defect pills) / RESULT (Verdict badge). Flex + fixed `w-` columns, not
+ * a literal `<table>` — see the file header for why.
+ */
+function CategoryRow({ cat }: { cat: CategoryAnalysis }) {
+  const [expanded, setExpanded] = useState(false);
+  const isFail = cat.passed === false;
+  const isNA = cat.passed === null;
+  const zeroTol = isZeroTolerance(cat.aqlLevel);
+  const pf = isPassFail(cat.aqlLevel);
+  const recordOnly = isRecordOnly(cat.aqlLevel);
+  const hasDefects = cat.defectItems.length > 0;
 
   return (
-    <div className="rounded-lg border border-gray-800 bg-surface whitespace-normal">
+    <div className={`px-4 py-3 transition-colors ${isFail ? 'bg-rose-500/[0.04]' : ''}`}>
+      <div className="flex items-center flex-wrap gap-y-1.5 gap-x-3">
 
-      {/* Panel header — always the first child, so it owns the top corners directly. */}
-      <div className="rounded-t-lg bg-gray-800/50 px-4 py-2 flex items-center justify-between border-b border-gray-800 flex-wrap gap-2">
-        <div className="flex items-center gap-2 flex-wrap min-w-0">
-          <ShieldCheck className="w-3.5 h-3.5 text-muted shrink-0" strokeWidth={2} />
-          <span className="text-xs font-bold uppercase tracking-wider text-muted">
-            AQL Category Analysis
+        {/* Column: NAME — §1.3 Dimension Field Name Label token, shared with DimensionsPanel.tsx */}
+        <span className="text-sm font-semibold uppercase text-primary w-[100px] shrink-0">
+          {cat.name}
+        </span>
+
+        {/* Column: TARGET — level chip + eval mode + Ac/Re. Logic unchanged; every
+            chip now carries the §4.8A-mandated `uppercase` class.
+            Fixed `w-` (not `min-w-`) — see file header. This cluster is the
+            worst-case content in the whole panel (AQL level chip + eval mode
+            word like "CUMULATIVE" + Ac/Re chip); 220px was sized specifically
+            so it fits on one line without wrapping (verified in
+            aqlCategoryAnalysisPanel.test.tsx via real-Chromium measurement,
+            not assumed) — `min-w` alone previously let this content grow past
+            170px, misaligning this column against DimensionsPanel.tsx's
+            identically-classed but always-shorter TARGET. A fixed width
+            forces any overflow to wrap *inside* this box (via the
+            `flex-wrap` already on this div) instead of growing it. */}
+        <div className="flex items-center gap-1.5 flex-wrap w-[220px] shrink-0">
+          <span className="px-2 py-0.5 rounded font-mono text-[10px] uppercase bg-indigo-500/10 border border-indigo-500/30 text-indigo-400">
+            {cat.aqlLevel || '—'}
           </span>
-          {/* "WOULD FAIL" indicator when reference analysis reveals failures on unlinked submissions */}
-          {anyFail && noProfileLinked && (
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/30 text-amber-400">
-              WOULD FAIL
+          {cat.evaluationMode && (
+            <span className={`text-[9px] font-bold uppercase tracking-wider ${
+              cat.evaluationMode === 'CUMULATIVE' || cat.evaluationMode === 'GRANULAR' ? 'text-emerald-400' : 'text-gray-400'
+            }`}>
+              {cat.evaluationMode}
             </span>
           )}
-          {anyFail && !noProfileLinked && (
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-500/10 border border-rose-500/30 text-rose-400">
-              CATEGORY FAILED
+          {zeroTol && (
+            <span className="px-2 py-0.5 rounded font-mono text-[10px] uppercase bg-gray-800/50 border border-gray-700/50 text-muted">
+              Ac 0
             </span>
           )}
-          {previewStatus === 'loading' && (
-            <span className="text-[10px] text-muted font-mono animate-pulse">Loading AQL analysis…</span>
+          {!zeroTol && !pf && cat.evaluationMode && cat.threshold && (
+            <span className="px-2 py-0.5 rounded font-mono text-[10px] uppercase bg-gray-800/50 border border-gray-700/50 text-muted">
+              Ac {cat.threshold.ac} / Re {cat.threshold.re}
+            </span>
           )}
-          {previewStatus === 'error' && (
-            <span className="text-[10px] text-amber-400 font-mono">
-              AQL analysis unavailable ({previewErrorMessage}) — showing raw defect counts only.
+          {pf && (
+            <span className="px-2 py-0.5 rounded font-mono text-[10px] uppercase bg-gray-800/50 border border-gray-700/50 text-muted">
+              qualitative
+            </span>
+          )}
+          {recordOnly && (
+            <span className="px-2 py-0.5 rounded font-mono text-[10px] uppercase bg-gray-800/50 border border-gray-700/50 text-muted inline-flex items-center gap-1">
+              <Eye className="w-3 h-3" strokeWidth={2} />
+              record only
             </span>
           )}
         </div>
-        <div className="flex items-center gap-3 flex-wrap min-w-0">
-          {/* ISO bracket note */}
-          <span className="text-[10px] font-mono text-muted">
-            n={sampleSize} → ISO n={snappedBracket}
-          </span>
-          {/* Clean total */}
-          <span className="text-[10px] font-mono text-muted">
-            {totalClean} defect{totalClean !== 1 ? 's' : ''} total
-          </span>
-          {/* Active profile name — §4.5 cyan for system identity */}
-          {displayProfileName && (
-            <span className="text-[10px] font-bold font-mono text-brand-secondary uppercase tracking-wider">
-              {displayProfileName}
+
+        {/* Column: ACTUAL — Defect Count + Actual AQL badge (moved here from
+            RESULT, layout & content revision 2026-08-27), collapsed by
+            default, click-to-expand reveals the defect pills below.
+            Click-to-expand interaction itself is unchanged.
+            Wrapped in a `flex-1 justify-center` spacer (layout adjustment,
+            2026-08-27) so the fixed-width button sits genuinely centered in
+            whatever space remains between TARGET and RESULT, matching
+            DimensionsPanel.tsx's identical treatment — see that file's
+            comment on the same pattern for the full reasoning. Text inside
+            the button stays left-aligned; only the column's own position
+            shifted. RESULT no longer needs `ml-auto` — this spacer already
+            consumes 100% of the leftover space. */}
+        <div className="flex-1 flex justify-center min-w-0">
+          <button
+            type="button"
+            onClick={() => hasDefects && setExpanded((e) => !e)}
+            disabled={!hasDefects}
+            className={`flex items-center gap-1.5 w-[260px] shrink-0 outline-none ${
+              hasDefects ? 'cursor-pointer hover:opacity-80' : 'cursor-default'
+            }`}
+            title={hasDefects ? (expanded ? 'Collapse defect breakdown' : 'Expand defect breakdown') : undefined}
+          >
+            {hasDefects ? (
+              expanded
+                ? <ChevronDown className="w-3.5 h-3.5 text-muted shrink-0" strokeWidth={2} />
+                : <ChevronRight className="w-3.5 h-3.5 text-muted shrink-0" strokeWidth={2} />
+            ) : (
+              <span className="w-3.5 h-3.5 shrink-0" />
+            )}
+            <span className={`text-sm font-mono ${
+              cat.totalCount === 0 ? 'text-muted' : isFail ? 'text-rose-400 font-bold' : 'text-primary'
+            }`}>
+              {cat.totalCount} found
+            </span>
+            <ActualAqlBadge actual={cat.actualAqlAchieved} />
+          </button>
+        </div>
+
+        {/* Column: RESULT — Verdict badge only (Actual AQL moved into ACTUAL above) */}
+        <div className="flex items-center gap-2 w-[110px] shrink-0 justify-end">
+          {!isNA && cat.evaluationMode && cat.evaluationMode !== '' && (
+            isFail ? (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-500/10 border border-rose-500/30 text-rose-400">
+                FAIL
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                PASS
+              </span>
+            )
+          )}
+          {(isNA || !cat.evaluationMode) && recordOnly && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-gray-500/10 border border-gray-500/30 text-gray-400 inline-flex items-center gap-1">
+              <Eye className="w-3 h-3" strokeWidth={2} />
+              RECORD ONLY
+            </span>
+          )}
+          {(isNA || !cat.evaluationMode) && !recordOnly && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-gray-500/10 border border-gray-500/30 text-gray-400">
+              N/A
             </span>
           )}
         </div>
       </div>
 
-      {/* ── Per-category rows, unclassified block, empty state ──────────────
-          Whichever of these three ends up last in the DOM (data-dependent —
-          see file header) gets its bottom corners rounded via the arbitrary
-          :last-child selector below, so no overflow-hidden is needed to
-          keep the panel's corners visually clean. */}
-      <div className="divide-y divide-gray-800/50 [&>*:last-child]:rounded-b-lg">
-        {categoryAnalysis.map((cat) => {
-          const isFail = cat.passed === false;
-          const isNA = cat.passed === null;
-          const zeroTol = isZeroTolerance(cat.aqlLevel);
-          const pf = isPassFail(cat.aqlLevel);
-          const recordOnly = isRecordOnly(cat.aqlLevel);
-
-          return (
+      {/* Defect pills — only reachable when expanded (and only exist to expand into when hasDefects) */}
+      {expanded && hasDefects && (
+        <div className="flex flex-wrap gap-2 mt-2 pl-5">
+          {cat.defectItems.map((item) => (
             <div
-              key={cat.id}
-              className={`px-4 py-3 transition-colors ${isFail ? 'bg-rose-500/[0.04]' : ''}`}
+              key={item.id}
+              className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 border shadow-sm ${
+                item.failing
+                  ? 'bg-rose-500/10 border-rose-500/30'
+                  : 'bg-canvas border-gray-700/50'
+              }`}
             >
-              {/* Row: meta chips left · count + verdict right */}
-              <div className="flex items-center justify-between flex-wrap gap-y-1.5 gap-x-3">
-
-                {/* LEFT: category identity + AQL chips */}
-                <div className="flex items-center gap-2 flex-wrap min-w-0">
-                  {/* Category name — min-w (not a fixed w-) so a longer name grows instead of truncating */}
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted min-w-[90px] shrink-0">
-                    {cat.name}
-                  </span>
-
-                  {/* AQL Level — §4.8A indigo for system parameter */}
-                  <span className="px-2 py-0.5 rounded font-mono text-[10px] uppercase bg-indigo-500/10 border border-indigo-500/30 text-indigo-400">
-                    {cat.aqlLevel || '—'}
-                  </span>
-
-                  {/* Evaluation mode — §4.8B emerald active, gray N/A */}
-                  {cat.evaluationMode ? (
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                      cat.evaluationMode === 'CUMULATIVE' || cat.evaluationMode === 'GRANULAR'
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                        : 'bg-gray-500/10 border-gray-500/30 text-gray-400'
-                    }`}>
-                      {cat.evaluationMode}
-                    </span>
-                  ) : null}
-
-                  {/* Acceptance threshold chip — §4.8A standard value chip */}
-                  {zeroTol && (
-                    <span className="px-2 py-0.5 rounded font-mono text-[10px] bg-gray-800/50 border border-gray-700/50 text-muted">
-                      Ac: 0  ·  zero tolerance
-                    </span>
-                  )}
-                  {!zeroTol && !pf && cat.evaluationMode && cat.evaluationMode !== '' && cat.threshold && (
-                    <span className="px-2 py-0.5 rounded font-mono text-[10px] bg-gray-800/50 border border-gray-700/50 text-muted">
-                      Ac ≤ {cat.threshold.ac}  ·  Re ≥ {cat.threshold.re}
-                    </span>
-                  )}
-                  {pf && (
-                    <span className="px-2 py-0.5 rounded font-mono text-[10px] bg-gray-800/50 border border-gray-700/50 text-muted">
-                      qualitative
-                    </span>
-                  )}
-                  {recordOnly && (
-                    <span className="px-2 py-0.5 rounded font-mono text-[10px] bg-gray-800/50 border border-gray-700/50 text-muted inline-flex items-center gap-1">
-                      <Eye className="w-3 h-3" strokeWidth={2} />
-                      record only
-                    </span>
-                  )}
-                </div>
-
-                {/* RIGHT: count + verdict */}
-                <div className="flex items-center gap-2 shrink-0">
-                  {/* Defect count */}
-                  <span className={`text-[11px] font-mono font-bold ${
-                    cat.totalCount === 0
-                      ? 'text-muted'
-                      : isFail
-                        ? 'text-rose-400'
-                        : 'text-primary'
-                  }`}>
-                    {cat.totalCount} found
-                  </span>
-
-                  {/* Category verdict badge — §4.8B */}
-                  {!isNA && cat.evaluationMode && cat.evaluationMode !== '' && (
-                    isFail ? (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-500/10 border border-rose-500/30 text-rose-400">
-                        FAIL
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-                        PASS
-                      </span>
-                    )
-                  )}
-                  {(isNA || !cat.evaluationMode) && recordOnly && (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-gray-500/10 border border-gray-500/30 text-gray-400 inline-flex items-center gap-1">
-                      <Eye className="w-3 h-3" strokeWidth={2} />
-                      RECORD ONLY
-                    </span>
-                  )}
-                  {(isNA || !cat.evaluationMode) && !recordOnly && (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-gray-500/10 border border-gray-500/30 text-gray-400">
-                      N/A
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Defect pills — only shown for non-zero counts */}
-              {cat.defectItems.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-2 pl-1">
-                  {cat.defectItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 border shadow-sm ${
-                        item.failing
-                          ? 'bg-rose-500/10 border-rose-500/30'
-                          : 'bg-canvas border-gray-700/50'
-                      }`}
-                    >
-                      <span className="font-mono text-[11px] text-primary">{item.name}</span>
-                      <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded border min-w-[1.5rem] text-center ${
-                        item.failing
-                          ? 'text-rose-400 bg-rose-500/15 border-rose-500/30'
-                          : 'text-muted bg-gray-800/50 border-gray-700/50'
-                      }`}>
-                        {item.count}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Zero-defect placeholder */}
-              {cat.defectItems.length === 0 && (
-                <div className="mt-1 pl-1">
-                  <span className="text-[10px] font-mono text-muted/40">none recorded</span>
-                </div>
-              )}
+              <span className="font-mono text-[10px] text-primary">{item.name}</span>
+              <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded border min-w-[1.5rem] text-center ${
+                item.failing
+                  ? 'text-rose-400 bg-rose-500/15 border-rose-500/30'
+                  : 'text-muted bg-gray-800/50 border-gray-700/50'
+              }`}>
+                {item.count}
+              </span>
             </div>
-          );
-        })}
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function AqlCategoryAnalysisPanel({
+  categoryAnalysis,
+  unclassified,
+  anyFail,
+  noProfileLinked,
+  previewStatus,
+  previewErrorMessage,
+}: AqlCategoryAnalysisPanelProps) {
+  return (
+    <div className="whitespace-normal">
+
+      {/* "DEFECTS" sub-header (renamed from "AQL Categories") — same visual
+          weight as DimensionsPanel.tsx's own sub-header. No icon here — the
+          shared outer panel header ("INSPECTION RESULTS") owns the single
+          ShieldCheck icon for the whole panel, one level up in
+          HistoryFeed.tsx; repeating it on every sub-header made the panel
+          read as three independent headers instead of one with two
+          children. The sample-size/ISO-bracket/profile-name subtitle also
+          moved up to that same shared header — it's context for the whole
+          submission (dimensions included), not defects-specific. */}
+      <div className="bg-gray-800/30 px-4 py-2 flex items-center gap-2 border-b border-gray-800 flex-wrap">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted">
+          Defects
+        </span>
+        {/* "WOULD FAIL" indicator when reference analysis reveals failures on unlinked submissions */}
+        {anyFail && noProfileLinked && (
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/30 text-amber-400">
+            WOULD FAIL
+          </span>
+        )}
+        {anyFail && !noProfileLinked && (
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-500/10 border border-rose-500/30 text-rose-400">
+            CATEGORY FAILED
+          </span>
+        )}
+        {/* Helper/status text — UI Chrome, not data, so plain Inter per §1.3's Golden Rule (no font-mono). */}
+        {previewStatus === 'loading' && (
+          <span className="text-[10px] text-muted animate-pulse">Loading AQL analysis…</span>
+        )}
+        {previewStatus === 'error' && (
+          <span className="text-[10px] text-amber-400">
+            AQL analysis unavailable ({previewErrorMessage}) — showing raw defect counts only.
+          </span>
+        )}
+      </div>
+
+      {/* Column header row — TARGET / ACTUAL / RESULT, shared scheme with
+          DimensionsPanel.tsx. Fixed `w-` on NAME/TARGET/ACTUAL, matching the
+          data rows below — see the root-cause comment on the TARGET column
+          above for why `min-w-` alone let this drift out of alignment. */}
+      <div className="px-4 py-2 flex items-center gap-x-3 border-b border-gray-800/50">
+        <span className="w-[100px] shrink-0" aria-hidden="true" />
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[220px] shrink-0">Target</span>
+        <div className="flex-1 flex justify-center min-w-0">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[260px] shrink-0">Actual</span>
+        </div>
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[110px] shrink-0 text-right">Result</span>
+      </div>
+
+      {/* ── Per-category rows, unclassified block, empty state ──────────── */}
+      <div className="divide-y divide-gray-800/50">
+        {categoryAnalysis.map((cat) => (
+          <CategoryRow key={cat.id} cat={cat} />
+        ))}
 
         {/* ── Unclassified defects — §4.9 amber ────────────────────────── */}
         {unclassified.length > 0 && (
@@ -367,7 +534,7 @@ export function AqlCategoryAnalysisPanel({
                   NOT IN PROFILE
                 </span>
               </div>
-              <span className="text-[11px] font-mono text-amber-400/70">
+              <span className="text-[10px] font-mono text-amber-400/70">
                 {unclassified.reduce((a, [, c]) => a + c, 0)} found
               </span>
             </div>
@@ -377,20 +544,17 @@ export function AqlCategoryAnalysisPanel({
                   key={id}
                   className="inline-flex items-center gap-2 bg-canvas border border-amber-500/20 rounded-md px-3 py-1.5 shadow-sm"
                 >
-                  <span className="font-mono text-[11px] text-amber-400/70">{id}</span>
+                  {/* §4.8A mandates text-[10px] uppercase on Value Chip text, but a raw
+                      defect id (e.g. "def_hole") is left un-uppercased here — same
+                      established exception this codebase already applies to defect
+                      NAMES elsewhere ("Hole", not "HOLE"). Logged in AUDIT_REPORT.md. */}
+                  <span className="font-mono text-[10px] text-amber-400/70">{id}</span>
                   <span className="text-xs font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 min-w-[1.5rem] text-center">
                     {count}
                   </span>
                 </div>
               ))}
             </div>
-          </div>
-        )}
-
-        {/* ── Empty state ───────────────────────────────────────────────── */}
-        {totalClean === 0 && unclassified.length === 0 && (
-          <div className="px-4 py-5 text-sm text-muted font-sans text-center">
-            No defects recorded for this lot.
           </div>
         )}
       </div>
