@@ -47,11 +47,22 @@
  *
  * Column scheme is shared with AqlCategoryAnalysisPanel.tsx so both tables'
  * header rows align with their own data rows and with EACH OTHER: NAME
- * `w-[100px]`, TARGET `w-[220px]`, ACTUAL `w-[400px]`, RESULT `w-[110px]`
+ * `w-[160px]`, TARGET `w-[220px]`, ACTUAL `w-[400px]`, RESULT `w-[110px]`
  * (all `shrink-0`). Duplicated here as literal class strings (not a shared
  * JS constant) — Tailwind's JIT scanner needs literal strings in source,
  * and no existing pattern in this codebase builds classNames from a shared
  * constant.
+ *
+ * NAME COLUMN WIDTH (2026-08-27, layout revision): `w-[100px]` → `w-[160px]`.
+ * At 100px the longer labels wrapped to two lines ("BEADING THICKNESS",
+ * "FINGER THICKNESS", "CUFF/PALM THICKNESS"). 160px is the widest current
+ * label ("BEADING THICKNESS", measured ~148px in Chromium at this file's
+ * `text-sm font-semibold uppercase` Inter) plus a small buffer, so every
+ * label in BOTH tables — dimension names here, category names
+ * (AND/BARRIER/VISUALS) in the Defects table — renders on one line. The
+ * label span also carries `whitespace-nowrap` so a future longer label
+ * overflows visibly rather than silently wrapping and breaking row rhythm.
+ * Genuine fixed `w-` (not `min-w-`), same reasoning as ACTUAL below.
  *
  * ACTUAL COLUMN POSITION (2026-08-27, layout/content revision): the
  * `flex-1 justify-center` centering spacer that briefly wrapped the ACTUAL
@@ -272,8 +283,10 @@ function DimensionRowView({ row }: { row: DimensionRow }) {
     <div className={`px-4 py-3 transition-colors ${outOfRange ? 'bg-rose-500/[0.04]' : ''}`}>
       <div className="flex items-center flex-wrap gap-y-1.5 gap-x-3">
 
-        {/* Column: NAME */}
-        <span className="text-sm font-semibold uppercase text-primary w-[100px] shrink-0">
+        {/* Column: NAME — `w-[160px]` sized to the widest current label
+            ("BEADING THICKNESS"); `whitespace-nowrap` keeps every label on
+            one line (see the file header). */}
+        <span className="text-sm font-semibold uppercase text-primary w-[160px] shrink-0 whitespace-nowrap">
           {row.name}
         </span>
 
@@ -324,7 +337,7 @@ export function DimensionsPanel({ rows }: DimensionsPanelProps) {
           matching the data rows below — see that file's root-cause comment
           on the TARGET column for why `min-w-` alone wasn't sufficient. */}
       <div className="px-4 py-2 flex items-center gap-x-3 border-b border-gray-800/50">
-        <span className="w-[100px] shrink-0" aria-hidden="true" />
+        <span className="w-[160px] shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[220px] shrink-0">Target</span>
         <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[400px] shrink-0">Actual</span>
         <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[110px] shrink-0 text-right ml-auto">Result</span>

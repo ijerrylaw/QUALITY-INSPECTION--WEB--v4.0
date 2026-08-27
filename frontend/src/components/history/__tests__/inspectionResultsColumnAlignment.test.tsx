@@ -168,4 +168,39 @@ describe('Inspection Results: TARGET/ACTUAL column widths match between tables',
     dims.unmount();
     defects.unmount();
   });
+
+  test('every row label in both tables renders on a single line inside the NAME column — no wrap, no overflow', () => {
+    const allDimNames = ['GLOVE WEIGHT', 'GLOVE LENGTH', 'PALM WIDTH', 'CUFF THICKNESS', 'PALM THICKNESS', 'FINGER THICKNESS', 'BEADING THICKNESS'];
+    const dimRows: DimensionRow[] = allDimNames.map((name) => ({
+      ...DIMENSION_ROWS[0]!, id: name, name,
+    }));
+    const catNames = ['AND', 'BARRIER', 'VISUALS'];
+    const cats: CategoryAnalysis[] = catNames.map((name) => ({ ...CATEGORY_ANALYSIS[0]!, id: name, name }));
+
+    const dims = render(<div style={{ width: '1400px' }}><DimensionsPanel rows={dimRows} /></div>);
+    const defects = render(<div style={{ width: '1400px' }}><AqlCategoryAnalysisPanel
+      categoryAnalysis={cats}
+      unclassified={[]}
+      anyFail={false}
+      noProfileLinked={false}
+      previewStatus="snapshot"
+    /></div>);
+
+    for (const { container } of [dims, defects]) {
+      const labelSpans = Array.from(
+        container.querySelectorAll('.px-4.py-3 .flex.items-center.flex-wrap > span.text-sm.font-semibold'),
+      ) as HTMLElement[];
+      expect(labelSpans.length).toBeGreaterThan(0);
+      for (const span of labelSpans) {
+        // Single line: rendered height is one line-height, not two.
+        const lineHeight = parseFloat(getComputedStyle(span).lineHeight);
+        expect(span.getBoundingClientRect().height).toBeLessThanOrEqual(lineHeight + 1);
+        // No overflow: the text fits within the fixed 160px column box.
+        expect(span.scrollWidth).toBeLessThanOrEqual(span.clientWidth + 1);
+      }
+    }
+
+    dims.unmount();
+    defects.unmount();
+  });
 });

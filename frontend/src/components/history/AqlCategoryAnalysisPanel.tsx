@@ -157,6 +157,13 @@
  * two tables' columns aligned under the shared INSPECTION RESULTS header
  * (its own ACTUAL content is short, so the extra width is mostly whitespace
  * here — an accepted trade for cross-table alignment).
+ *
+ * NAME COLUMN WIDTH (2026-08-27, layout revision): `w-[100px]` → `w-[160px]`,
+ * mirrored from DimensionsPanel.tsx (whose "BEADING THICKNESS" label, ~148px,
+ * was wrapping at 100px). This table's own labels (AND/BARRIER/VISUALS) fit
+ * at 100px, but the two NAME columns must stay the same width to keep the
+ * tables aligned under the shared header. `whitespace-nowrap` on the label
+ * span matches DimensionsPanel.tsx.
  */
 
 import { useState } from 'react';
@@ -310,8 +317,10 @@ function CategoryRow({ cat }: { cat: CategoryAnalysis }) {
     <div className={`px-4 py-3 transition-colors ${isFail ? 'bg-rose-500/[0.04]' : ''}`}>
       <div className="flex items-center flex-wrap gap-y-1.5 gap-x-3">
 
-        {/* Column: NAME — §1.3 Dimension Field Name Label token, shared with DimensionsPanel.tsx */}
-        <span className="text-sm font-semibold uppercase text-primary w-[100px] shrink-0">
+        {/* Column: NAME — §1.3 Dimension Field Name Label token, shared with
+            DimensionsPanel.tsx. `w-[160px]` + `whitespace-nowrap` mirrored
+            from there (see the file header). */}
+        <span className="text-sm font-semibold uppercase text-primary w-[160px] shrink-0 whitespace-nowrap">
           {cat.name}
         </span>
 
@@ -504,7 +513,7 @@ export function AqlCategoryAnalysisPanel({
           data rows below — see the root-cause comment on the TARGET column
           above for why `min-w-` alone let this drift out of alignment. */}
       <div className="px-4 py-2 flex items-center gap-x-3 border-b border-gray-800/50">
-        <span className="w-[100px] shrink-0" aria-hidden="true" />
+        <span className="w-[160px] shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[220px] shrink-0">Target</span>
         <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[400px] shrink-0">Actual</span>
         <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[110px] shrink-0 text-right ml-auto">Result</span>
