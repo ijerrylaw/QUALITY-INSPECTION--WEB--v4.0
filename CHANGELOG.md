@@ -5162,3 +5162,205 @@ interaction model instead of always-visible markup.
 **Verification:** `tsc` clean both sides; all 12 existing Vitest tests
 green, including the updated width-regression guard; `prisma db push`
 applied cleanly against the real dev.db.
+
+---
+
+## 37. Inspection Results Panel — Visual Consistency Rework — Shipped 2026-08-27
+
+A pure restyle/restructure pass on top of §36's panel — no new backend work,
+no grading/dimension computation changes. Full audit of `DimensionsPanel.tsx`
+and `AqlCategoryAnalysisPanel.tsx` against `UI_DESIGN_SYSTEM.md`, and
+unification of both tables under one identical column contract.
+
+**Audit deviations found and fixed:**
+- Sub-section headers ("Dimensions", "AQL Categories", and `HistoryFeed.tsx`'s
+  outer "Inspection Results") used `font-bold`; §1.3's Table Header token is
+  `font-semibold` — all three corrected.
+- Row identity labels (dimension/category name) used two different,
+  non-standard treatments across the two files. Both now conform to §1.3's
+  "Dimension Field Name Labels" token, `text-sm font-semibold text-primary
+  uppercase` — written for exactly this kind of row-name label, and now
+  shared identically by both tables.
+- Value chips missing the §4.8A-mandated `uppercase` class — the Ac/Re chip,
+  the "qualitative" chip, and the small "record only" chip — all fixed.
+- Collapsed defect-count text was `text-[11px]`, not a documented token;
+  moved to `text-sm font-mono` per §4.2's stacked-cell primary-value size,
+  matching `DimensionsPanel`'s own AVG cell.
+- `ChevronRight`/`ChevronDown` rendered at `w-3 h-3`, below §1.4's documented
+  `w-3.5 h-3.5` floor for inline icons — bumped in both files.
+- "Loading AQL analysis…" / "AQL analysis unavailable…" dropped `font-mono` —
+  per §1.3's Golden Rule this is UI Chrome/helper text, not data.
+- The Unclassified defect-id chip and the expanded per-defect-type pill's
+  name text moved from `text-[11px]` to §4.8A's mandated `text-[10px]`, but
+  deliberately kept un-uppercased — logged as an accepted exception in
+  `AUDIT_REPORT.md` #32 rather than silently resolved, since forcing
+  `uppercase` on a raw identifier (`def_hole` → `DEF_HOLE`) is a real
+  legibility regression and inconsistent with how defect names render
+  everywhere else in this codebase.
+- State badges (§4.8B — PASS/FAIL/N/A/RECORD ONLY/COMPLIANT/OUT OF
+  SPEC/NOT FROZEN, and the `ActualAqlBadge` pill) were already fully
+  conformant — confirmed, not touched.
+
+**Column unification.** Both tables now share one 4-column scheme — NAME /
+TARGET / ACTUAL / RESULT — with identical `min-w-` breakpoints (`140px` /
+`170px` / `110px` / `90px ml-auto`) so a new header row (§1.3 Table Header
+typography) aligns with the data rows beneath it, in both tables, matching
+each other. `AqlCategoryAnalysisPanel.tsx`'s sub-header renamed "AQL
+Categories" → **"Defects"**. Classes are duplicated as literal strings in
+both files rather than abstracted into a shared JS constant — Tailwind's
+JIT scanner needs literal class strings in source, and no existing pattern
+in this codebase builds classNames from a shared constant.
+
+**`AqlCategoryAnalysisPanel.tsx`'s content is otherwise unchanged** — TARGET
+(AQL level + eval mode + Ac/Re), ACTUAL (defect count, click-to-expand to
+the per-defect-type pills), and RESULT (Actual AQL badge + Verdict badge
+together) map directly onto the existing `CategoryRow` columns with no
+interaction or logic changes, only the typography fixes above. Two decisions
+were explicitly confirmed with the user before building, both diverging from
+a literal first reading of the task's own column-contract text:
+- **Actual AQL Achieved stays paired with Verdict in RESULT** — not moved
+  into ACTUAL alongside the defect count. Confirmed twice in this session's
+  planning exchange as a deliberate override, consistent with wanting Actual
+  AQL prominent and positioned close to the pass/fail result.
+- RECORD ONLY / N/A rows keep their exact existing conditional rendering
+  (the em-dash-for-inapplicable-Target treatment, the extra "record only"
+  chip) — only className fixes were applied to those branches, no logic
+  touched.
+
+**`DimensionsPanel.tsx` — the larger restructure.** `DimensionRow` gains
+`slots: string[]` (raw operator-entered readings, in slot order) and
+`slotFails: boolean[]` (same length, from the frozen `fails` array already
+present in `dimensionMins`/`gloveWeightSnapshot` but not previously wired
+through). Sourced from `Submission.dimensions` — already persisted at submit
+time, already returned by `GET /api/submissions`, simply not read by this
+panel before now; a frontend-only wiring addition, no backend or schema
+touch. Glove Weight becomes a genuine 1-slot case of the same shape rather
+than a special-cased scalar — no separate weight branch anywhere in the
+render logic.
+
+Rows are now interactive: collapsed ACTUAL shows the AVG value only (the
+always-visible MIN–MAX secondary line from §36's build is removed from the
+collapsed state) plus a chevron toggle, mirroring `CategoryRow`'s exact
+`useState`-per-row pattern. Expanding reveals one chip per raw slot
+(`Slot {n}: {value}{unit}`), individually rose-tinted per `slotFails[n]` —
+visually parallel to the AQL table's expanded per-defect pills, so both
+tables' "click ACTUAL to see the itemized breakdown" interactions read as
+the same pattern. This shape — raw per-slot values, not a labeled
+aggregate summary — was an explicit correction from the user during
+planning, made specifically so an inspector can see exactly how many
+individual readings were out of spec, not just the aggregate verdict.
+
+Expand is disabled only for the legacy NOT FROZEN Glove Weight row (no
+`fails` data exists for it — a real bug caught by the updated test suite:
+the initial `canExpand` check used `slots.length > 0` alone, which is
+non-empty even for that legacy row since its one raw reading is still shown
+collapsed, so expand would have stayed wrongly enabled; fixed to gate on
+`hasSnapshot` instead, the flag that is exactly false in that one case).
+Every other row — compliant or failing, record-only or graded — gets the
+identical interactive affordance and reveals the identical fields, per the
+task's structural-parity requirement: same row height, same column layout,
+only the RESULT badge's color differs.
+
+**Tests.** `dimensionsPanel.test.tsx` fixtures gained `slots`/`slotFails`;
+the COMPLIANT/OUT-OF-SPEC/RECORD-ONLY tests now click the expand toggle
+(via `dispatchEvent` + `waitFor`, matching `history.widthRegression.test.tsx`'s
+established click-to-expand pattern) before asserting slot-level content, and
+new assertions cover per-slot rose-tinting and the disabled-toggle legacy
+case. `history.widthRegression.test.tsx` needed no changes — it never
+asserted the literal "AQL Categories" string, only "Inspection Results" and
+the toggle's `title` attribute, both unaffected by the rename; re-run (not
+assumed) to confirm.
+
+**Verification:** `tsc` clean both sides; all 21 Vitest tests green (9
+`dimensionsPanel.test.tsx`, up from 7; the rest unchanged), including
+"THE GUARD" width-regression test confirmed by name in a verbose run, not
+just an aggregate pass count.
+
+---
+
+## 38. Inspection Results Panel — Post-Review Cleanup — Shipped 2026-08-27
+
+Jerry's live browser review of §37's rework surfaced four remaining display
+issues. All four are pure display fixes on top of already-frozen data — no
+backend, no logic changes.
+
+**Empty-state cleanup.** The chevron-disable behavior for a 0-found Defects
+category was already correct (`disabled={!hasDefects}`, where
+`hasDefects = cat.defectItems.length > 0` — and `defectItems` is
+pre-filtered server-side to `count > 0` entries, so the two conditions are
+exactly equivalent) — confirmed, not re-derived. Removed the two genuinely
+dead pieces instead: the "none recorded" placeholder under a collapsed
+empty category row, and the "No defects recorded for this lot." footer
+sentence — both redundant against the per-row "0 found" value now that
+every category always renders its own row.
+
+**Subtitle relocated, one segment dropped.** The `n=… → ISO n=… · N defects
+total · PROFILE` line moved from `AqlCategoryAnalysisPanel.tsx`'s own
+"Defects" sub-header up to `HistoryFeed.tsx`'s shared "Inspection Results"
+header, as a subtitle directly beneath it — it's context for the whole
+submission (dimensions included), not defects-specific. The "N defects
+total" segment was dropped entirely, redundant against per-row counts.
+Everything the subtitle needed was already computed in `HistoryFeed.tsx`
+(`sub.sampleSize`, `displayProfileName`) or already exported and reusable
+(`snapBracket()`, from `AqlCategoryAnalysisPanel.tsx`) — no new
+computation. `totalClean`, `sampleSize`, and `displayProfileName` dropped
+from `AqlCategoryAnalysisPanelProps` entirely once their only consumer
+(this line) moved away — left as dead props/locals, `frontend/tsconfig.app.json`'s
+`noUnusedLocals`/`noUnusedParameters` would have hard-errored on them, which
+is exactly how the cleanup was confirmed complete rather than merely visual.
+
+**Header icon de-duplicated.** `ShieldCheck` rendered on all three headers
+("Inspection Results," "Dimensions," "Defects") — now renders once, only on
+the top-level panel header. Checked `UI_DESIGN_SYSTEM.md` for a documented
+"sub-section" typography token to also demote the two children to, per the
+task's request to audit weight/size alongside the icon removal — none
+exists at this compact scale (§1.3's H2/H3 buckets are page-level,
+`text-xl`/`text-lg`; the only token matching `text-xs` is the Table Header
+one, which all three headers already correctly used identically). So the
+"looks like three independent headers" problem was never a typography
+mismatch — removing the repeated icon is the complete fix; the sub-headers'
+typography was already correct and is left unchanged.
+
+**Column-alignment bug — root cause found, not pixel-nudged.** Both tables
+already shared identical `min-w-[Npx]` breakpoints on NAME/TARGET/ACTUAL —
+the breakpoints were never the bug. `min-w-` is a floor, not a fixed width:
+`DimensionsPanel.tsx`'s TARGET cell holds one short spec-range string,
+reliably narrower than 170px, so it always settled at exactly the floor.
+`AqlCategoryAnalysisPanel.tsx`'s TARGET cell holds a 2–4-chip cluster (AQL
+level + eval mode + Ac/Re), reliably **wider** than 170px in most real rows
+— content wider than a `min-w` floor grows the flex item past it. Worse,
+because each row's outer container has `flex-wrap`, a too-wide TARGET could
+push that one row's ACTUAL/RESULT onto a wrapped second line while a
+shorter-content row on the same table stayed on one line — rows within the
+Defects table didn't reliably align with each other, let alone with
+Dimensions. Fixed by switching NAME/TARGET/ACTUAL (data rows and the header
+row, both files) from `min-w-[Npx]` to a genuine `w-[Npx] shrink-0`.
+Overflow content now wraps *inside* the fixed box (the chip cluster already
+had its own `flex-wrap`) instead of growing it — a row's *height* can grow,
+never a column's *width*. This doesn't reintroduce the file's own
+documented width-clipping bug (§30's saga): that bug was one 400-char
+*unbreakable* token with zero wrap points forced into `table-layout:auto`;
+this is several short, space-separated chips with an existing wrap
+mechanism, several DOM levels inside an already-`table-fixed` `<td>` whose
+own width a small inner flex item's fixed size cannot touch either way.
+RESULT stays `min-w-[90px] ml-auto` unchanged — right-pinned and
+deliberately variable-width (1 or 2 badges); forcing it to a hard cap would
+wrap the Actual-AQL/Verdict badge pair vertically, breaking their
+intentional side-by-side pairing.
+
+**New regression guard**
+(`inspectionResultsColumnAlignment.test.tsx`), same real-browser
+`getBoundingClientRect()` method `history.widthRegression.test.tsx`
+established: renders both tables with deliberately mismatched content
+shapes (a wide multi-chip AQL category vs. a short spec-range dimension)
+and asserts their NAME/TARGET/ACTUAL columns — and both tables' header
+rows — land at pixel-identical widths. Verified the test actually catches
+the bug it guards, not just a plausible-looking assertion: temporarily
+reverted the TARGET column back to `min-w-[170px]`, confirmed the test
+failed (170px vs. 189px — the exact "grew past the floor" behavior
+diagnosed above), then restored the fix and confirmed green again.
+
+**Verification:** `tsc` clean both sides; all 23 Vitest tests green (2 new
+in `inspectionResultsColumnAlignment.test.tsx`; the other 21 unchanged and
+unaffected — no test asserted the removed "none recorded" text or footer
+sentence), including "THE GUARD" width-regression test confirmed by name.

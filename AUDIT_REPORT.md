@@ -515,3 +515,19 @@ with its full original context, reasoning, and verification trail.
     client-written field), a larger change than this build's scope. Revisit
     if a real historical-accuracy complaint ever surfaces.
     → `CHANGELOG.md` §36.
+
+32. **Accepted exception to §4.8A's literal "Value Chips MUST be uppercase"
+    rule: raw defect identifiers are never CSS-uppercased.** Raised by the
+    Inspection Results panel visual consistency rework (2026-08-27), which
+    audited every chip in `AqlCategoryAnalysisPanel.tsx`/`DimensionsPanel.tsx`
+    against `UI_DESIGN_SYSTEM.md` and fixed every missing `uppercase` class
+    found — except the Unclassified block's raw defect-id chip (e.g.
+    `def_hole`) and the expanded per-defect-type pill's name text, both left
+    un-uppercased on purpose. Forcing `uppercase` there would render
+    `DEF_HOLE`/`HOLE` — a real legibility regression for an identifier/name,
+    and inconsistent with how defect names are displayed everywhere else in
+    this codebase (never CSS-uppercased). Their size was still brought to
+    §4.8A's mandated `text-[10px]` (was `text-[11px]`) — only the casing rule
+    is the accepted exception, not the whole chip spec.
+    → `CHANGELOG.md` §37.
+

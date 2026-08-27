@@ -18,10 +18,13 @@ import {
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { useToast } from '../ui/ToastProvider';
-import { API_BASE_URL, useConfig } from '../../context/ConfigContext';
+import { API_BASE_URL, useConfig, resolveProductMatrix, mergeCanonicalDimensionDefs } from '../../context/ConfigContext';
 import { useHistoryIndicator } from '../../context/HistoryIndicatorContext';
-import { AqlCategoryAnalysisPanel } from './AqlCategoryAnalysisPanel';
-import type { CategoryAnalysis, DefectItem } from './AqlCategoryAnalysisPanel';
+import { AqlCategoryAnalysisPanel, snapBracket } from './AqlCategoryAnalysisPanel';
+import type { ActualAqlAchieved, CategoryAnalysis, DefectItem } from './AqlCategoryAnalysisPanel';
+import { DimensionsPanel } from './DimensionsPanel';
+import type { DimensionRow } from './DimensionsPanel';
+import { FIXED_DIM_LENGTH, FIXED_DIM_PALM, FIXED_DIM_WEIGHT, FIXED_DIMENSION_LABELS } from '../../lib/fixedDimensions';
 
 // ── POST /api/verdict/preview response shape ─────────────────────────────────
 // Mirrors backend/src/engine/aqlEvaluator.ts's exported CategoryResult/
@@ -42,6 +45,12 @@ interface ServerCategoryResult {
   totalCount: number;
   passed: boolean;
   failingDefects: ServerFailingDefect[];
+  /**
+   * Optional so an older backend (or a test fixture predating the field) still
+   * type-checks against this shape — a live server always sends it on a graded
+   * category.
+   */
+  actualAqlAchieved?: ActualAqlAchieved | null;
 }
 
 type VerdictPreviewState =
@@ -110,6 +119,9 @@ function buildCategoryAnalysis(
       threshold,
       totalCount,
       passed,
+      // Live re-grade path (legacy rows with no frozen snapshot) — carry the
+      // server's computed value through so those rows show the chip too.
+      actualAqlAchieved: serverResult?.actualAqlAchieved ?? null,
       defectItems: defectItems.map((d) => ({ ...d, failing: failingIds.has(d.id) })),
     };
   });
@@ -137,6 +149,8 @@ interface Submission {
   size?: string;
   sampleSize: number;
   defects?: Record<string, number> | string;
+  /** JSON — DimensionMeasurements = Record<string, string[]>, the raw operator-entered slot readings. Frozen at submit time, never recomputed — same historical-record guarantee as everything else here. */
+  dimensions?: Record<string, string[]> | string;
   verdict: 'PASSED' | 'FAILED';
   inspectorName?: string;
   amendmentStatus: AmendmentStatus;
@@ -146,6 +160,10 @@ interface Submission {
   /** JSON — CategoryAnalysis[], frozen at submit/amendment-approval time. Null on legacy rows (AUDIT_REPORT.md #18). */
   gradingSnapshot?: string | null;
   gradingSnapshotProfileName?: string | null;
+  /** JSON — DimensionStats (client-computed per-dimension min/max/avg/threshold/fails/isGraded), frozen at submit time. Never includes Glove Weight. */
+  dimensionMins?: string | null;
+  /** JSON — a single DimensionResult for Glove Weight, frozen at submit/amendment-approval time. Null on rows predating this field. */
+  gloveWeightSnapshot?: string | null;
   /** Full amendment history — GET /api/submissions already includes this relation. Only `status` is used here, to count lifetime APPROVED amendments against MAX_APPROVED_AMENDMENTS. */
   amendmentLogs?: { status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' }[];
 }
@@ -195,6 +213,140 @@ function parseDefects(raw: Record<string, number> | string | undefined): Record<
 function parseGradingSnapshot(raw: string | null | undefined): CategoryAnalysis[] | null {
   if (!raw) return null;
   try { return JSON.parse(raw) as CategoryAnalysis[]; } catch { return null; }
+}
+
+/** Display-only mirror of backend/src/engine/dimensionEvaluator.ts's per-dimension DimensionStats entry. */
+interface DimensionStatsEntry {
+  min: number; max: number; avg: number; fails: boolean[]; threshold: number; maxThreshold: number; isMin: boolean; isGraded: boolean;
+}
+/** Display-only mirror of backend/src/engine/dimensionEvaluator.ts's DimensionResult (used here for Glove Weight only). */
+interface FrozenDimensionResult {
+  min: number; max: number; avg: number; fails: boolean[]; failed: boolean; threshold: number; maxThreshold: number; isMin: boolean; isGraded: boolean;
+}
+
+function parseDimensionMins(raw: string | null | undefined): Record<string, DimensionStatsEntry> {
+  if (!raw) return {};
+  try { return JSON.parse(raw) as Record<string, DimensionStatsEntry>; } catch { return {}; }
+}
+
+function parseGloveWeightSnapshot(raw: string | null | undefined): FrozenDimensionResult | null {
+  if (!raw) return null;
+  try { return JSON.parse(raw) as FrozenDimensionResult; } catch { return null; }
+}
+
+/**
+ * Parses Submission.dimensions — the raw operator-entered slot value strings,
+ * keyed by dimension id, frozen at submit time. Same safe-parse convention as
+ * parseDefects() above (tolerant of both an already-parsed object, from a
+ * fresh POST response, and a raw JSON string, from GET /api/submissions).
+ */
+function parseRawSlots(raw: Record<string, string[]> | string | undefined): Record<string, string[]> {
+  if (!raw) return {};
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as Record<string, string[]>; } catch { return {}; }
+  }
+  return raw;
+}
+
+/**
+ * Assembles DimensionsPanel's row list for one submission: joins the frozen
+ * per-dimension compliance data (dimensionMins + gloveWeightSnapshot) against
+ * the CURRENT product's dimension defs for name/unit resolution only — the
+ * one part of this table that is NOT frozen (AUDIT_REPORT.md #31), same
+ * class of drift risk gradingSnapshot eliminated for AQL, accepted here
+ * since a renamed dimension def post-submission is rare.
+ *
+ * Data-driven, not a hardcoded field list: renders exactly whichever
+ * dimension ids are present in `dimensionMins` (OFF-mode dims were already
+ * filtered out before the wizard ever wrote it) plus a leading Glove Weight
+ * row, matching the AQL section's own data-driven convention.
+ */
+function buildDimensionRows(
+  config: { products?: Record<string, any>; productMatrixConfig?: Record<string, any>; dimensions?: any[] } | null | undefined,
+  sub: Submission,
+): DimensionRow[] {
+  const matrixEntry = resolveProductMatrix(config, sub.productCode);
+  const dynamicDefs = mergeCanonicalDimensionDefs(
+    matrixEntry?.dimensionDefs && matrixEntry.dimensionDefs.length > 0
+      ? matrixEntry.dimensionDefs
+      : config?.dimensions ?? [],
+  );
+
+  const nameFor = (id: string): { name: string; unit: string } => {
+    if (id === FIXED_DIM_LENGTH) return { name: FIXED_DIMENSION_LABELS[FIXED_DIM_LENGTH], unit: 'mm' };
+    if (id === FIXED_DIM_PALM) return { name: FIXED_DIMENSION_LABELS[FIXED_DIM_PALM], unit: 'mm' };
+    const def = dynamicDefs.find((d: any) => d.id === id);
+    return { name: def?.name ?? id, unit: def?.unit ?? 'mm' };
+  };
+
+  const rows: DimensionRow[] = [];
+  const rawSlots = parseRawSlots(sub.dimensions);
+
+  // Glove Weight leads the table (Type 1), matching the field's own
+  // conceptual precedence over the 5-slot Type 2 dimensions that follow. It
+  // is a 1-slot case, not a special-cased scalar — DimensionsPanel treats
+  // every row's `slots`/`slotFails` uniformly regardless of length.
+  const weightResult = parseGloveWeightSnapshot(sub.gloveWeightSnapshot);
+  if (weightResult) {
+    rows.push({
+      id: FIXED_DIM_WEIGHT,
+      name: FIXED_DIMENSION_LABELS[FIXED_DIM_WEIGHT],
+      unit: 'g',
+      measured: { min: weightResult.min, max: weightResult.max, avg: weightResult.avg },
+      failed: weightResult.failed,
+      isGraded: weightResult.isGraded,
+      threshold: weightResult.threshold,
+      maxThreshold: weightResult.maxThreshold,
+      isMin: weightResult.isMin,
+      hasSnapshot: true,
+      // Weight's single raw reading — sub.gloveWeight itself, not a slots
+      // array (Weight was never part of the 5-slot `dimensions` map).
+      slots: [String(sub.gloveWeight ?? '')],
+      slotFails: weightResult.fails ?? [false],
+    });
+  } else if (sub.gloveWeight != null) {
+    // Legacy row predating gloveWeightSnapshot — show the recorded value with
+    // no compliance judgment, never a false COMPLIANT. No fails data exists
+    // for this case, so expand stays disabled (empty slotFails signals that).
+    rows.push({
+      id: FIXED_DIM_WEIGHT,
+      name: FIXED_DIMENSION_LABELS[FIXED_DIM_WEIGHT],
+      unit: 'g',
+      measured: { min: sub.gloveWeight, max: sub.gloveWeight, avg: sub.gloveWeight },
+      failed: false,
+      isGraded: true,
+      threshold: 0,
+      maxThreshold: Infinity,
+      isMin: false,
+      hasSnapshot: false,
+      slots: [String(sub.gloveWeight)],
+      slotFails: [],
+    });
+  }
+
+  const dimensionMins = parseDimensionMins(sub.dimensionMins);
+  for (const [id, stats] of Object.entries(dimensionMins)) {
+    const { name, unit } = nameFor(id);
+    rows.push({
+      id,
+      name,
+      unit,
+      measured: { min: stats.min, max: stats.max, avg: stats.avg },
+      failed: stats.fails?.some((f) => f === true) ?? false,
+      isGraded: stats.isGraded ?? true,
+      threshold: stats.threshold,
+      maxThreshold: stats.maxThreshold,
+      isMin: stats.isMin,
+      hasSnapshot: true,
+      // Raw operator-entered readings, frozen alongside the aggregate stats
+      // — sourced from a SEPARATE Submission field (`dimensions`), keyed by
+      // the same dimension id, so the two are joined here by id.
+      slots: rawSlots[id] ?? [],
+      slotFails: stats.fails ?? [],
+    });
+  }
+
+  return rows;
 }
 
 /**
@@ -329,7 +481,12 @@ function DefectBreakdownPanel({
   sub: Submission;
   onAmend: (id: string) => void;
 }) {
-  const { getResolvedProfile } = useConfig();
+  const { getResolvedProfile, config } = useConfig();
+
+  // Dimensions section data — see buildDimensionRows()'s own docs for the
+  // frozen-vs-live provenance split (dimensionMins/gloveWeightSnapshot are
+  // frozen; name/unit resolution is live against current product config).
+  const dimensionRows = useMemo(() => buildDimensionRows(config, sub), [config, sub]);
 
   const approvedAmendmentCount = useMemo(
     () => (sub.amendmentLogs ?? []).filter((log) => log.status === 'APPROVED').length,
@@ -438,7 +595,6 @@ function DefectBreakdownPanel({
     [cleanDefects, classifiedIds],
   );
 
-  const totalClean = Object.values(cleanDefects).reduce((a, b) => a + b, 0);
   const anyFail = categoryAnalysis.some((c) => c.passed === false);
   const previewStatus = hasSnapshot ? 'snapshot' : previewState.status;
   const previewErrorMessage = previewState.status === 'error' ? previewState.message : undefined;
@@ -491,18 +647,54 @@ function DefectBreakdownPanel({
           </div>
         )}
 
-        {/* ── AQL Category Analysis Panel ───────────────────────────────────── */}
-        <AqlCategoryAnalysisPanel
-          categoryAnalysis={categoryAnalysis}
-          unclassified={unclassified}
-          totalClean={totalClean}
-          sampleSize={sub.sampleSize}
-          displayProfileName={displayProfileName}
-          anyFail={anyFail}
-          noProfileLinked={noProfileLinked}
-          previewStatus={previewStatus}
-          previewErrorMessage={previewErrorMessage}
-        />
+        {/* ── Inspection Results panel — Dimensions + AQL Categories ──────────
+            One shared bordered container/header (renamed from the old
+            "AQL Category Analysis" title, which now only labels its own
+            sub-section below), same rounding convention the AQL section used
+            to own alone: whichever sub-section ends up last gets its own
+            bottom corners rounded via the arbitrary :last-child selector, so
+            no overflow-hidden is needed regardless of which sections render
+            (a legacy row with zero dimension data renders AQL Categories
+            alone; every other row renders both). */}
+        <div className="rounded-lg border border-gray-800 bg-surface whitespace-normal">
+          <div className="rounded-t-lg bg-gray-800/50 px-4 py-2 border-b border-gray-800">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-3.5 h-3.5 text-muted shrink-0" strokeWidth={2} />
+              {/* font-semibold, not font-bold — §1.3's Table Header token, matching
+                  the "Dimensions"/"Defects" sub-headers directly beneath it
+                  (visual consistency rework, 2026-08-27). This is now the ONLY
+                  ShieldCheck icon in the whole panel — removed from both
+                  sub-headers (post-review cleanup, 2026-08-27) so the panel
+                  reads as one header with two children, not three independent
+                  headers. */}
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted">
+                Inspection Results
+              </span>
+            </div>
+            {/* Sample-size/ISO-bracket/profile subtitle — moved here from
+                AqlCategoryAnalysisPanel.tsx's own sub-header (post-review
+                cleanup, 2026-08-27): it's context for the whole submission,
+                dimensions included, not defects-specific. The "N defects
+                total" segment that used to sit alongside it was dropped
+                entirely — redundant now that every category row shows its
+                own count. */}
+            <p className="text-[10px] font-mono text-muted mt-1 pl-[22px]">
+              n={sub.sampleSize} → ISO n={snapBracket(sub.sampleSize)}
+              {displayProfileName && <> · {displayProfileName}</>}
+            </p>
+          </div>
+          <div className="divide-y divide-gray-800/50 [&>*:last-child]:rounded-b-lg">
+            <DimensionsPanel rows={dimensionRows} />
+            <AqlCategoryAnalysisPanel
+              categoryAnalysis={categoryAnalysis}
+              unclassified={unclassified}
+              anyFail={anyFail}
+              noProfileLinked={noProfileLinked}
+              previewStatus={previewStatus}
+              previewErrorMessage={previewErrorMessage}
+            />
+          </div>
+        </div>
 
         {/* ── Amendment actions ──────────────────────────────────────────────── */}
         {/* Note: `amendmentStatus === 'APPROVED'` no longer blocks this block —
