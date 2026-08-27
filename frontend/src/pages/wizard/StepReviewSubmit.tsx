@@ -98,6 +98,21 @@ interface VerdictFailingDefect {
   threshold: { ac: number; re: number };
 }
 
+/**
+ * Display-only mirror of backend/src/engine/aqlEvaluator.ts's ActualAqlAchieved —
+ * the tightest standard ISO 2859-1 AQL level the observed count still satisfies at
+ * this sample size. Server-computed (this file never derives it), and frozen onto
+ * Submission.gradingSnapshot when the operator submits, so what's previewed here is
+ * exactly what gets stored. Same "display-only inline copy" pattern as the bracket
+ * list above.
+ */
+interface ActualAqlAchieved {
+  status: 'ACHIEVED' | 'EXCEEDS_ALL' | 'QUALITATIVE';
+  aqlLevel: string | null;
+  threshold: { ac: number; re: number } | null;
+  evaluatedCount: number | null;
+}
+
 interface VerdictCategoryResult {
   categoryId: string;
   categoryName: string;
@@ -106,6 +121,8 @@ interface VerdictCategoryResult {
   totalCount: number;
   passed: boolean;
   failingDefects: VerdictFailingDefect[];
+  /** Optional so an older backend / a test fixture predating the field still type-checks. */
+  actualAqlAchieved?: ActualAqlAchieved | null;
 }
 
 type VerdictPreviewState =
@@ -127,6 +144,44 @@ interface CategoryVerdictRow {
   thresholds: { ac: number; re: number; bracket: number } | null;
   result: 'PASS' | 'FAIL' | 'RECORD_ONLY';
   reason?: string;
+  /** Undefined for synthesized RECORD ONLY rows — they are never graded. */
+  actualAqlAchieved?: ActualAqlAchieved | null;
+}
+
+/**
+ * The "Actual AQL Achieved" chip for the category breakdown row — the tightest
+ * standard level this category's count still met, shown beside the AQL it was
+ * assigned so the two read as an assigned-vs-actual pair.
+ *
+ * Matches this row's own local chip styling (bg-canvas / border-gray-800), switching
+ * to Danger styling per UI_DESIGN_SYSTEM.md §4.8A when the count busted every level.
+ * Not emerald on success — §4.8A reserves emerald for state badges, and the row's
+ * existing PASS/FAIL text already carries the verdict.
+ *
+ * Renders nothing for QUALITATIVE (PASS/FAIL categories have no count to grade) or a
+ * missing value (RECORD ONLY rows, or a backend predating the field).
+ */
+function ActualAqlChip({ actual }: { actual?: ActualAqlAchieved | null }) {
+  if (!actual || actual.status === 'QUALITATIVE') return null;
+
+  const hardFail = actual.status === 'EXCEEDS_ALL';
+
+  return (
+    <span
+      className={`text-[10px] font-mono px-2 py-0.5 rounded-md border ${
+        hardFail
+          ? 'text-rose-400 bg-rose-500/10 border-rose-500/30'
+          : 'text-muted bg-canvas border-gray-800'
+      }`}
+      title={
+        hardFail
+          ? `Observed ${actual.evaluatedCount} — exceeds Ac ${actual.threshold?.ac} at the loosest standard AQL level (10).`
+          : `Observed ${actual.evaluatedCount} — still within Ac ${actual.threshold?.ac} at AQL ${actual.aqlLevel}, the tightest level met.`
+      }
+    >
+      {hardFail ? 'ACTUAL > 10' : `ACTUAL ${actual.aqlLevel}`}
+    </span>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -267,6 +322,7 @@ export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpd
               evalMode: cr.evaluationMode === 'N/A' ? 'QUALITATIVE' : cr.evaluationMode,
               defectCount: cr.totalCount,
               thresholds: { ac: cr.threshold.ac, re: cr.threshold.re, bracket: snapToDisplayBracket(sampleSize) },
+              actualAqlAchieved: cr.actualAqlAchieved ?? null,
               result: cr.passed ? 'PASS' : 'FAIL',
               reason: cr.passed
                 ? undefined
@@ -476,6 +532,7 @@ export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpd
                 <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${cv.result === 'PASS' ? 'bg-emerald-400' : cv.result === 'FAIL' ? 'bg-rose-400' : 'bg-gray-600'}`} />
                 <span className="text-xs font-bold uppercase text-primary tracking-wider min-w-[90px]">{cv.categoryName}</span>
                 <span className="text-[10px] font-mono text-muted bg-canvas border border-gray-800 px-2 py-0.5 rounded-md">AQL {cv.aql}</span>
+                <ActualAqlChip actual={cv.actualAqlAchieved} />
                 <span className="text-[10px] font-mono text-muted bg-canvas border border-gray-800 px-2 py-0.5 rounded-md">{cv.evalMode}</span>
                 {cv.thresholds && (
                   <span className="text-[10px] font-mono text-muted bg-canvas border border-gray-800 px-2 py-0.5 rounded-md">

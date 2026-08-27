@@ -4931,3 +4931,103 @@ silently breaking whichever one was assumed dead):
   test.tsx`) rather than a live click-through — the dev database has
   zero PIN accounts and creating one requires Group A/B (MSAL), which
   the sandbox can't complete.
+
+---
+
+## 35. Actual AQL Achieved — Shipped 2026-08-27
+
+Adds a second, independent per-category data point alongside the existing
+assigned-AQL pass/fail: the **tightest (lowest) standard ISO 2859-1 AQL
+level whose Ac/Re threshold the observed defect count still satisfies**, at
+the same bracket-snapped sample size already used for that category's
+verdict.
+
+The gap it closes: a category assigned AQL 4.0 that recorded zero defects
+and one that recorded exactly `Ac` defects both rendered an identical green
+PASS. The record carried no signal about how much margin the lot actually
+had. Actual AQL answers *"what quality level did this lot demonstrate?"*
+rather than *"did it pass?"* — the two are deliberately decoupled, so a
+zero-tolerance `AND` category that recorded 1 defect fails its own verdict
+while still reporting a tight actual level.
+
+**The computation** (`findActualAqlAchieved()`, `aqlEvaluator.ts`):
+- Walks `SUPPORTED_AQL_LEVELS` ascending, calling the **existing**
+  `getAQLThresholds()` for each rung. The matrix is never read directly and
+  never duplicated — this is the single-cell assigned-AQL lookup generalized
+  across the level set, exactly as the brief required.
+- `Ac` is monotonically non-decreasing along that list for any fixed
+  bracket, so the first level satisfying `count <= Ac` is by construction the
+  tightest. Verified exhaustively (all 13 brackets x 7 levels for
+  monotonicity, plus a brute-force cross-check over 13 brackets x 61 counts
+  against an independently-computed expected value).
+- **Which count is compared is mode-dependent**, and is frozen as
+  `evaluatedCount` precisely because for GRANULAR it differs from
+  `totalCount`: CUMULATIVE compares the category **sum**; GRANULAR compares
+  the **MAX single defect count**, mirroring GRANULAR's own pass rule (it
+  passes a level iff *every* count is `<= Ac`, i.e. iff its largest one is).
+  Using the sum would report a looser level than the category genuinely
+  achieved.
+- **Three states, never null/blank for a graded category:** `ACHIEVED`
+  (carries level + Ac/Re; `'0.65'` reads as "0.65 or better", the tightest
+  column the table has), `EXCEEDS_ALL` (explicit hard-fail carrying the
+  loosest level's Ac/Re — the bar still missed, so a catastrophic category is
+  visibly distinct from "not computed"), and `QUALITATIVE`.
+
+**Scope decisions** (all locked before implementation):
+- RECORD ONLY / OFF categories excluded via the existing empty-string
+  `evaluationMode` skip path — they get no `CategoryResult`, so their frozen
+  value is `null`, meaning *not graded*, never *graded but unknown*.
+- N/A (PASS/FAIL) categories record `QUALITATIVE` rather than a fabricated
+  level: their `defectCounts` are state codes, not counts, so there is no
+  count to grade. Logged as `AUDIT_REPORT.md` #30 rather than silently
+  resolved, since "every graded category gets an actual AQL" cannot hold
+  literally for N/A.
+- Physical dimensions and Glove Weight are excluded **structurally, not by a
+  guard** — confirmed during discovery that `dimensionEvaluator.ts` never
+  references `defectCounts` and `StepDimensions.tsx` never writes into
+  `inspectionData.defects`; the two systems meet only at the final combined
+  verdict. No code was needed to enforce the exclusion.
+- The ladder scans all 7 levels including `'10'`, which
+  `QualityRules.tsx`'s `ISO_WHITELIST` never lets an admin assign. Recorded
+  as `AUDIT_REPORT.md` #29.
+
+**Latent bug found and fixed en route.** `'10'` never resolved at all
+before this build: `getAQLThresholds()`'s `normaliseAQLKey()` pads any
+all-digit string to `'10.0'`, which is not a matrix key, so every AQL 10
+lookup silently fell through to `INDETERMINATE_THRESHOLD` (`{ac:0}`) —
+grading AQL 10 as *zero tolerance*, the strictest possible setting. Found by
+the verification script, not by review. Unreachable through the admin UI
+(whitelist stops at `6.5`), so no stored submission is affected, but
+reachable by direct API call and now reachable internally by the ladder.
+Fixed by trying the exact matrix key before the padded form.
+
+**Freezing.** Carried on both `CategoryResult` (required — that type only
+ever describes graded categories) and `FrozenCategoryAnalysis` (nullable),
+so one computation serves both consumers: `StepReviewSubmit.tsx` reads
+`categoryResults` from `POST /api/verdict/preview`, `HistoryFeed.tsx` reads
+the frozen snapshot. No route changes were needed — both freeze sites
+already persist `JSON.stringify(categoryAnalysis)`. Existing submissions were
+**not** backfilled (same rule as `gradingSnapshot` itself, #18), so frontend
+types treat the field as optional and legacy rows render with no chip.
+
+**Display.** A value chip sitting directly beside the existing indigo
+assigned-AQL chip, so the two read as one assigned-vs-actual pair, in both
+`AqlCategoryAnalysisPanel.tsx` (record detail) and `StepReviewSubmit.tsx`
+(wizard review). Standard `UI_DESIGN_SYSTEM.md` §4.8A value-chip styling,
+switching to §4.8A's documented Danger override on `EXCEEDS_ALL`.
+Deliberately **not** emerald on success: §4.8A reserves emerald for §4.8B
+state badges, and this is a supporting value, not a second verdict — the
+row's existing PASS/FAIL badge still carries that meaning. A `title`
+tooltip on each chip states the observed count and the Ac it was measured
+against.
+
+**Verification:** `tsc` clean both sides; all 12 existing Vitest tests still
+green; the exhaustive math script above; and a live `POST
+/api/verdict/preview` exercise against the real `FACTORY STANDARD` profile
+covering all five category shapes at once — zero-tolerance `AND` (actual
+`0.65`), graded CUMULATIVE `BARRIER` (actual `1.0`), GRANULAR `VISUALS`
+deliberately set so `max != sum` (`total=14` but `evalCount=7`, proving the
+max rule is genuinely in effect — the sum would have yielded `6.5`), N/A
+`OTHERS` (`QUALITATIVE`), and RECORD ONLY (`null` in the snapshot,
+structurally absent from `categoryResults`), plus a 25-defect case
+confirming `EXCEEDS_ALL`.

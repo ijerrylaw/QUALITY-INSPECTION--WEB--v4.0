@@ -460,3 +460,38 @@ with its full original context, reasoning, and verification trail.
     `isCanonicalThicknessDim()` check already used to gate the Trash
     button, in both files identically.
 
+29. **AQL level vocabulary asymmetry between the assignable whitelist and
+    the Actual AQL ladder.** Raised by the "Actual AQL Achieved" build
+    (2026-08-27). The ladder (`findActualAqlAchieved()`,
+    `ISO2859_MATH_ENGINE.md` §2A) scans all 7 `SUPPORTED_AQL_LEVELS`
+    including `'10'`, while Configuration Control's assignable whitelist
+    (`QualityRules.tsx`'s `ISO_WHITELIST`) stops at `'6.5'`. A category can
+    therefore report an *actual* level of `10` that it could never have been
+    *assigned*. Scanning all 7 was an explicit decision (the metric is meant
+    to be independent of what's currently assignable, and including `'10'`
+    means fewer categories fall into the `EXCEEDS_ALL` hard-fail state) —
+    recorded here because the two vocabularies are now deliberately
+    different, not because the current behavior is wrong. Open question for
+    a future build: add `'10'` to `ISO_WHITELIST`, or narrow the ladder to
+    the assignable six.
+
+    **Latent bug this exposed (already fixed, not open):** `'10'` never
+    resolved at all before this build. `getAQLThresholds()`'s
+    `normaliseAQLKey()` pads any all-digit string to `'10.0'`, which is not a
+    matrix key — so every AQL 10 lookup silently fell through to
+    `INDETERMINATE_THRESHOLD` (`{ac:0}`), i.e. graded AQL 10 as *zero
+    tolerance*. Unreachable through the admin UI (hence no stored submission
+    is affected), but reachable by direct API call. Fixed by trying the exact
+    matrix key before the padded form.
+    → `CHANGELOG.md` §35.
+
+30. **N/A-mode categories carry no Actual AQL by design.** `ISO2859_MATH_ENGINE.md`
+    §2 defines N/A mode as qualitative — `defectCounts` holds state codes
+    (0=unrecorded, 1=pass, 2=fail), not defect counts — so there is no count
+    to run the ladder against, even though N/A is a *graded* mode that does
+    affect the verdict. Resolved by recording an explicit `QUALITATIVE`
+    state rather than fabricating an AQL level from a state code, and the UI
+    renders no Actual AQL chip for those rows. Logged here (rather than
+    silently resolved) because "every graded category gets an actual AQL"
+    does not, and cannot, hold literally for N/A.
+    → `CHANGELOG.md` §35.

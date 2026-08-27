@@ -20,7 +20,9 @@ import {
   INDETERMINATE_THRESHOLD,
   ISO_2859_MATRIX,
   SAMPLE_SIZE_BRACKETS,
+  SUPPORTED_AQL_LEVELS,
   SampleSizeBracket,
+  SupportedAQLLevel,
   ZERO_TOLERANCE_THRESHOLD,
   isZeroToleranceAQL,
 } from './iso2859-matrix';
@@ -47,7 +49,7 @@ export interface DefectDefinition {
   currentClass: string;
 }
 
-export type { AQLThreshold, SampleSizeBracket };
+export type { AQLThreshold, SampleSizeBracket, SupportedAQLLevel };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BRACKET SMOOTHING
@@ -116,8 +118,16 @@ export function getAQLThresholds(sampleSize: number, aqlLevel: string): AQLThres
     return INDETERMINATE_THRESHOLD;
   }
 
+  // Exact matrix key first, then the padded form. Order matters: '10' IS a real
+  // matrix key, but normaliseAQLKey() pads any all-digit string to '10.0', which is
+  // NOT — so a normalise-first lookup silently missed the whole AQL 10 column and
+  // fell through to INDETERMINATE ({ac:0}), i.e. graded AQL 10 as zero tolerance.
+  // Unreachable via the admin UI (QualityRules.tsx's ISO_WHITELIST stops at '6.5'),
+  // so no stored submission is affected, but it was reachable by direct API call and
+  // is now reachable internally by findActualAqlAchieved()'s ladder scan.
+  // See AUDIT_REPORT.md.
   const normalisedAQL = normaliseAQLKey(aqlLevel);
-  const threshold = sizeRow[normalisedAQL];
+  const threshold = sizeRow[aqlLevel.trim()] ?? sizeRow[normalisedAQL];
 
   if (!threshold) {
     console.warn(
@@ -127,6 +137,117 @@ export function getAQLThresholds(sampleSize: number, aqlLevel: string): AQLThres
   }
 
   return threshold;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ACTUAL AQL ACHIEVED
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Which of the three possible outcomes a category's Actual AQL computation landed on.
+ *
+ *   ACHIEVED    — the observed count still satisfies at least one standard AQL level.
+ *   EXCEEDS_ALL — the observed count busts even the loosest level in the table.
+ *                 An explicit hard-fail state, deliberately NOT null/blank, so a
+ *                 catastrophic category is visibly distinct from "not computed".
+ *   QUALITATIVE — an N/A-mode (PASS/FAIL) category. Its `defectCounts` values are
+ *                 state codes (0=unrecorded, 1=pass, 2=fail), not defect counts
+ *                 (ISO2859_MATH_ENGINE.md §2), so there is no count to run the
+ *                 ladder against. Recorded as an explicit state rather than a
+ *                 fabricated AQL level derived from a state code.
+ */
+export type ActualAqlStatus = 'ACHIEVED' | 'EXCEEDS_ALL' | 'QUALITATIVE';
+
+/**
+ * "Actual AQL Achieved" — the TIGHTEST (lowest) standard ISO 2859-1 AQL level whose
+ * Ac/Re threshold the observed defect count still satisfies, at the SAME sample size
+ * already applied to that category's assigned-AQL verdict.
+ *
+ * Independent of the assigned AQL: a category assigned 'AND' (zero tolerance) that
+ * recorded 1 defect FAILS its own verdict, yet may still report a tight Actual AQL —
+ * that is the point of the metric. It answers "what quality level did this lot
+ * actually demonstrate", not "did it pass".
+ *
+ * Computed once at submission time and frozen into Submission.gradingSnapshot. Never
+ * recomputed live, and never changes if Product Engine or Inspection Profile config
+ * changes later — same rule as all other frozen grading snapshot data.
+ */
+export interface ActualAqlAchieved {
+  status: ActualAqlStatus;
+  /**
+   * The achieved level ('0.65'…'10'). Null for EXCEEDS_ALL and QUALITATIVE.
+   *
+   * '0.65' is the tightest level the table carries, so it reads as "0.65 or better" —
+   * the metric cannot resolve finer than the matrix's own leftmost column.
+   */
+  aqlLevel: SupportedAQLLevel | null;
+  /**
+   * Ac/Re of the achieved level. For EXCEEDS_ALL this carries the LOOSEST level's
+   * Ac/Re — i.e. the bar that was still missed — so the hard-fail state stays
+   * self-explanatory in a frozen record. Null for QUALITATIVE.
+   */
+  threshold: AQLThreshold | null;
+  /**
+   * The count the ladder was actually run against. Mode-dependent, and deliberately
+   * frozen alongside CategoryResult.totalCount because for GRANULAR the two differ:
+   *   CUMULATIVE — the category sum (the same value its assigned verdict compares)
+   *   GRANULAR   — the MAX single defect count, mirroring GRANULAR's own pass rule
+   *                (`count > ac` per defect ⇒ the category satisfies a level iff its
+   *                largest single count does)
+   * Null for QUALITATIVE.
+   */
+  evaluatedCount: number | null;
+}
+
+/**
+ * The frozen value recorded for N/A-mode categories. Shared constant rather than an
+ * inline literal so every site that means "qualitative, no ladder" is provably the
+ * same shape.
+ */
+export const QUALITATIVE_ACTUAL_AQL: Readonly<ActualAqlAchieved> = {
+  status: 'QUALITATIVE',
+  aqlLevel: null,
+  threshold: null,
+  evaluatedCount: null,
+} as const;
+
+/**
+ * Generalizes the single-cell getAQLThresholds() lookup across the whole standard AQL
+ * level set: instead of resolving Ac/Re for ONE assigned level, it walks every level
+ * and reports the tightest one the observed count still fits under.
+ *
+ * SUPPORTED_AQL_LEVELS is ordered tightest → loosest ('0.65' … '10'), and Ac is
+ * monotonically non-decreasing along it for any fixed bracket (verified across all 13
+ * rows of ISO_2859_MATRIX). So the FIRST level that accommodates the count is by
+ * construction the tightest — a forward scan, no sorting or comparison needed.
+ *
+ * Reuses getAQLThresholds() rather than reading ISO_2859_MATRIX directly, so bracket
+ * snapping and the matrix stay single-sourced. None of the 7 level strings trips that
+ * function's zero-tolerance guard (/and/i, /zero.?tolerance/i, /^0$/), so every
+ * iteration reaches a real matrix cell.
+ *
+ * @param sampleSize    - Operator-recorded sample size (bracket-snapped internally).
+ * @param observedCount - Mode-appropriate count; see ActualAqlAchieved.evaluatedCount.
+ */
+export function findActualAqlAchieved(
+  sampleSize: number,
+  observedCount: number,
+): ActualAqlAchieved {
+  for (const level of SUPPORTED_AQL_LEVELS) {
+    const threshold = getAQLThresholds(sampleSize, level);
+    if (observedCount <= threshold.ac) {
+      return { status: 'ACHIEVED', aqlLevel: level, threshold, evaluatedCount: observedCount };
+    }
+  }
+
+  // Busted even the loosest level — explicit hard-fail state, never null/blank.
+  const loosest = SUPPORTED_AQL_LEVELS[SUPPORTED_AQL_LEVELS.length - 1];
+  return {
+    status: 'EXCEEDS_ALL',
+    aqlLevel: null,
+    threshold: getAQLThresholds(sampleSize, loosest),
+    evaluatedCount: observedCount,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -155,6 +276,16 @@ export interface CategoryResult {
   passed: boolean;
   /** Non-empty only when passed === false. Lists what caused the failure. */
   failingDefects: FailingDefect[];
+  /**
+   * The tightest standard AQL level this category's observed count still satisfies —
+   * see {@link ActualAqlAchieved}. Independent of, and reported alongside, the
+   * assigned-AQL pass/fail above.
+   *
+   * Always populated (never null) on a CategoryResult, because a CategoryResult only
+   * exists for a graded category — the `''` RECORD ONLY / OFF skip path below
+   * `continue`s before one is built.
+   */
+  actualAqlAchieved: ActualAqlAchieved;
 }
 
 /**
@@ -274,6 +405,8 @@ export function evaluateAQLVerdict(params: EvaluateAQLVerdictParams): VerdictRes
         totalCount: failingDefects.length,
         passed,
         failingDefects,
+        // N/A values are state codes, not defect counts — no ladder to run.
+        actualAqlAchieved: QUALITATIVE_ACTUAL_AQL,
       });
 
     // ── CUMULATIVE MODE: Sum all defects, compare total against Ac ───────────
@@ -292,6 +425,9 @@ export function evaluateAQLVerdict(params: EvaluateAQLVerdictParams): VerdictRes
         threshold,
         totalCount: total,
         passed,
+        // CUMULATIVE compares the summed total against Ac, so the ladder runs
+        // against that same total.
+        actualAqlAchieved: findActualAqlAchieved(sampleSize, total),
         failingDefects: passed
           ? []
           : [
@@ -308,10 +444,15 @@ export function evaluateAQLVerdict(params: EvaluateAQLVerdictParams): VerdictRes
     } else if (category.evaluationMode === 'GRANULAR') {
       const failingDefects: FailingDefect[] = [];
       let totalCount = 0;
+      // GRANULAR passes a level iff EVERY individual count is <= Ac, which is
+      // equivalent to its largest single count being <= Ac. So the ladder runs
+      // against the max, not the sum — see ActualAqlAchieved.evaluatedCount.
+      let maxCount = 0;
 
       for (const def of categoryDefects) {
         const count = defectCounts[def.id] ?? 0;
         totalCount += count;
+        if (count > maxCount) maxCount = count;
         if (count > threshold.ac) {
           failingDefects.push({
             defectId: def.id,
@@ -333,6 +474,7 @@ export function evaluateAQLVerdict(params: EvaluateAQLVerdictParams): VerdictRes
         totalCount,
         passed,
         failingDefects,
+        actualAqlAchieved: findActualAqlAchieved(sampleSize, maxCount),
       });
     }
   }

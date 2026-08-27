@@ -35,6 +35,38 @@ The evaluation function determines the final PASS/FAIL verdict by mapping record
 
 * **Empty String `''` Mode:** The engine skips this category entirely — captured defect counts never affect the verdict. This is what a **RECORD ONLY** AQL Level category writes as its `evaluationMode` (Configuration Control > Quality Rules auto-locks it, mirroring the dimension-level Graded/Record-only pattern — see §5). Distinct from N/A mode above: a PASS/FAIL category is still evaluated (qualitative pass/fail per defect); only RECORD ONLY truly opts a category out of verdict computation.
 
+---
+
+## 2A. ACTUAL AQL ACHIEVED (`findActualAqlAchieved`)
+
+A second, **independent** data point recorded alongside the assigned-AQL verdict: the **tightest (lowest) standard ISO 2859-1 AQL level whose Ac/Re threshold the observed defect count still satisfies**, at the same bracket-snapped sample size already used for that category's verdict.
+
+It answers *"what quality level did this lot actually demonstrate?"* — not *"did it pass?"*. The two are deliberately decoupled: a category assigned `AND` (zero tolerance) that recorded 1 defect **fails** its own verdict yet can still report a tight Actual AQL. That is the intended behavior, not a contradiction.
+
+* **The ladder:** `findActualAqlAchieved()` walks `SUPPORTED_AQL_LEVELS` (`'0.65'`, `'1.0'`, `'1.5'`, `'2.5'`, `'4.0'`, `'6.5'`, `'10'`) in ascending order, calling the **same `getAQLThresholds()`** used for the assigned-AQL lookup — the matrix is never read directly and never duplicated. `Ac` is monotonically non-decreasing along that list for any fixed bracket (verified across all 13 rows), so the first level satisfying `count ≤ Ac` is by construction the tightest.
+
+* **Which count is compared** — mode-dependent, and frozen as `evaluatedCount` because for GRANULAR it deliberately differs from `totalCount`:
+  - **CUMULATIVE** — the category **sum** (the same value its assigned verdict compares).
+  - **GRANULAR** — the **MAX single defect count**. GRANULAR passes a level iff *every* individual count ≤ Ac, which is equivalent to its largest single count doing so. Using the sum here would report a looser level than the category genuinely achieved under its own grading rule.
+  - **N/A** — no ladder is run. See below.
+
+* **Three recorded states — never null, never blank, for any graded category:**
+  - `ACHIEVED` — carries the level plus its Ac/Re. `'0.65'` is the tightest column the table has, so it reads as *"0.65 or better"*; the metric cannot resolve finer.
+  - `EXCEEDS_ALL` — the count busts even the loosest level. An **explicit hard-fail state** carrying the loosest level's Ac/Re (the bar that was still missed), so a catastrophic category is visibly distinct from "not computed".
+  - `QUALITATIVE` — an N/A-mode (PASS/FAIL) category. Its `defectCounts` values are state codes (§2), not defect counts, so there is no count to grade. Recorded as an explicit state rather than a fabricated AQL level derived from a state code.
+
+* **Scope:** every category the engine grades. RECORD ONLY / OFF categories are excluded by the existing empty-string `evaluationMode` skip path (§2) — they never receive a `CategoryResult`, so their frozen value is `null`, meaning *not graded* (never *graded but unknown*).
+
+* **Physical dimensions and Glove Weight are excluded** — structurally, not by a guard. Dimension measurements never enter `defectCounts`; the dimension and AQL systems meet only at the final combined verdict (§5). They keep their existing in-spec / out-of-spec display and never carry an AQL level.
+
+* **Frozen once, never recomputed.** Computed at submission time (and refrozen at amendment-approval time, in the same transaction as `verdict`) into `Submission.gradingSnapshot` — the same rule as all other frozen grading data. It must never be recomputed live and never changes if Product Engine or Inspection Profile config changes later. Existing submissions were deliberately **not** backfilled; their snapshots simply lack the field and render without it.
+
+**Source:** `findActualAqlAchieved()` / `ActualAqlAchieved` in `backend/src/engine/aqlEvaluator.ts`; frozen via `buildFrozenCategoryAnalysis()` in `backend/src/engine/resolveVerdict.ts`.
+
+> **Vocabulary asymmetry (intentional):** the ladder scans `'10'`, but Configuration Control's assignable whitelist (`QualityRules.tsx`'s `ISO_WHITELIST`) stops at `'6.5'`. So an *actual* level of `10` can be reported for a category whose *assigned* level could never be `10`. See `AUDIT_REPORT.md` #29.
+
+---
+
 **Engine source files:**
 - Matrix + bracket snap: `backend/src/engine/iso2859-matrix.ts`
 - Verdict engine: `backend/src/engine/aqlEvaluator.ts`

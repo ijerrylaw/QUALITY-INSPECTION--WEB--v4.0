@@ -17,7 +17,7 @@
  */
 
 import { evaluateAQLVerdict } from './aqlEvaluator';
-import type { CategoryResult } from './aqlEvaluator';
+import type { ActualAqlAchieved, CategoryResult } from './aqlEvaluator';
 import { evaluateDimensions, evaluateWeight, hasUsableProductMatrix } from './dimensionEvaluator';
 import type { DimensionResult, ProductConfig, ProductDimensionDef } from './dimensionEvaluator';
 import { resolveProductRegistry } from '../lib/productEntry';
@@ -149,6 +149,22 @@ export interface FrozenCategoryAnalysis {
   totalCount: number;
   /** true=PASS, false=FAIL, null=informational/not evaluated (empty evaluationMode) */
   passed: boolean | null;
+  /**
+   * The tightest standard AQL level this category's observed count still satisfied —
+   * see ActualAqlAchieved in aqlEvaluator.ts. Frozen here alongside the assigned-AQL
+   * verdict data above, and subject to the same rule: computed once at submit (or
+   * amendment-approval) time and never recomputed live, so it cannot drift if the
+   * profile's AQL levels change later.
+   *
+   * Null ONLY for categories that were never graded at all — the empty-evaluationMode
+   * (RECORD ONLY / OFF) skip path, where `passed` and `threshold` are already null too.
+   * A graded category always carries a real state, including the explicit EXCEEDS_ALL
+   * hard fail; it is never null-because-unknown.
+   *
+   * Absent entirely on snapshots frozen before this field existed — deliberately NOT
+   * backfilled, same rule as gradingSnapshot itself (AUDIT_REPORT.md #18).
+   */
+  actualAqlAchieved: ActualAqlAchieved | null;
   defectItems: FrozenDefectItem[];
 }
 
@@ -203,6 +219,9 @@ function buildFrozenCategoryAnalysis(
       threshold,
       totalCount,
       passed,
+      // Null exactly where `passed`/`threshold` are null — an ungraded category has
+      // no CategoryResult, so there is nothing to freeze.
+      actualAqlAchieved: result?.actualAqlAchieved ?? null,
       defectItems: defectItemsRaw.map((d) => ({ ...d, failing: failingIds.has(d.id) })),
     };
   });

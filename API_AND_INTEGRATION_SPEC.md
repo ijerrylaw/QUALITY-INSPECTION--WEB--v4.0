@@ -48,7 +48,7 @@
     3. Hardcoded GLOBAL STANDARD (DEFAULT) profile
   * **Important:** `profileId` is stored as a plain opaque string, checked against `AppConfig.inspectionProfiles`/the `'prof_default'` sentinel (not a Prisma foreign key — `InspectionProfile` was removed as a relational model). A miss logs a warning and stores `null` rather than hard-failing.
   * **Response 201:** `{ submission, verdict: 'PASSED' | 'FAILED', categoryResults[] }`
-  * **Frozen snapshot (AUDIT_REPORT.md #18):** The persisted `submission` also carries `gradingSnapshot`/`gradingSnapshotProfileName` — a richer, self-contained `FrozenCategoryAnalysis[]` (names, AQL level, threshold, eval mode, pass/fail, full per-category defect breakdown) computed by `resolveVerdict()` and stored as JSON. This is **not the same shape** as the response's `categoryResults[]` (which stays the engine's audit-trail `CategoryResult[]` — no `aqlLevel`, failing-defects-only). `HistoryFeed.tsx` reads `gradingSnapshot` directly instead of re-querying `POST /api/verdict/preview`.
+  * **Frozen snapshot (AUDIT_REPORT.md #18):** The persisted `submission` also carries `gradingSnapshot`/`gradingSnapshotProfileName` — a richer, self-contained `FrozenCategoryAnalysis[]` (names, AQL level, threshold, eval mode, pass/fail, `actualAqlAchieved`, full per-category defect breakdown) computed by `resolveVerdict()` and stored as JSON. This is **not the same shape** as the response's `categoryResults[]` (which stays the engine's audit-trail `CategoryResult[]` — no `aqlLevel`, failing-defects-only). `HistoryFeed.tsx` reads `gradingSnapshot` directly instead of re-querying `POST /api/verdict/preview`.
   * **Auth:** Requires `X-User-Role` header, any authenticated role — see `NAVIGATION_AND_RBAC.md` §5.1.
 
 * `GET /api/submissions/sequence-hint`
@@ -91,6 +91,7 @@
     - `HistoryFeed.tsx` — **legacy fallback only**, for submissions with no `gradingSnapshot` (AUDIT_REPORT.md #18). Rows with a snapshot render it directly and never call this endpoint.
   * **Payload:** `{ profileId?: string | null, productCode?: string, sampleSize: number, defects: Record<string, number> }`
   * **Response 200:** The full `ResolveVerdictResult` shape — `{ verdict, categoryResults[], categoryAnalysis[], evaluationProfileName, failedDimensions, dimensionResults[], evaluationProfileId, requestedProfileId }`.
+  * **`actualAqlAchieved`:** every graded entry in **both** `categoryResults[]` and `categoryAnalysis[]` carries `{ status: 'ACHIEVED' | 'EXCEEDS_ALL' | 'QUALITATIVE', aqlLevel, threshold, evaluatedCount }` — the tightest standard ISO 2859-1 level the observed count still satisfies (`ISO2859_MATH_ENGINE.md` §2A). Required on `categoryResults[]` (which only ever contains graded categories); nullable on `categoryAnalysis[]`, where `null` marks an ungraded RECORD ONLY / OFF category. `StepReviewSubmit.tsx` reads it from `categoryResults[]`; `HistoryFeed.tsx` reads it from the frozen snapshot, falling back to `categoryResults[]` on legacy rows.
   * **Note:** Resolves profiles in `'fallback'` mode (an unresolvable `profileId` degrades to the safety-net profile instead of throwing) — appropriate for a non-authoritative preview, unlike `POST /api/submissions` and `POST /api/amendments/:id/approve` which both throw on an unresolvable explicit `profileId`.
   * **Auth:** None required.
 

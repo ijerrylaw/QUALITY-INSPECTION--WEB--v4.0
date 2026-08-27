@@ -93,6 +93,21 @@ export interface Submission {
    * a historical grade from current config isn't actually history). Legacy
    * rows fall back to a live re-grade in `HistoryFeed.tsx`, shown with an
    * explicit "not the original result" banner instead of silently drifting.
+   *
+   * Each entry also carries `actualAqlAchieved` — the tightest standard ISO
+   * 2859-1 level that category's observed count still satisfied, frozen under
+   * the same never-recompute rule (ISO2859_MATH_ENGINE.md §2A):
+   *
+   *   { status: 'ACHIEVED' | 'EXCEEDS_ALL' | 'QUALITATIVE',
+   *     aqlLevel: string | null,                 // null unless ACHIEVED
+   *     threshold: { ac, re } | null,            // loosest level's Ac/Re when EXCEEDS_ALL
+   *     evaluatedCount: number | null }          // sum for CUMULATIVE, MAX for GRANULAR
+   *
+   * `null` on an entry means the category was never graded (empty
+   * `evaluationMode` — RECORD ONLY / OFF), never "graded but unknown".
+   * ABSENT entirely on snapshots frozen before this field existed — also not
+   * backfilled, so frontend types must treat it as optional and render the
+   * chip only when present.
    */
   gradingSnapshot: string | null;
   /**
