@@ -98,14 +98,15 @@
  * ACTUAL COLUMN REDESIGN (2026-08-27, layout/content revision): the
  * click-to-expand interaction from the immediately preceding session was
  * REMOVED, not merely hidden — this table has no chevron, no expand state,
- * no button. ACTUAL now always shows `MIN x / MAX y / AVG z` directly, plus
- * (only for a failed graded row) a second line listing the specific
- * out-of-spec raw readings — both already-frozen data
+ * no button. ACTUAL now shows `MIN x / MAX y / AVG z` directly for a 5-slot
+ * dimension, plus (only for a failed graded row) a second line listing the
+ * specific out-of-spec raw readings — both already-frozen data
  * (`row.slots`/`row.slotFails`, wired in two sessions ago for the removed
- * expand feature) simply rendered differently, not new computation. The
- * legacy NOT-FROZEN Glove Weight row is the one exception: it still shows
- * only its single raw value, since min/max/avg would all be that same
- * placeholder number, not real per-slot data.
+ * expand feature) simply rendered differently, not new computation.
+ * Glove Weight is the exception: it is a single recorded reading, not a
+ * 5-slot grid, so any single-slot row (`slots.length === 1` — the frozen
+ * gloveWeightSnapshot row and the legacy NOT-FROZEN one) shows just that
+ * one value, no MIN/MAX/AVG. See ActualCell's own doc comment.
  */
 
 export interface DimensionRow {
@@ -229,9 +230,14 @@ function ComplianceBadge({ row }: { row: DimensionRow }) {
  * MIN/MAX/AVG is styled the same de-emphasized way regardless of pass/fail,
  * since the failure signal now lives in the out-of-spec line and the
  * RESULT badge, not here. Both lines reuse `row.slots`/`row.slotFails` —
- * already-frozen data, just a different presentation of it. The legacy
- * NOT-FROZEN Glove Weight row is the one exception: no real per-slot data
- * exists for it, so it shows only its single recorded value.
+ * already-frozen data, just a different presentation of it.
+ *
+ * SINGLE-ENTRY EXCEPTION: Glove Weight is one recorded reading, not a
+ * 5-slot measurement grid — MIN/MAX/AVG would each just be that same value.
+ * Any row with a single slot (`slots.length === 1`) — the frozen
+ * gloveWeightSnapshot row and the legacy NOT-FROZEN one alike — therefore
+ * shows only its single value (rose if out of spec, primary otherwise), no
+ * MIN/MAX/AVG line and no separate out-of-spec list.
  */
 function ActualCell({ row }: { row: DimensionRow }) {
   if (!row.measured) {
@@ -239,18 +245,22 @@ function ActualCell({ row }: { row: DimensionRow }) {
   }
 
   const dp = rowDecimals(row);
+  const outOfRange = row.isGraded && row.failed;
 
-  if (!row.hasSnapshot) {
-    // Legacy row: min === max === avg (the same placeholder value three
-    // times over) is not real per-slot data — show the single value only.
+  // Single-entry field (Glove Weight — one recorded reading, not a 5-slot
+  // stats object): MIN/MAX/AVG would all be that same value, so show the
+  // single value only. `slots.length === 1` catches both the frozen
+  // gloveWeightSnapshot row and the legacy NOT-FROZEN one; `!hasSnapshot` is
+  // kept as a belt-and-braces guard for the legacy shape. Rose when it's the
+  // out-of-spec value, primary otherwise.
+  if (!row.hasSnapshot || row.slots.length === 1) {
     return (
-      <span className="text-sm font-mono text-primary">
+      <span className={`text-sm font-mono ${outOfRange ? 'text-rose-400' : 'text-primary'}`}>
         {formatNum(row.measured.avg, dp)}{row.unit}
       </span>
     );
   }
 
-  const outOfRange = row.isGraded && row.failed;
   const { min, max, avg } = row.measured;
   const failingSlots = row.slots.filter((_, i) => row.slotFails[i] === true);
   const showOutOfSpec = outOfRange && failingSlots.length > 0;

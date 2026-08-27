@@ -267,4 +267,50 @@ describe('DimensionsPanel', () => {
     expect(queryByText('COMPLIANT')).toBeNull();
     expect(queryByText('OUT OF SPEC')).toBeNull();
   });
+
+  test('a FROZEN Glove Weight row (single recorded reading) shows only its value — no MIN/MAX/AVG', () => {
+    const frozenWeight: DimensionRow = {
+      id: '__fixed_weight__',
+      name: 'GLOVE WEIGHT',
+      unit: 'g',
+      measured: { min: 2.22, max: 2.22, avg: 2.22 },
+      failed: false,
+      isGraded: true,
+      threshold: 2.30,
+      maxThreshold: 2.70,
+      isMin: false,
+      hasSnapshot: true,
+      slots: ['2.22'],
+      slotFails: [false],
+    };
+    const { getByText, container } = render(<DimensionsPanel rows={[frozenWeight]} />);
+    expect(getByText('COMPLIANT')).toBeTruthy();
+    expectText(container, '2.22g');
+    expect(container.textContent).not.toContain('MIN');
+    expect(container.textContent).not.toContain('MAX');
+    expect(container.textContent).not.toContain('AVG');
+  });
+
+  test('a FROZEN out-of-spec Glove Weight row shows its single value in rose, still no MIN/MAX/AVG', () => {
+    const failedWeight: DimensionRow = {
+      id: '__fixed_weight__',
+      name: 'GLOVE WEIGHT',
+      unit: 'g',
+      measured: { min: 2.22, max: 2.22, avg: 2.22 },
+      failed: true,
+      isGraded: true,
+      threshold: 2.30,
+      maxThreshold: 2.70,
+      isMin: false,
+      hasSnapshot: true,
+      slots: ['2.22'],
+      slotFails: [true],
+    };
+    const { getByText, container } = render(<DimensionsPanel rows={[failedWeight]} />);
+    expect(getByText('OUT OF SPEC')).toBeTruthy();
+    const valueSpan = findByTextContent(container, '2.22g');
+    expect(valueSpan.className).toContain('text-rose-400');
+    expect(container.textContent).not.toContain('MIN');
+    expect(container.textContent).not.toContain('AVG');
+  });
 });
