@@ -22,13 +22,21 @@ export type AccessLogAction =
 
 export async function logAccess(
   req: Request,
-  params: { userId?: string | null; role?: string | null; action: AccessLogAction; detail?: string | null },
+  params: {
+    userId?: string | null;
+    role?: string | null;
+    /** Copied in at write time — see the model's doc comment in schema.prisma. */
+    userDisplayName?: string | null;
+    action: AccessLogAction;
+    detail?: string | null;
+  },
 ): Promise<void> {
   try {
     await prisma.accessLog.create({
       data: {
         userId: params.userId ?? null,
         role: params.role ?? null,
+        userDisplayName: params.userDisplayName ?? null,
         action: params.action,
         detail: params.detail ?? null,
         ipAddress: req.ip ?? null,

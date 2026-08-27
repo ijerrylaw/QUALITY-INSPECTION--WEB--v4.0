@@ -39,7 +39,7 @@ const isDeepEqual = (obj1: any, obj2: any): boolean => {
   return true;
 };
 import { useConfig, API_BASE_URL } from '../context/ConfigContext';
-import { useAuth, authHeader } from '../context/AuthContext';
+import { useAuth, authHeader, authIdentity } from '../context/AuthContext';
 import { useToast } from '../components/ui/ToastProvider';
 import { 
   Building2, 
@@ -134,7 +134,11 @@ export function ConfigPage() {
       const response = await fetch(`${API_BASE_URL}/api/config`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...authHeader(user) },
-        body: JSON.stringify(draftConfig)
+        // authIdentity(user) is spread in purely for AccessLog's CONFIG_WRITE
+        // audit row (config.routes.ts's resolveConfigWriterDisplayName) —
+        // same identity-fragment convention ApprovalsQueue.tsx already uses.
+        // Not read by any config-field processing below.
+        body: JSON.stringify({ ...draftConfig, ...authIdentity(user) })
       });
 
       if (!response.ok) {

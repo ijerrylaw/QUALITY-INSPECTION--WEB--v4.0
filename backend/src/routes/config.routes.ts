@@ -320,6 +320,40 @@ function inferConfigWriteDetail(payload: Record<string, unknown>): string {
   return sections.length > 0 ? sections.join(', ') : 'Configuration';
 }
 
+/**
+ * Resolves the acting user's display name for a CONFIG_WRITE AccessLog row,
+ * from the same `{ loginMethod, ... }` identity fragment `authIdentity(user)`
+ * (frontend/src/context/AuthContext.tsx) already spreads into other write
+ * payloads (e.g. ApprovalsQueue.tsx's approve/reject calls) — ConfigPage.tsx/
+ * CompanyBrandingPanel.tsx now spread the same fragment into their PATCH
+ * body. Best-effort only: unlike backend/src/lib/identity.ts's
+ * resolveIdentity() (used by Submission/AmendmentLog writes), a missing/
+ * malformed identity fragment here must never fail the config save itself —
+ * it only means this one audit row's name comes back null.
+ *
+ * PATCH /api/config is Group A/B (MANAGER/ADMIN) only, and both are M365-only
+ * roles (NAVIGATION_AND_RBAC.md §2) — the PIN branch can't be reached by any
+ * route in this app today, but is still handled here for consistency with
+ * the shared identity-fragment shape, the same way identity.ts does for both
+ * login methods.
+ */
+async function resolveConfigWriterDisplayName(payload: Record<string, unknown>): Promise<string | null> {
+  if (payload['loginMethod'] === 'PIN') {
+    const pinUserId = typeof payload['pinUserId'] === 'string' ? payload['pinUserId'] : null;
+    if (!pinUserId) return null;
+    const pinUser = await prisma.pinUser.findUnique({ where: { id: pinUserId }, select: { name: true } });
+    return pinUser?.name ?? null;
+  }
+  if (payload['loginMethod'] === 'M365') {
+    const displayName = typeof payload['displayName'] === 'string' ? payload['displayName'].trim() : '';
+    const userPrincipalName = typeof payload['userPrincipalName'] === 'string' ? payload['userPrincipalName'].trim() : '';
+    // Same fallback order as identity.ts's displayNameOf(): a real name first,
+    // the UPN if that's all we have, null otherwise.
+    return displayName || userPrincipalName || null;
+  }
+  return null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PATCH /api/config
 // ─────────────────────────────────────────────────────────────────────────────
@@ -573,6 +607,7 @@ router.patch('/', requireRole('MANAGER', 'ADMIN'), async (req: Request, res: Res
     await logAccess(req, {
       userId: null,
       role: req.header('X-User-Role') ?? null,
+      userDisplayName: await resolveConfigWriterDisplayName(payload),
       action: 'CONFIG_WRITE',
       detail: inferConfigWriteDetail(payload),
     });

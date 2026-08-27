@@ -13,6 +13,8 @@ interface AccessLogRow {
   id: string;
   userId: string | null;
   role: string | null;
+  /** Copied in at write time, not a live join — see schema.prisma's AccessLog doc comment. Null for rows predating this field, or a login that never resolved an identity. */
+  userDisplayName: string | null;
   action: string;
   detail: string | null;
   ipAddress: string | null;
@@ -149,7 +151,9 @@ export function AccessLogPanel() {
                         {new Date(log.timestamp).toLocaleString()}
                       </td>
                       <td className="py-3 px-4 text-sm border-b border-gray-800/50">
-                        <div className="text-primary">{log.role ?? '—'}</div>
+                        <div className="font-bold text-primary">
+                          {log.userDisplayName ?? '—'}{log.role ? ` · ${log.role}` : ''}
+                        </div>
                         {log.userId && (
                           <div className="text-xs text-muted font-mono truncate max-w-[16rem]">{log.userId}</div>
                         )}

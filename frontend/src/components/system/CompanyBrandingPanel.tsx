@@ -3,7 +3,7 @@ import { Building2, Upload, Palette, Save } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { useToast } from '../ui/ToastProvider';
 import { useConfig, API_BASE_URL } from '../../context/ConfigContext';
-import { useAuth, authHeader } from '../../context/AuthContext';
+import { useAuth, authHeader, authIdentity } from '../../context/AuthContext';
 import { ACCENT_PRESETS, DEFAULT_ACCENT_FAMILY, isAccentFamily } from '../../lib/accentColors';
 import type { AccentFamily } from '../../lib/accentColors';
 
@@ -61,7 +61,9 @@ export function CompanyBrandingPanel() {
       const res = await fetch(`${API_BASE_URL}/api/config`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...authHeader(user) },
-        body: JSON.stringify({ companyName, portalTitle, logoImage, accentColor }),
+        // authIdentity(user) is spread in purely for AccessLog's CONFIG_WRITE
+        // audit row — same convention as ConfigPage.tsx's handleSave().
+        body: JSON.stringify({ companyName, portalTitle, logoImage, accentColor, ...authIdentity(user) }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));

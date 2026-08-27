@@ -462,6 +462,13 @@ model AccessLog {
   /// same nullability reasoning as userId (some M365 states, e.g. a pending
   /// or bootstrap-eligible login, genuinely have no role assigned yet).
   role      String?
+  /// Human-readable name, copied in at the moment of the write — same
+  /// convention as AmendmentLog.requestedByDisplayName (schema.prisma), not
+  /// a live join. Keeps the log's display accurate even if the person is
+  /// later renamed/deleted, and avoids a runtime join on this table. Same
+  /// nullability reasoning as userId/role — a failed login before identity
+  /// resolution may not have a name to attach.
+  userDisplayName String?
   /// 'M365_LOGIN_SUCCESS' | 'M365_LOGIN_FAILURE' | 'PIN_LOGIN_SUCCESS' |
   /// 'PIN_LOGIN_FAILURE' | 'CONFIG_WRITE' — enforced in route code, not the DB.
   action    String

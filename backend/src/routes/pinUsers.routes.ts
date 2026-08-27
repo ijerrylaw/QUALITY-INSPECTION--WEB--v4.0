@@ -353,19 +353,19 @@ pinAuthRouter.post('/pin-login', async (req: Request, res: Response) => {
     const userId = typeof body.userId === 'string' ? body.userId : '';
 
     if (!userId || !isValidSixDigitPin(body.pin)) {
-      await logAccess(req, { userId: userId || null, role: null, action: 'PIN_LOGIN_FAILURE' });
+      await logAccess(req, { userId: userId || null, role: null, userDisplayName: null, action: 'PIN_LOGIN_FAILURE' });
       res.status(401).json({ error: 'Invalid PIN' });
       return;
     }
 
     const match = await prisma.pinUser.findFirst({ where: { id: userId, active: true } });
     if (!match || !verifyPin(body.pin as string, match.pinHash, match.pinSalt)) {
-      await logAccess(req, { userId, role: match?.role ?? null, action: 'PIN_LOGIN_FAILURE' });
+      await logAccess(req, { userId, role: match?.role ?? null, userDisplayName: match?.name ?? null, action: 'PIN_LOGIN_FAILURE' });
       res.status(401).json({ error: 'Invalid PIN' });
       return;
     }
 
-    await logAccess(req, { userId: match.id, role: match.role, action: 'PIN_LOGIN_SUCCESS' });
+    await logAccess(req, { userId: match.id, role: match.role, userDisplayName: match.name, action: 'PIN_LOGIN_SUCCESS' });
 
     res.json({
       id: match.id,

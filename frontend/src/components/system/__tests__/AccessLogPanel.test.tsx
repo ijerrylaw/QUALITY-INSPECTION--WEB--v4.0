@@ -61,6 +61,7 @@ function accessLogRow(overrides: Partial<Record<string, unknown>> = {}) {
     id: 'log_1',
     userId: 'test-aad-obj',
     role: 'ADMIN',
+    userDisplayName: null,
     action: 'CONFIG_WRITE',
     detail: 'System Admin',
     ipAddress: '127.0.0.1',
@@ -82,6 +83,59 @@ describe('AccessLogPanel: sends the X-User-Role header (the actual bug)', () => 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect((init.headers as Record<string, string>)['X-User-Role']).toBe('ADMIN');
+  });
+});
+
+describe('AccessLogPanel: USER / ROLE column ("Name · Role" format)', () => {
+  test('renders "Name · Role" with userId still visible underneath', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          logs: [accessLogRow({ userDisplayName: 'Jerry Law', role: 'ADMIN', userId: 'aad-jerry-law' })],
+          count: 1, page: 1, limit: 50, totalCount: 1, hasMore: false,
+        }),
+        { status: 200 },
+      ),
+    ));
+
+    const { findByText } = render(<AccessLogPanel />);
+
+    await findByText('Jerry Law · ADMIN');
+    await findByText('aad-jerry-law');
+  });
+
+  test('a null userDisplayName (pre-migration row, or a login that never resolved) renders "—" gracefully', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          logs: [accessLogRow({ userDisplayName: null, role: 'ADMIN', userId: 'aad-legacy-row' })],
+          count: 1, page: 1, limit: 50, totalCount: 1, hasMore: false,
+        }),
+        { status: 200 },
+      ),
+    ));
+
+    const { findByText } = render(<AccessLogPanel />);
+
+    // '—' with no name, but the role still shows and userId is still visible.
+    await findByText('— · ADMIN');
+    await findByText('aad-legacy-row');
+  });
+
+  test('a fully unresolved failed-login row (no name, no role, no userId) renders without crashing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          logs: [accessLogRow({ userDisplayName: null, role: null, userId: null, action: 'PIN_LOGIN_FAILURE', detail: null })],
+          count: 1, page: 1, limit: 50, totalCount: 1, hasMore: false,
+        }),
+        { status: 200 },
+      ),
+    ));
+
+    const { findByText } = render(<AccessLogPanel />);
+
+    await findByText('—', { selector: '.font-bold' });
   });
 });
 

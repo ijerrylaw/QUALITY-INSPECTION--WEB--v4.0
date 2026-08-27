@@ -359,7 +359,11 @@ m365AuthRouter.post('/m365-login', async (req: Request, res: Response) => {
     const jobTitleUpdate = jobTitle ? { jobTitle } : {};
 
     if (!aadObjectId || !userPrincipalName || !displayName) {
-      await logAccess(req, { userId: null, role: null, action: 'M365_LOGIN_FAILURE' });
+      // displayName itself may be one of the missing/empty fields here —
+      // that's exactly why it's read best-effort (`|| null`) rather than
+      // assumed present, unlike every branch below where validation has
+      // already guaranteed a non-empty value.
+      await logAccess(req, { userId: null, role: null, userDisplayName: displayName || null, action: 'M365_LOGIN_FAILURE' });
       res.status(400).json({ error: 'aadObjectId, userPrincipalName, and displayName are required' });
       return;
     }
@@ -368,7 +372,7 @@ m365AuthRouter.post('/m365-login', async (req: Request, res: Response) => {
     const byAad = await prisma.m365UserRole.findUnique({ where: { aadObjectId } });
     if (byAad) {
       if (!byAad.isActive) {
-        await logAccess(req, { userId: aadObjectId, role: byAad.role, action: 'M365_LOGIN_FAILURE' });
+        await logAccess(req, { userId: aadObjectId, role: byAad.role, userDisplayName: displayName, action: 'M365_LOGIN_FAILURE' });
         res.json({ role: null, status: 'revoked' });
         return;
       }
@@ -376,7 +380,7 @@ m365AuthRouter.post('/m365-login', async (req: Request, res: Response) => {
         where: { aadObjectId },
         data: { userPrincipalName, displayName, ...jobTitleUpdate },
       });
-      await logAccess(req, { userId: aadObjectId, role: byAad.role, action: 'M365_LOGIN_SUCCESS' });
+      await logAccess(req, { userId: aadObjectId, role: byAad.role, userDisplayName: displayName, action: 'M365_LOGIN_SUCCESS' });
       res.json({ role: byAad.role, status: 'active' });
       return;
     }
@@ -388,7 +392,7 @@ m365AuthRouter.post('/m365-login', async (req: Request, res: Response) => {
     });
     if (invited) {
       if (!invited.isActive) {
-        await logAccess(req, { userId: aadObjectId, role: invited.role, action: 'M365_LOGIN_FAILURE' });
+        await logAccess(req, { userId: aadObjectId, role: invited.role, userDisplayName: displayName, action: 'M365_LOGIN_FAILURE' });
         res.json({ role: null, status: 'revoked' });
         return;
       }
@@ -396,7 +400,7 @@ m365AuthRouter.post('/m365-login', async (req: Request, res: Response) => {
         where: { id: invited.id },
         data: { aadObjectId, displayName, ...jobTitleUpdate },
       });
-      await logAccess(req, { userId: aadObjectId, role: claimed.role, action: 'M365_LOGIN_SUCCESS' });
+      await logAccess(req, { userId: aadObjectId, role: claimed.role, userDisplayName: displayName, action: 'M365_LOGIN_SUCCESS' });
       res.json({ role: claimed.role, status: 'invite-claimed' });
       return;
     }
@@ -406,7 +410,7 @@ m365AuthRouter.post('/m365-login', async (req: Request, res: Response) => {
     // auto-provision-pending behavior.
     const totalRows = await prisma.m365UserRole.count();
     if (totalRows === 0) {
-      await logAccess(req, { userId: aadObjectId, role: null, action: 'M365_LOGIN_SUCCESS' });
+      await logAccess(req, { userId: aadObjectId, role: null, userDisplayName: displayName, action: 'M365_LOGIN_SUCCESS' });
       res.json({ role: null, status: 'bootstrap-eligible' });
       return;
     }
@@ -417,7 +421,7 @@ m365AuthRouter.post('/m365-login', async (req: Request, res: Response) => {
       update: { userPrincipalName, displayName, ...jobTitleUpdate },
       create: { aadObjectId, userPrincipalName, displayName, role: null, ...jobTitleUpdate },
     });
-    await logAccess(req, { userId: aadObjectId, role: created.role, action: 'M365_LOGIN_SUCCESS' });
+    await logAccess(req, { userId: aadObjectId, role: created.role, userDisplayName: displayName, action: 'M365_LOGIN_SUCCESS' });
     res.json({ role: created.role, status: 'pending' });
   } catch (error) {
     console.error('[POST /api/auth/m365-login] Error:', error);
