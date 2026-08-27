@@ -5364,3 +5364,82 @@ diagnosed above), then restored the fix and confirmed green again.
 in `inspectionResultsColumnAlignment.test.tsx`; the other 21 unchanged and
 unaffected — no test asserted the removed "none recorded" text or footer
 sentence), including "THE GUARD" width-regression test confirmed by name.
+
+---
+
+## 39. Inspection Results Panel — Layout & Content Revision — Shipped 2026-08-27
+
+Jerry's live browser review of §38 called for reversing two of that pass's
+own decisions and rebalancing column widths now that both tables' ACTUAL
+content was changing shape. Implemented fresh per the new spec, not patched
+onto the old behavior — several file-header doc comments describing the
+old architecture as a "locked decision" were rewritten, not left
+contradicting the code beneath them.
+
+**Column widths rebalanced.** NAME narrowed 140px→100px, TARGET widened
+170px→220px, ACTUAL widened 110px→150px (RESULT unchanged,
+`min-w-[90px] ml-auto`) — in both files' data rows and header rows
+together, so they can't drift apart again. TARGET's new width was sized so
+Defects' worst-case content (AQL level chip + the longer eval-mode word
+`CUMULATIVE` + a real Ac/Re chip) fits on one line — confirmed by real
+layout measurement in `aqlCategoryAnalysisPanel.test.tsx`, not assumed.
+That measurement caught a real flaw in its own first draft: an initial
+"do all three chips share the same `top`" assertion produced a false
+positive for "wrapped" against genuinely single-line content, because a
+plain text span and a padded/bordered chip land at very slightly different
+`top` offsets under `items-center` even on the same line. Replaced with a
+"left edges strictly increasing, last chip's right edge inside the box"
+check, then validated both directions: confirmed it correctly PASSES at
+220px, and confirmed it correctly FAILS when temporarily reverted to the
+old 170px (chip 3 visibly jumping to a smaller `left`, i.e. wrapping to a
+new line) — this exact 220px value was not guessed, it was measured against
+real rendered content and then proven sufficient by removing the width
+constraint entirely and measuring the natural content extent (~204px).
+
+**Dimensions' ACTUAL column — expand removed, not hidden.** The
+click-to-expand-to-raw-slots feature from the immediately preceding session
+(§38) is gone entirely: no `useState`, no chevron, no `<button>` — `git
+grep` for `button` inside `DimensionsPanel.tsx` now returns nothing, and a
+test asserts exactly that (`querySelectorAll('button').length === 0`).
+ACTUAL now always shows `MIN x / MAX y / AVG z` directly. For a failed
+graded row, a second stacked line lists the SPECIFIC out-of-spec raw
+readings — `OUT OF SPEC: 0.22mm, 0.21mm`, not every slot, verified with a
+fixture where only 2 of 5 slots fail. Both the triplet and the list reuse
+`row.slots`/`row.slotFails` — data that was already frozen and already
+wired in for the now-removed expand feature two sessions ago; this is a
+display change on top of existing data, no new computation, no backend
+touch. The legacy NOT-FROZEN Glove Weight row is the one exception,
+unchanged from before: it shows only its single recorded value, since
+min/max/avg would all be that same placeholder number, not real per-slot
+data.
+
+**Defects' Actual AQL Achieved relocated from RESULT into ACTUAL,** beside
+the defect count (`3 found` · `ACTUAL 1.0` as two elements in the same
+button) — explicitly reversing §38's own placement decision. RESULT now
+holds the Verdict badge only. `ActualAqlBadge` itself is byte-for-byte
+unchanged — same component, same indigo/rose pill geometry — only where it
+renders moved. Click-to-expand for the per-defect-type pill breakdown
+(a separate, unrelated interaction) is untouched — new coverage in
+`aqlCategoryAnalysisPanel.test.tsx` proves it still works exactly as
+before.
+
+**Tests.** New `aqlCategoryAnalysisPanel.test.tsx` — the first dedicated
+test file for this component; previously only
+`inspectionResultsColumnAlignment.test.tsx` touched it, and only for column
+widths, never content placement. `dimensionsPanel.test.tsx` rewritten:
+removed `expandRow()` and every expand-dependent assertion, added coverage
+for the always-visible MIN/MAX/AVG triplet, the out-of-spec list's
+exactness (only the actually-failed values, not all five), and the
+no-button invariant. The old "structural parity: same row height" test was
+removed outright, not patched — it's no longer a valid invariant once a
+failing row's out-of-spec line legitimately makes it taller than a
+compliant row's, which is this design's intended behavior, not a
+regression.
+
+**Verification:** `tsc` clean both sides; all 28 Vitest tests green (8 in
+`dimensionsPanel.test.tsx`, rewritten; 6 new in
+`aqlCategoryAnalysisPanel.test.tsx`; the remaining 14 unchanged, including
+`inspectionResultsColumnAlignment.test.tsx`'s 2 tests re-run — not
+assumed — and confirmed still passing under the new shared width values),
+including "THE GUARD" width-regression test confirmed by name in a verbose
+run.
