@@ -196,10 +196,59 @@ describe('DimensionsPanel', () => {
     const { getByText, container } = render(<DimensionsPanel rows={[ROWS[2]!]} />);
     expect(getByText('RECORD ONLY')).toBeTruthy();
     expect(getByText('—')).toBeTruthy();
-    expectText(container, 'MIN : 1mm');
-    expectText(container, 'MAX : 1.20mm');
-    expectText(container, 'AVG : 1.10mm');
+    // Precision follows the raw readings: this row's slots are 1-decimal
+    // ('1.0', '1.1', '1.2') so MIN/MAX/AVG render at 1 decimal — not '1mm'
+    // (integer-trimmed) or '1.20mm' (fixed 2dp), both of which the old
+    // formatNum would have produced.
+    expectText(container, 'MIN : 1.0mm');
+    expectText(container, 'MAX : 1.2mm');
+    expectText(container, 'AVG : 1.1mm');
     expect(container.textContent).not.toContain('OUT OF SPEC');
+  });
+
+  test('MIN/MAX/AVG precision matches the recorded readings — a 3-decimal dimension is never shown rounded to 2', () => {
+    const fingerThickness: DimensionRow = {
+      id: 'fingerThickness',
+      name: 'FINGER THICKNESS',
+      unit: 'mm',
+      measured: { min: 0.049, max: 0.049, avg: 0.049 },
+      failed: true,
+      isGraded: true,
+      threshold: 0.045,
+      maxThreshold: 0.048,
+      isMin: false,
+      hasSnapshot: true,
+      slots: ['0.049', '0.049', '0.049', '0.049', '0.049'],
+      slotFails: [true, true, true, true, true],
+    };
+    const { container } = render(<div style={{ width: '1400px' }}><DimensionsPanel rows={[fingerThickness]} /></div>);
+    // MIN/MAX/AVG at 3 decimals (would have been '0.05mm' under the old fixed
+    // toFixed(2) rule).
+    expectText(container, 'MIN : 0.049mm');
+    expectText(container, 'MAX : 0.049mm');
+    expectText(container, 'AVG : 0.049mm');
+    expect(container.textContent).not.toContain('0.05mm');
+    // Spec range also follows the 3-decimal precision.
+    expectText(container, '0.045mm – 0.048mm');
+
+    // Out-of-spec list: all 5 failing readings on ONE line, comma-separated,
+    // no wrap — the ACTUAL box is a fixed width sized for exactly this.
+    const listSpan = findByTextContent(container, '0.049mm, 0.049mm, 0.049mm, 0.049mm, 0.049mm');
+    expect(listSpan.className).toContain('whitespace-nowrap');
+    expect(listSpan.getBoundingClientRect().height).toBeLessThan(28); // single text line, not wrapped to two
+    // ...and it actually FITS inside the fixed ACTUAL column (w-[400px]) —
+    // not merely clipped/overflowing because of whitespace-nowrap.
+    const actualCol = listSpan.closest('.w-\\[400px\\]') as HTMLElement;
+    expect(actualCol).toBeTruthy();
+    expect(listSpan.getBoundingClientRect().right).toBeLessThanOrEqual(
+      actualCol.getBoundingClientRect().right + 0.5,
+    );
+
+    // MIN/MAX/AVG line is also single-line (nowrap).
+    const minSpan = findByTextContent(container, 'MIN : 0.049mm');
+    const mmaLine = minSpan.parentElement as HTMLElement;
+    expect(mmaLine.className).toContain('whitespace-nowrap');
+    expect(mmaLine.getBoundingClientRect().height).toBeLessThan(28);
   });
 
   test('isMin dimension shows a "≥X" spec range with no upper cap', () => {

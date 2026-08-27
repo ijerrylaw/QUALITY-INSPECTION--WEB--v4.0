@@ -116,6 +116,31 @@ describe('Inspection Results: TARGET/ACTUAL column widths match between tables',
     defects.unmount();
   });
 
+  test('ACTUAL sits directly after TARGET (one gap-x-3 apart), not drifted toward the row centre', () => {
+    const dims = render(<div style={{ width: '1400px' }}><DimensionsPanel rows={DIMENSION_ROWS} /></div>);
+    const defects = render(<div style={{ width: '1400px' }}><AqlCategoryAnalysisPanel
+      categoryAnalysis={CATEGORY_ANALYSIS}
+      unclassified={[]}
+      anyFail={false}
+      noProfileLinked={false}
+      previewStatus="snapshot"
+    /></div>);
+
+    for (const { container } of [dims, defects]) {
+      const flexRow = container.querySelector('.px-4.py-3 .flex.items-center.flex-wrap') as HTMLElement;
+      const target = flexRow.children[1] as HTMLElement;
+      const actual = flexRow.children[2] as HTMLElement;
+      const gap = actual.getBoundingClientRect().left - target.getBoundingClientRect().right;
+      // gap-x-3 === 0.75rem === 12px. The old `flex-1 justify-center` spacer
+      // pushed this to ~260px+ in this 1400px-wide wrapper.
+      expect(gap).toBeGreaterThan(8);
+      expect(gap).toBeLessThan(20);
+    }
+
+    dims.unmount();
+    defects.unmount();
+  });
+
   test('the header rows of both tables also align with each other and with their own data rows', () => {
     const dims = render(<div style={{ width: '1400px' }}><DimensionsPanel rows={DIMENSION_ROWS} /></div>);
     const defects = render(<div style={{ width: '1400px' }}><AqlCategoryAnalysisPanel

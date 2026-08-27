@@ -47,34 +47,42 @@
  *
  * Column scheme is shared with AqlCategoryAnalysisPanel.tsx so both tables'
  * header rows align with their own data rows and with EACH OTHER: NAME
- * `w-[100px]`, TARGET `w-[220px]`, ACTUAL `w-[260px]`, RESULT `w-[110px]`
+ * `w-[100px]`, TARGET `w-[220px]`, ACTUAL `w-[400px]`, RESULT `w-[110px]`
  * (all `shrink-0`). Duplicated here as literal class strings (not a shared
  * JS constant) — Tailwind's JIT scanner needs literal strings in source,
  * and no existing pattern in this codebase builds classNames from a shared
  * constant.
  *
- * ACTUAL COLUMN POSITION (2026-08-27, layout adjustment): the fixed-width
- * ACTUAL box is wrapped in a `flex-1 justify-center` spacer, both in the
- * header row and every data row, so it sits genuinely centered in whatever
- * space remains between TARGET and RESULT rather than hugging TARGET's
- * right edge (text inside ACTUAL stays left-aligned — only the column's own
- * position shifted). RESULT dropped its `ml-auto`: the spacer already
- * consumes all leftover space, so RESULT reaches the row's true right edge
- * through ordinary flex flow.
+ * ACTUAL COLUMN POSITION (2026-08-27, layout/content revision): the
+ * `flex-1 justify-center` centering spacer that briefly wrapped the ACTUAL
+ * box was REMOVED, both here and in AqlCategoryAnalysisPanel.tsx. ACTUAL now
+ * sits directly after TARGET (hugging its right edge) rather than drifting
+ * toward the row's centre — with a wide ACTUAL column the leftover space
+ * between TARGET and RESULT was large, so centring pushed ACTUAL a long way
+ * off TARGET and the gap read as a layout gap. RESULT regained `ml-auto`
+ * (safe now that it is a genuine fixed `w-`, not the `min-w-` that made
+ * `ml-auto` unstable before) so it stays pinned to the row's right edge.
+ *
+ * ACTUAL was also widened `w-[260px]` → `w-[400px]` (both files): a failed
+ * dimension's out-of-spec list can carry up to 5 raw readings at 3-decimal
+ * precision (`0.049mm, 0.049mm, …`), which must render on ONE line, no wrap
+ * — 400px fits that worst case. Both ACTUAL lines (the out-of-spec list and
+ * the MIN/MAX/AVG line) carry `whitespace-nowrap` so neither can wrap
+ * inside the box; the fixed width, not wrapping, is what keeps every row's
+ * ACTUAL cell one line tall regardless of content length.
  *
  * All four columns are fixed (`w-`), not floored (`min-w-`). `min-w-` only
  * sets a lower bound: content wider than the breakpoint grows the flex item
  * past it — this bit twice: first for TARGET (AqlCategoryAnalysisPanel.tsx's
  * variable 2–4-chip cluster reliably grew past a shared `min-w-170px`,
  * misaligning it against this file's own always-short TARGET content — see
- * that file's root-cause comment), then again for RESULT once it stopped
- * being pinned by `ml-auto` (layout adjustment, 2026-08-27): a `min-w-`
- * RESULT let badge text length ("COMPLIANT" vs "PASS") change how much
- * space the new ACTUAL-centering spacer got, shifting ACTUAL's position
- * row-to-row. Both are now genuinely fixed for the same reason. TARGET/NAME
- * were rebalanced (2026-08-27, layout/content revision) — TARGET widened,
- * NAME narrowed — so Defects' worst-case TARGET content (AQL level + eval
- * mode + Ac/Re) fits on one line; see that file for the exact reasoning.
+ * that file's root-cause comment), then again for RESULT (a `min-w-` RESULT
+ * let badge text length, "COMPLIANT" vs "PASS", change how much space was
+ * left over, shifting ACTUAL's position row-to-row). Both are now genuinely
+ * fixed for the same reason. TARGET/NAME were rebalanced (2026-08-27,
+ * layout/content revision) — TARGET widened, NAME narrowed — so Defects'
+ * worst-case TARGET content (AQL level + eval mode + Ac/Re) fits on one
+ * line; see that file for the exact reasoning.
  *
  * ACTUAL COLUMN REDESIGN (2026-08-27, layout/content revision): the
  * click-to-expand interaction from the immediately preceding session was
@@ -120,9 +128,31 @@ export interface DimensionsPanelProps {
   rows: DimensionRow[];
 }
 
-/** Trims to at most 2 decimals without padding integers with trailing zeros. */
-function formatNum(n: number): string {
-  return Number.isInteger(n) ? n.toFixed(0) : n.toFixed(2);
+/** Decimal places in a raw reading string: "0.049" → 3, "240" → 0, "1.0" → 1. */
+function decimalsIn(s: string): number {
+  const i = s.indexOf('.');
+  return i === -1 ? 0 : s.length - i - 1;
+}
+
+/**
+ * How many decimal places to render this row's derived numbers — MIN/MAX/AVG
+ * AND the spec range — at. Taken from the widest precision the operator
+ * actually recorded in `row.slots`, so a dimension keyed in to 3 decimals
+ * (Finger Thickness, `0.049mm`) is never silently shown rounded to 2
+ * (`0.05mm`). A fixed `toFixed(2)` rule was the bug this replaces. Falls
+ * back to 2dp only when a row carries no usable raw slots (legacy shape).
+ * Purely a display choice — the frozen numeric values are untouched.
+ */
+function rowDecimals(row: DimensionRow): number {
+  const seen = row.slots
+    .filter((s) => s.trim() !== '' && Number.isFinite(Number(s)))
+    .map(decimalsIn);
+  return seen.length > 0 ? Math.max(...seen) : 2;
+}
+
+/** Format a derived number at the row's data-derived precision. */
+function formatNum(n: number, decimals: number): string {
+  return Number.isFinite(n) ? n.toFixed(decimals) : String(n);
 }
 
 function SpecRangeCell({ row }: { row: DimensionRow }) {
@@ -130,15 +160,16 @@ function SpecRangeCell({ row }: { row: DimensionRow }) {
     return <span className="text-xs font-mono text-muted">—</span>;
   }
   const { threshold, maxThreshold, isMin, unit } = row;
+  const dp = rowDecimals(row);
   if (isMin) {
-    return <span className="text-xs font-mono text-primary">≥{formatNum(threshold)}{unit}</span>;
+    return <span className="text-xs font-mono text-primary">≥{formatNum(threshold, dp)}{unit}</span>;
   }
   if (!Number.isFinite(maxThreshold)) {
-    return <span className="text-xs font-mono text-primary">≥{formatNum(threshold)}{unit}</span>;
+    return <span className="text-xs font-mono text-primary">≥{formatNum(threshold, dp)}{unit}</span>;
   }
   return (
     <span className="text-xs font-mono text-primary">
-      {formatNum(threshold)}{unit} – {formatNum(maxThreshold)}{unit}
+      {formatNum(threshold, dp)}{unit} – {formatNum(maxThreshold, dp)}{unit}
     </span>
   );
 }
@@ -196,12 +227,14 @@ function ActualCell({ row }: { row: DimensionRow }) {
     return <span className="text-sm font-mono text-muted">—</span>;
   }
 
+  const dp = rowDecimals(row);
+
   if (!row.hasSnapshot) {
     // Legacy row: min === max === avg (the same placeholder value three
     // times over) is not real per-slot data — show the single value only.
     return (
       <span className="text-sm font-mono text-primary">
-        {formatNum(row.measured.avg)}{row.unit}
+        {formatNum(row.measured.avg, dp)}{row.unit}
       </span>
     );
   }
@@ -214,14 +247,14 @@ function ActualCell({ row }: { row: DimensionRow }) {
   return (
     <div className="flex flex-col gap-0.5">
       {showOutOfSpec && (
-        <span className="text-sm font-mono text-rose-400">
+        <span className="text-sm font-mono text-rose-400 whitespace-nowrap">
           {failingSlots.map((v) => `${v}${row.unit}`).join(', ')}
         </span>
       )}
-      <div className="flex items-center gap-x-3">
-        <span className="text-xs font-mono text-muted">MIN : {formatNum(min)}{row.unit}</span>
-        <span className="text-xs font-mono text-muted">MAX : {formatNum(max)}{row.unit}</span>
-        <span className="text-xs font-mono text-muted">AVG : {formatNum(avg)}{row.unit}</span>
+      <div className="flex items-center gap-x-3 whitespace-nowrap">
+        <span className="text-xs font-mono text-muted">MIN : {formatNum(min, dp)}{row.unit}</span>
+        <span className="text-xs font-mono text-muted">MAX : {formatNum(max, dp)}{row.unit}</span>
+        <span className="text-xs font-mono text-muted">AVG : {formatNum(avg, dp)}{row.unit}</span>
       </div>
     </div>
   );
@@ -256,24 +289,20 @@ function DimensionRowView({ row }: { row: DimensionRow }) {
         </div>
 
         {/* Column: ACTUAL — always-visible MIN/MAX/AVG (+ out-of-spec list when
-            applicable). Wrapped in a `flex-1 justify-center` spacer (layout
-            adjustment, 2026-08-27) so the fixed-width ACTUAL box sits
-            genuinely centered in whatever space remains between TARGET and
-            RESULT, rather than hugging TARGET's right edge — text inside
-            ACTUAL itself stays left-aligned; only the column's own position
-            shifts. `min-w-0` is the standard flex fix allowing a flex-grow
-            item to actually shrink below its content's natural width when
-            needed. RESULT no longer needs `ml-auto` — this spacer already
-            consumes 100% of the leftover space, so RESULT lands at the row's
-            true right edge through ordinary flex flow. */}
-        <div className="flex-1 flex justify-center min-w-0">
-          <div className="w-[260px] shrink-0">
-            <ActualCell row={row} />
-          </div>
+            applicable). Sits directly after TARGET (no centering spacer — see
+            the file header): a genuine fixed `w-[400px]`, sized for the
+            worst-case out-of-spec list (5 readings at 3-decimal precision on
+            one line). The fixed width is what holds every row's ACTUAL cell
+            to one line tall — the MIN/MAX/AVG line and the out-of-spec list
+            both carry `whitespace-nowrap` inside ActualCell. */}
+        <div className="w-[400px] shrink-0">
+          <ActualCell row={row} />
         </div>
 
-        {/* Column: RESULT */}
-        <div className="w-[110px] shrink-0 flex justify-end">
+        {/* Column: RESULT — `ml-auto` pins it to the row's right edge (safe:
+            RESULT is a genuine fixed `w-`, not the `min-w-` that made
+            `ml-auto` unstable in an earlier revision). */}
+        <div className="w-[110px] shrink-0 flex justify-end ml-auto">
           <ComplianceBadge row={row} />
         </div>
       </div>
@@ -297,10 +326,8 @@ export function DimensionsPanel({ rows }: DimensionsPanelProps) {
       <div className="px-4 py-2 flex items-center gap-x-3 border-b border-gray-800/50">
         <span className="w-[100px] shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[220px] shrink-0">Target</span>
-        <div className="flex-1 flex justify-center min-w-0">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[260px] shrink-0">Actual</span>
-        </div>
-        <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[110px] shrink-0 text-right">Result</span>
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[400px] shrink-0">Actual</span>
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[110px] shrink-0 text-right ml-auto">Result</span>
       </div>
 
       <div className="divide-y divide-gray-800/50">

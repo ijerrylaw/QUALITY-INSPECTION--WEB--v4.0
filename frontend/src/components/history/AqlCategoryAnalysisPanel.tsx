@@ -138,27 +138,25 @@
  * `ActualAqlBadge` itself is unchanged (same component, same indigo/rose
  * pill geometry) — only where it's rendered moved.
  *
- * LAYOUT ADJUSTMENT (2026-08-27, follow-up): ACTUAL widened again,
- * 150px→260px, and repositioned — it now sits inside a `flex-1
- * justify-center` spacer between TARGET and RESULT (both in the header row
- * and every `CategoryRow`) instead of hugging TARGET's right edge, so it
- * reads as genuinely centered in the row rather than crowded against
- * TARGET. Text inside the ACTUAL button stays left-aligned; only the
- * column's own position shifted. RESULT dropped its `ml-auto` — the spacer
- * already consumes all leftover space, so RESULT reaches the row's true
- * right edge through ordinary flex flow. Same pattern applied identically
- * in DimensionsPanel.tsx, whose own ACTUAL content (MIN/MAX/AVG, potentially
- * with an out-of-spec line) also needed the wider box.
+ * LAYOUT ADJUSTMENT (2026-08-27, follow-up): ACTUAL widened 150px→260px.
+ * RESULT converted from `min-w-[90px]` to a genuine `w-[110px]` — a real
+ * bug caught by the alignment test: its `min-w-` let badge text length
+ * ("PASS" here vs. e.g. "COMPLIANT" in DimensionsPanel.tsx) change how much
+ * of the row RESULT consumed, shifting the rest of the layout by which
+ * verdict happened to render. Same root cause as TARGET's own `min-w-`→`w-`
+ * fix above.
  *
- * That same follow-up also converted RESULT from `min-w-[90px]` to a
- * genuine `w-[110px]` — a real bug caught by the alignment test, not a
- * cosmetic tidy-up. Once `ml-auto` no longer pinned RESULT, its `min-w-`
- * let badge text length ("PASS" here vs. e.g. "COMPLIANT" in
- * DimensionsPanel.tsx) change how much of the row RESULT actually
- * consumed, which changed how much space was left for the ACTUAL-centering
- * spacer — shifting ACTUAL's position depending on which verdict badge
- * happened to render. Same root cause as TARGET's own `min-w-`→`w-` fix
- * above, recurring in a new column once the surrounding layout changed.
+ * LAYOUT/CONTENT REVISION (2026-08-27, follow-up 2): ACTUAL widened again
+ * 260px→400px and the `flex-1 justify-center` centering spacer that briefly
+ * wrapped it was REMOVED (both here and in DimensionsPanel.tsx). ACTUAL now
+ * sits directly after TARGET again; RESULT regained `ml-auto` to stay
+ * pinned right (safe now it is a genuine fixed `w-`). The driver is
+ * DimensionsPanel.tsx's ACTUAL content — a failed dimension's out-of-spec
+ * list needs up to 5 readings at 3-decimal precision on one line, and 400px
+ * fits that worst case; this file follows the same width purely to keep the
+ * two tables' columns aligned under the shared INSPECTION RESULTS header
+ * (its own ACTUAL content is short, so the extra width is mostly whitespace
+ * here — an accepted trade for cross-table alignment).
  */
 
 import { useState } from 'react';
@@ -366,21 +364,18 @@ function CategoryRow({ cat }: { cat: CategoryAnalysis }) {
         {/* Column: ACTUAL — Defect Count + Actual AQL badge (moved here from
             RESULT, layout & content revision 2026-08-27), collapsed by
             default, click-to-expand reveals the defect pills below.
-            Click-to-expand interaction itself is unchanged.
-            Wrapped in a `flex-1 justify-center` spacer (layout adjustment,
-            2026-08-27) so the fixed-width button sits genuinely centered in
-            whatever space remains between TARGET and RESULT, matching
-            DimensionsPanel.tsx's identical treatment — see that file's
-            comment on the same pattern for the full reasoning. Text inside
-            the button stays left-aligned; only the column's own position
-            shifted. RESULT no longer needs `ml-auto` — this spacer already
-            consumes 100% of the leftover space. */}
-        <div className="flex-1 flex justify-center min-w-0">
+            Click-to-expand interaction itself is unchanged. Sits directly
+            after TARGET (no centering spacer — see the file header): a
+            genuine fixed `w-[400px]` column slot matching DimensionsPanel.tsx
+            so the two tables stay aligned. The button itself stays sized to
+            its content (left-aligned) inside that slot, rather than being a
+            400px-wide click target. */}
+        <div className="w-[400px] shrink-0">
           <button
             type="button"
             onClick={() => hasDefects && setExpanded((e) => !e)}
             disabled={!hasDefects}
-            className={`flex items-center gap-1.5 w-[260px] shrink-0 outline-none ${
+            className={`flex items-center gap-1.5 outline-none ${
               hasDefects ? 'cursor-pointer hover:opacity-80' : 'cursor-default'
             }`}
             title={hasDefects ? (expanded ? 'Collapse defect breakdown' : 'Expand defect breakdown') : undefined}
@@ -401,8 +396,10 @@ function CategoryRow({ cat }: { cat: CategoryAnalysis }) {
           </button>
         </div>
 
-        {/* Column: RESULT — Verdict badge only (Actual AQL moved into ACTUAL above) */}
-        <div className="flex items-center gap-2 w-[110px] shrink-0 justify-end">
+        {/* Column: RESULT — Verdict badge only (Actual AQL moved into ACTUAL
+            above). `ml-auto` pins it to the row's right edge — safe now
+            RESULT is a genuine fixed `w-`, not a `min-w-`. */}
+        <div className="flex items-center gap-2 w-[110px] shrink-0 justify-end ml-auto">
           {!isNA && cat.evaluationMode && cat.evaluationMode !== '' && (
             isFail ? (
               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-500/10 border border-rose-500/30 text-rose-400">
@@ -509,10 +506,8 @@ export function AqlCategoryAnalysisPanel({
       <div className="px-4 py-2 flex items-center gap-x-3 border-b border-gray-800/50">
         <span className="w-[100px] shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[220px] shrink-0">Target</span>
-        <div className="flex-1 flex justify-center min-w-0">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[260px] shrink-0">Actual</span>
-        </div>
-        <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[110px] shrink-0 text-right">Result</span>
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[400px] shrink-0">Actual</span>
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[110px] shrink-0 text-right ml-auto">Result</span>
       </div>
 
       {/* ── Per-category rows, unclassified block, empty state ──────────── */}
