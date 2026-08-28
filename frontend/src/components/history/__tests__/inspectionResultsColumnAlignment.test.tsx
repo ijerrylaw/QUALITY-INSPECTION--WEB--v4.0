@@ -169,6 +169,14 @@ describe('Inspection Results: TARGET/ACTUAL column widths match between tables',
     defects.unmount();
   });
 
+  // NOTE: index.css pulls Inter from Google Fonts via `@import url(...)`,
+  // which never resolves in this headless runner — so label widths here are
+  // measured in a *fallback* face, ~1-2px narrower than real Inter. That is
+  // exactly how the w-[160px] round passed this test yet still wrapped live.
+  // The NAME column is now w-[200px] with a ~50px buffer over real Inter's
+  // "BEADING THICKNESS" (149.6px, measured in a real Chromium with the font
+  // loaded), so this test has margin to spare even accounting for the
+  // fallback-font gap.
   test('every row label in both tables renders on a single line inside the NAME column — no wrap, no overflow', () => {
     const allDimNames = ['GLOVE WEIGHT', 'GLOVE LENGTH', 'PALM WIDTH', 'CUFF THICKNESS', 'PALM THICKNESS', 'FINGER THICKNESS', 'BEADING THICKNESS'];
     const dimRows: DimensionRow[] = allDimNames.map((name) => ({
@@ -195,8 +203,10 @@ describe('Inspection Results: TARGET/ACTUAL column widths match between tables',
         // Single line: rendered height is one line-height, not two.
         const lineHeight = parseFloat(getComputedStyle(span).lineHeight);
         expect(span.getBoundingClientRect().height).toBeLessThanOrEqual(lineHeight + 1);
-        // No overflow: the text fits within the fixed 160px column box.
+        // No overflow: the text fits within the fixed 200px column box.
         expect(span.scrollWidth).toBeLessThanOrEqual(span.clientWidth + 1);
+        // And the box really is the widened 200px (guards against a silent revert).
+        expect(span.clientWidth).toBeGreaterThanOrEqual(199);
       }
     }
 

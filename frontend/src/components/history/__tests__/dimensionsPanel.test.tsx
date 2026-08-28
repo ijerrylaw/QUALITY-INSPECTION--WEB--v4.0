@@ -31,6 +31,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
 import { DimensionsPanel } from '../DimensionsPanel';
 import type { DimensionRow } from '../DimensionsPanel';
+import { FIXED_DIM_WEIGHT } from '../../../lib/fixedDimensions';
 import '../../../index.css';
 
 afterEach(() => {
@@ -270,7 +271,7 @@ describe('DimensionsPanel', () => {
 
   test('a FROZEN Glove Weight row (single recorded reading) shows only its value — no MIN/MAX/AVG', () => {
     const frozenWeight: DimensionRow = {
-      id: '__fixed_weight__',
+      id: FIXED_DIM_WEIGHT,
       name: 'GLOVE WEIGHT',
       unit: 'g',
       measured: { min: 2.22, max: 2.22, avg: 2.22 },
@@ -293,7 +294,7 @@ describe('DimensionsPanel', () => {
 
   test('a FROZEN out-of-spec Glove Weight row shows its single value in rose, still no MIN/MAX/AVG', () => {
     const failedWeight: DimensionRow = {
-      id: '__fixed_weight__',
+      id: FIXED_DIM_WEIGHT,
       name: 'GLOVE WEIGHT',
       unit: 'g',
       measured: { min: 2.22, max: 2.22, avg: 2.22 },
@@ -310,6 +311,53 @@ describe('DimensionsPanel', () => {
     expect(getByText('OUT OF SPEC')).toBeTruthy();
     const valueSpan = findByTextContent(container, '2.22g');
     expect(valueSpan.className).toContain('text-rose-400');
+    expect(container.textContent).not.toContain('MIN');
+    expect(container.textContent).not.toContain('AVG');
+  });
+
+  // Regression: a prior fix keyed the collapse on `row.slots.length === 1`
+  // only, and it did not fire live. Weight is now collapsed on its sentinel
+  // id regardless of what shape `slots` arrives in — length 3 (duplicated),
+  // length 0 (empty), whatever. These assert the id guard, not the length.
+  test('Glove Weight collapses to a single value even when slots arrives length 3 (duplicated)', () => {
+    const weird: DimensionRow = {
+      id: FIXED_DIM_WEIGHT,
+      name: 'GLOVE WEIGHT',
+      unit: 'g',
+      measured: { min: 2.22, max: 2.22, avg: 2.22 },
+      failed: false,
+      isGraded: true,
+      threshold: 2.30,
+      maxThreshold: 2.70,
+      isMin: false,
+      hasSnapshot: true,
+      slots: ['2.22', '2.22', '2.22'],
+      slotFails: [false, false, false],
+    };
+    const { container } = render(<DimensionsPanel rows={[weird]} />);
+    expectText(container, '2.22g');
+    expect(container.textContent).not.toContain('MIN');
+    expect(container.textContent).not.toContain('MAX');
+    expect(container.textContent).not.toContain('AVG');
+  });
+
+  test('Glove Weight collapses to a single value even when slots arrives empty', () => {
+    const empty: DimensionRow = {
+      id: FIXED_DIM_WEIGHT,
+      name: 'GLOVE WEIGHT',
+      unit: 'g',
+      measured: { min: 2.22, max: 2.22, avg: 2.22 },
+      failed: false,
+      isGraded: true,
+      threshold: 2.30,
+      maxThreshold: 2.70,
+      isMin: false,
+      hasSnapshot: true,
+      slots: [],
+      slotFails: [],
+    };
+    const { container } = render(<DimensionsPanel rows={[empty]} />);
+    expectText(container, '2.22g');
     expect(container.textContent).not.toContain('MIN');
     expect(container.textContent).not.toContain('AVG');
   });

@@ -47,22 +47,25 @@
  *
  * Column scheme is shared with AqlCategoryAnalysisPanel.tsx so both tables'
  * header rows align with their own data rows and with EACH OTHER: NAME
- * `w-[160px]`, TARGET `w-[220px]`, ACTUAL `w-[400px]`, RESULT `w-[110px]`
+ * `w-[200px]`, TARGET `w-[220px]`, ACTUAL `w-[400px]`, RESULT `w-[110px]`
  * (all `shrink-0`). Duplicated here as literal class strings (not a shared
  * JS constant) — Tailwind's JIT scanner needs literal strings in source,
  * and no existing pattern in this codebase builds classNames from a shared
  * constant.
  *
- * NAME COLUMN WIDTH (2026-08-27, layout revision): `w-[100px]` → `w-[160px]`.
- * At 100px the longer labels wrapped to two lines ("BEADING THICKNESS",
- * "FINGER THICKNESS", "CUFF/PALM THICKNESS"). 160px is the widest current
- * label ("BEADING THICKNESS", measured ~148px in Chromium at this file's
- * `text-sm font-semibold uppercase` Inter) plus a small buffer, so every
- * label in BOTH tables — dimension names here, category names
- * (AND/BARRIER/VISUALS) in the Defects table — renders on one line. The
- * label span also carries `whitespace-nowrap` so a future longer label
- * overflows visibly rather than silently wrapping and breaking row rhythm.
- * Genuine fixed `w-` (not `min-w-`), same reasoning as ACTUAL below.
+ * NAME COLUMN WIDTH (2026-08-28, layout revision): `w-[100px]` → `w-[160px]`
+ * → `w-[200px]`. The 160px round still wrapped in the real browser: the
+ * widest label "BEADING THICKNESS" measures **149.6px in real Chromium with
+ * Inter actually loaded** (the earlier ~148px measurement was taken in the
+ * headless test, where the Google-Fonts `@import` in index.css never
+ * resolves so a fallback face is measured — a false pass), leaving 160px
+ * with only ~10px of slack that any zoom above 100% ate. 200px = 149.6px +
+ * a deliberately generous ~50px buffer (covers ~130% browser zoom / future
+ * font-metric drift). Every label in BOTH tables — dimension names here,
+ * category names (AND/BARRIER/VISUALS) in the Defects table — fits on one
+ * line. `whitespace-nowrap` on the label span makes any still-wider future
+ * label overflow visibly rather than silently wrapping. Genuine fixed `w-`
+ * (not `min-w-`), same reasoning as ACTUAL below.
  *
  * ACTUAL COLUMN POSITION (2026-08-27, layout/content revision): the
  * `flex-1 justify-center` centering spacer that briefly wrapped the ACTUAL
@@ -108,6 +111,8 @@
  * gloveWeightSnapshot row and the legacy NOT-FROZEN one) shows just that
  * one value, no MIN/MAX/AVG. See ActualCell's own doc comment.
  */
+
+import { FIXED_DIM_WEIGHT } from '../../lib/fixedDimensions';
 
 export interface DimensionRow {
   id: string;
@@ -234,10 +239,12 @@ function ComplianceBadge({ row }: { row: DimensionRow }) {
  *
  * SINGLE-ENTRY EXCEPTION: Glove Weight is one recorded reading, not a
  * 5-slot measurement grid — MIN/MAX/AVG would each just be that same value.
- * Any row with a single slot (`slots.length === 1`) — the frozen
- * gloveWeightSnapshot row and the legacy NOT-FROZEN one alike — therefore
- * shows only its single value (rose if out of spec, primary otherwise), no
- * MIN/MAX/AVG line and no separate out-of-spec list.
+ * It renders as its single value only (rose if out of spec, primary
+ * otherwise), no MIN/MAX/AVG line and no separate out-of-spec list. The
+ * collapse fires on `row.id === FIXED_DIM_WEIGHT` (the definitive signal —
+ * Weight always carries that sentinel id), with `!hasSnapshot` and
+ * `slots.length === 1` as extra guards for the legacy shape and any other
+ * single-reading row.
  */
 function ActualCell({ row }: { row: DimensionRow }) {
   if (!row.measured) {
@@ -249,11 +256,20 @@ function ActualCell({ row }: { row: DimensionRow }) {
 
   // Single-entry field (Glove Weight — one recorded reading, not a 5-slot
   // stats object): MIN/MAX/AVG would all be that same value, so show the
-  // single value only. `slots.length === 1` catches both the frozen
-  // gloveWeightSnapshot row and the legacy NOT-FROZEN one; `!hasSnapshot` is
-  // kept as a belt-and-braces guard for the legacy shape. Rose when it's the
-  // out-of-spec value, primary otherwise.
-  if (!row.hasSnapshot || row.slots.length === 1) {
+  // single value only. Rose when it's the out-of-spec value, primary
+  // otherwise. Three independent guards, ANY of which collapses the row —
+  // deliberately redundant because a prior `slots.length === 1`-only version
+  // still rendered MIN/MAX/AVG for a real frozen Weight row in the live app:
+  //   - `row.id === FIXED_DIM_WEIGHT`: the definitive signal. Weight is the
+  //     only single-reading dimension and always carries this sentinel id
+  //     (buildDimensionRows, both the frozen and legacy branches) — this
+  //     holds no matter what shape `slots` arrives in.
+  //   - `!row.hasSnapshot`: the legacy pre-gloveWeightSnapshot shape.
+  //   - `row.slots.length === 1`: any other genuine single-reading row.
+  //     Kept at `=== 1` (not `<= 1`) so a 5-slot dimension that happens to
+  //     arrive with no raw slots still shows its frozen MIN/MAX/AVG stats
+  //     rather than collapsing to a bare average.
+  if (row.id === FIXED_DIM_WEIGHT || !row.hasSnapshot || row.slots.length === 1) {
     return (
       <span className={`text-sm font-mono ${outOfRange ? 'text-rose-400' : 'text-primary'}`}>
         {formatNum(row.measured.avg, dp)}{row.unit}
@@ -293,10 +309,11 @@ function DimensionRowView({ row }: { row: DimensionRow }) {
     <div className={`px-4 py-3 transition-colors ${outOfRange ? 'bg-rose-500/[0.04]' : ''}`}>
       <div className="flex items-center flex-wrap gap-y-1.5 gap-x-3">
 
-        {/* Column: NAME — `w-[160px]` sized to the widest current label
-            ("BEADING THICKNESS"); `whitespace-nowrap` keeps every label on
-            one line (see the file header). */}
-        <span className="text-sm font-semibold uppercase text-primary w-[160px] shrink-0 whitespace-nowrap">
+        {/* Column: NAME — `w-[200px]`: widest label "BEADING THICKNESS"
+            (~149.6px in real Chromium with Inter loaded) plus a generous
+            buffer for zoom/font drift; `whitespace-nowrap` keeps every label
+            on one line (see the file header). */}
+        <span className="text-sm font-semibold uppercase text-primary w-[200px] shrink-0 whitespace-nowrap">
           {row.name}
         </span>
 
@@ -347,7 +364,7 @@ export function DimensionsPanel({ rows }: DimensionsPanelProps) {
           matching the data rows below — see that file's root-cause comment
           on the TARGET column for why `min-w-` alone wasn't sufficient. */}
       <div className="px-4 py-2 flex items-center gap-x-3 border-b border-gray-800/50">
-        <span className="w-[160px] shrink-0" aria-hidden="true" />
+        <span className="w-[200px] shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[220px] shrink-0">Target</span>
         <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[400px] shrink-0">Actual</span>
         <span className="text-xs font-semibold uppercase tracking-wider text-muted w-[110px] shrink-0 text-right ml-auto">Result</span>
