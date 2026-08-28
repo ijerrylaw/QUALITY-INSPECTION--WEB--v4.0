@@ -19,12 +19,15 @@
  * assert this content is visible with zero interaction, and that no
  * button/toggle element exists at all.
  *
- * HIERARCHY SWAP (2026-08-27, follow-up): the out-of-spec list is now the
- * PRIMARY line (normal size, red) when present, with MIN/MAX/AVG demoted to
- * a smaller grey secondary line beneath it — the reverse of the original
- * ordering/weight. Format also changed from `MIN x / MAX y / AVG z` to
- * `MIN : x   MAX : y   AVG : z`. A compliant row (no out-of-spec line) shows
- * only the one secondary-styled MIN/MAX/AVG line.
+ * HIERARCHY (2026-08-28, revised): on an out-of-spec row, MIN/MAX/AVG is the
+ * PRIMARY line — first, larger (`text-sm`), white (`text-primary`) — and the
+ * specific out-of-spec reading(s) sit on a SECONDARY line beneath it:
+ * smaller (`text-xs`) but still red (`text-rose-400`). This reverses the
+ * 2026-08-27 arrangement that led with the red values. A compliant row (no
+ * out-of-spec line) still shows only its lone MIN/MAX/AVG line, and that
+ * line stays de-emphasized (`text-xs text-muted`) — the promotion to
+ * `text-sm text-primary` happens only when there's an out-of-spec line to
+ * outrank.
  */
 
 import { afterEach, describe, expect, test } from 'vitest';
@@ -157,16 +160,22 @@ describe('DimensionsPanel', () => {
     expect(container.querySelectorAll('button').length).toBe(0);
   });
 
-  test('COMPLIANT row shows only the secondary MIN/MAX/AVG line, no out-of-spec line', () => {
+  test('COMPLIANT row shows only the de-emphasized MIN/MAX/AVG line (text-xs text-muted, unchanged), no out-of-spec line', () => {
     const { getByText, container } = render(<DimensionsPanel rows={[ROWS[0]!]} />);
     expect(getByText('COMPLIANT')).toBeTruthy();
     expectText(container, 'MIN : 240mm');
     expectText(container, 'MAX : 244mm');
     expectText(container, 'AVG : 242mm');
     expect(container.textContent).not.toContain('OUT OF SPEC');
+    // Compliant rows are explicitly NOT affected by the hierarchy swap — the
+    // lone MIN/MAX/AVG line stays small and grey.
+    const minSpan = findByTextContent(container, 'MIN : 240mm');
+    expect(minSpan.className).toContain('text-xs');
+    expect(minSpan.className).toContain('text-muted');
+    expect(minSpan.className).not.toContain('text-primary');
   });
 
-  test('OUT OF SPEC row shows the out-of-spec list FIRST (primary line), listing exactly the failed slot values, with MIN/MAX/AVG demoted beneath it', () => {
+  test('OUT OF SPEC row leads with MIN/MAX/AVG (primary: larger, white) and puts the failed readings on a secondary line (smaller, still red)', () => {
     const { getByText, container } = render(<DimensionsPanel rows={[ROWS[1]!]} />);
     expect(getByText('OUT OF SPEC')).toBeTruthy();
     expectText(container, '0.16mm'); // spec range upper bound, TARGET column
@@ -175,22 +184,23 @@ describe('DimensionsPanel', () => {
     // "OUT OF SPEC:" label prefix (RESULT's own badge already says that).
     expectText(container, '0.22mm, 0.21mm');
     expect(container.textContent).not.toContain('0.18mm, ');
-    // Secondary MIN/MAX/AVG line still present, demoted beneath it.
     expectText(container, 'MIN : 0.18mm');
     expectText(container, 'MAX : 0.22mm');
     expectText(container, 'AVG : 0.20mm');
 
-    // Hierarchy: the out-of-spec span must render BEFORE the MIN/MAX/AVG
-    // row in DOM order (primary line first, secondary line second).
-    const outOfSpecSpan = findByTextContent(container, '0.22mm, 0.21mm');
     const minSpan = findByTextContent(container, 'MIN : 0.18mm');
-    expect(outOfSpecSpan.compareDocumentPosition(minSpan) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const outOfSpecSpan = findByTextContent(container, '0.22mm, 0.21mm');
 
-    // Primary line is normal size + red; secondary line is smaller + grey.
-    expect(outOfSpecSpan.className).toContain('text-sm');
+    // Hierarchy: MIN/MAX/AVG now renders BEFORE the out-of-spec line in DOM
+    // order (primary line first, secondary line second).
+    expect(minSpan.compareDocumentPosition(outOfSpecSpan) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // Primary line is larger + white; secondary line is smaller + still red.
+    expect(minSpan.className).toContain('text-sm');
+    expect(minSpan.className).toContain('text-primary');
+    expect(minSpan.className).not.toContain('text-muted');
+    expect(outOfSpecSpan.className).toContain('text-xs');
     expect(outOfSpecSpan.className).toContain('text-rose-400');
-    expect(minSpan.className).toContain('text-xs');
-    expect(minSpan.className).toContain('text-muted');
   });
 
   test('RECORD ONLY badge and a "—" spec range for a record-only dimension; MIN/MAX/AVG still shown, no out-of-spec line', () => {
@@ -250,6 +260,14 @@ describe('DimensionsPanel', () => {
     const mmaLine = minSpan.parentElement as HTMLElement;
     expect(mmaLine.className).toContain('whitespace-nowrap');
     expect(mmaLine.getBoundingClientRect().height).toBeLessThan(28);
+
+    // Same hierarchy swap applies to the multi-value case: MIN/MAX/AVG first
+    // (larger, white), the 5-value list second (smaller, still red).
+    expect(minSpan.compareDocumentPosition(listSpan) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(minSpan.className).toContain('text-sm');
+    expect(minSpan.className).toContain('text-primary');
+    expect(listSpan.className).toContain('text-xs');
+    expect(listSpan.className).toContain('text-rose-400');
   });
 
   test('isMin dimension shows a "≥X" spec range with no upper cap', () => {

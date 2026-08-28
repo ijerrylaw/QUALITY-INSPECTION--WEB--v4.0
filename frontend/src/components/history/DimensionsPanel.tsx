@@ -225,17 +225,17 @@ function ComplianceBadge({ row }: { row: DimensionRow }) {
 
 /**
  * The ACTUAL column's content — always visible, no interaction. Hierarchy
- * (2026-08-27, layout adjustment): the out-of-spec list is now the PRIMARY
- * line (normal size, red) when present, with MIN/MAX/AVG demoted to a
- * secondary line beneath it (smaller, grey) — the reverse of this cell's
- * original ordering/weight, since the failing values are what an inspector
- * actually needs to see first; the aggregate MIN/MAX/AVG is supporting
- * context, not the headline. A compliant row has no out-of-spec line at
- * all, so it renders as just the one (secondary-styled) MIN/MAX/AVG line —
- * MIN/MAX/AVG is styled the same de-emphasized way regardless of pass/fail,
- * since the failure signal now lives in the out-of-spec line and the
- * RESULT badge, not here. Both lines reuse `row.slots`/`row.slotFails` —
- * already-frozen data, just a different presentation of it.
+ * (2026-08-28, revised): when a row is out of spec, MIN/MAX/AVG is the
+ * PRIMARY line — larger (`text-sm`) and white (`text-primary`), since those
+ * are the actual calculated figures — and the specific out-of-spec
+ * reading(s) sit on a SECONDARY line beneath it: smaller (`text-xs`) but
+ * still red (`text-rose-400`), so the failure is still unmistakable, just
+ * no longer the headline. (This reverses the 2026-08-27 arrangement, which
+ * led with the red values.) A compliant row has no out-of-spec line at all,
+ * so its lone MIN/MAX/AVG line stays de-emphasized (`text-xs text-muted`) —
+ * the promotion to `text-sm text-primary` only happens when there's an
+ * out-of-spec line to outrank. Both lines reuse `row.slots`/`row.slotFails`
+ * — already-frozen data, just a different presentation of it.
  *
  * SINGLE-ENTRY EXCEPTION: Glove Weight is one recorded reading, not a
  * 5-slot measurement grid — MIN/MAX/AVG would each just be that same value.
@@ -281,18 +281,25 @@ function ActualCell({ row }: { row: DimensionRow }) {
   const failingSlots = row.slots.filter((_, i) => row.slotFails[i] === true);
   const showOutOfSpec = outOfRange && failingSlots.length > 0;
 
+  // When there's an out-of-spec line, MIN/MAX/AVG is the PRIMARY line
+  // (larger, white — the actual calculated figures lead) and the out-of-spec
+  // value list sits beneath it (smaller, still red). A compliant row has no
+  // out-of-spec line, so its lone MIN/MAX/AVG line stays de-emphasized
+  // (smaller, grey) — unchanged.
+  const mmaClass = showOutOfSpec ? 'text-sm text-primary' : 'text-xs text-muted';
+
   return (
     <div className="flex flex-col gap-0.5">
+      <div className="flex items-center gap-x-3 whitespace-nowrap">
+        <span className={`${mmaClass} font-mono`}>MIN : {formatNum(min, dp)}{row.unit}</span>
+        <span className={`${mmaClass} font-mono`}>MAX : {formatNum(max, dp)}{row.unit}</span>
+        <span className={`${mmaClass} font-mono`}>AVG : {formatNum(avg, dp)}{row.unit}</span>
+      </div>
       {showOutOfSpec && (
-        <span className="text-sm font-mono text-rose-400 whitespace-nowrap">
+        <span className="text-xs font-mono text-rose-400 whitespace-nowrap">
           {failingSlots.map((v) => `${v}${row.unit}`).join(', ')}
         </span>
       )}
-      <div className="flex items-center gap-x-3 whitespace-nowrap">
-        <span className="text-xs font-mono text-muted">MIN : {formatNum(min, dp)}{row.unit}</span>
-        <span className="text-xs font-mono text-muted">MAX : {formatNum(max, dp)}{row.unit}</span>
-        <span className="text-xs font-mono text-muted">AVG : {formatNum(avg, dp)}{row.unit}</span>
-      </div>
     </div>
   );
 }
