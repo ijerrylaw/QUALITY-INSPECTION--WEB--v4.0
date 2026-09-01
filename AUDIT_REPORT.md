@@ -544,3 +544,14 @@ with its full original context, reasoning, and verification trail.
     backend vitest harness matching the frontend toolchain, and port the
     GRANULAR 8/9/10-vs-Ac7 case to call the engine directly.
 
+34. **`StepReviewSubmit.tsx`'s "Total Defects Recorded" KPI folds N/A
+    fail-counts into a defect tally.** The KPI sums `cr.totalCount` across
+    all categories, including N/A (qualitative) — where `cr.totalCount` is
+    the FAIL-item count, not a true defect quantity. Same semantic category
+    as the per-category reason-line / Count-label bug fixed one level down
+    (2026-09-01, commit `9eced03`), just as a cross-category grand total
+    rather than a single category's display. Currently guarded by
+    `StepReviewSubmit.recordOnly.test.tsx` (asserts the KPI stays
+    server-verdict-derived) and intentionally left as-is — logged for future
+    consideration, not an active fix.
+
