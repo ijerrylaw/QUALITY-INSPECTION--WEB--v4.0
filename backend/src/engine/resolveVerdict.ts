@@ -124,6 +124,16 @@ export interface FrozenDefectItem {
   name: string;
   count: number;
   failing: boolean;
+  /**
+   * N/A (qualitative PASS/FAIL) categories only. For those, the shared `count`
+   * field carries a STATE CODE (1 = PASS, 2 = FAIL — ISO2859_MATH_ENGINE.md §2),
+   * not a quantity. This decodes it once at freeze time so no downstream reader
+   * has to re-interpret `count`. Absent for CUMULATIVE / GRANULAR items, whose
+   * `count` is a real defect tally. Both PASS and FAIL entries are kept in the
+   * frozen array for audit completeness — the panel filters to FAIL-only at
+   * render time, not here.
+   */
+  qualitativeState?: 'PASS' | 'FAIL';
 }
 
 /**
@@ -147,6 +157,18 @@ export interface FrozenCategoryAnalysis {
   evaluationMode: string;
   threshold: { ac: number; re: number } | null;
   totalCount: number;
+  /**
+   * How many defect-type definitions this category has in total — the denominator
+   * for the panel's "N of M failed" header. Captured BEFORE zero-count entries are
+   * dropped from `defectItems`, so it survives that filter.
+   *
+   * ABSENT on snapshots frozen before this field existed — readers must fall back
+   * to `defectItems.length` (the post-filter count). That fallback UNDERCOUNTS for
+   * those historical rows, because their zero-count defect types were already
+   * discarded at freeze time and cannot be recovered; it is simply the best
+   * number available for legacy rows.
+   */
+  totalDefectTypes?: number;
   /** true=PASS, false=FAIL, null=informational/not evaluated (empty evaluationMode) */
   passed: boolean | null;
   /**
@@ -184,19 +206,44 @@ function buildFrozenCategoryAnalysis(
   const resultsById = new Map(categoryResults.map((r) => [r.categoryId, r]));
 
   return categories.map((cat): FrozenCategoryAnalysis => {
+    const isQualitative = cat.evaluationMode === 'N/A';
+
     const catDefs = defectDefinitions.filter(
       (d) => d.currentClass === cat.name || d.currentClass === cat.id,
     );
 
-    const defectItemsRaw = catDefs
-      .map((d) => ({ id: d.id, name: d.name, count: defectCounts[d.id] ?? 0 }))
-      .filter((d) => d.count > 0);
+    // Denominator for the panel's "N of M failed" header — every defect-type
+    // definition mapped to this category, captured BEFORE the zero-count filter
+    // below discards types that were never recorded.
+    const totalDefectTypes = catDefs.length;
 
-    const totalCount = defectItemsRaw.reduce((sum, d) => sum + d.count, 0);
+    const defectItemsRaw = catDefs
+      .map((d) => {
+        const raw = defectCounts[d.id] ?? 0;
+        const item: { id: string; name: string; count: number; qualitativeState?: 'PASS' | 'FAIL' } = {
+          id: d.id,
+          name: d.name,
+          count: raw,
+        };
+        // Decode the N/A state code (1=PASS, 2=FAIL) once here — see FrozenDefectItem.
+        if (isQualitative) item.qualitativeState = raw === 2 ? 'FAIL' : 'PASS';
+        return item;
+      })
+      .filter((d) => d.count > 0);
 
     const result = resultsById.get(cat.id);
     const passed: boolean | null = result ? result.passed : null;
     const threshold = result?.threshold ?? null;
+
+    // For N/A categories `count` is a state code, so summing it is meaningless
+    // (the old bug: 1×PASS + 1×FAIL surfaced as totalCount 3). Use the engine's
+    // own count of FAIL items instead — aqlEvaluator.ts already computes exactly
+    // that as CategoryResult.totalCount / failingDefects.length for N/A mode.
+    const totalCount = isQualitative
+      ? (result
+          ? result.failingDefects.length
+          : defectItemsRaw.filter((d) => d.qualitativeState === 'FAIL').length)
+      : defectItemsRaw.reduce((sum, d) => sum + d.count, 0);
 
     const failingIds = new Set<string>();
     if (result && !result.passed) {
@@ -218,6 +265,7 @@ function buildFrozenCategoryAnalysis(
       evaluationMode: cat.evaluationMode,
       threshold,
       totalCount,
+      totalDefectTypes,
       passed,
       // Null exactly where `passed`/`threshold` are null — an ungraded category has
       // no CategoryResult, so there is nothing to freeze.

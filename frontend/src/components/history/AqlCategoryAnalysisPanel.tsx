@@ -165,6 +165,23 @@
  * easily at any of these, but the two NAME columns must stay the same width
  * to keep the tables aligned under the shared header. `whitespace-nowrap` on
  * the label span matches DimensionsPanel.tsx.
+ *
+ * HEADER / BREAKDOWN REVISION (2026-09-01): the collapsed ACTUAL label and the
+ * expanded breakdown now branch on `evaluationMode` instead of always reading
+ * `totalCount` as a quantity:
+ *   - CUMULATIVE — "{totalCount} found" + full name/count chip list (unchanged),
+ *     with a new "{totalCount} instances total across {M} defect types" caption.
+ *   - GRANULAR   — "{failed} of {M} failed" (each defect type is graded against
+ *     the category Ac independently — the engine already did this; the panel
+ *     just surfaces it). Same chip list + caption as CUMULATIVE.
+ *   - N/A        — "{failed} of {M} failed", where a fail is a wizard PASS/FAIL
+ *     toggle set to FAIL. The breakdown shows FAIL entries only, as name + a
+ *     "FAIL" tag (no number — N/A `count` is a state code 1/2, not a tally,
+ *     decoded upstream into `DefectItem.qualitativeState`). No caption.
+ * "M" is `CategoryAnalysis.totalDefectTypes`, frozen before zero-count types
+ * are dropped; legacy snapshots without it fall back to `defectItems.length`
+ * (undercounts, but best available). See DATA_SCHEMAS_AND_TYPES.md §1 and
+ * ISO2859_MATH_ENGINE.md §2.
  */
 
 import { useState } from 'react';
@@ -217,6 +234,14 @@ export interface DefectItem {
   name: string;
   count: number;
   failing: boolean;
+  /**
+   * N/A (qualitative PASS/FAIL) categories only — decoded from the shared `count`
+   * state code (1=PASS, 2=FAIL) at freeze/build time, so this component never has
+   * to re-interpret `count` as a quantity. Absent for CUMULATIVE / GRANULAR items.
+   * PASS entries are kept in the array for audit completeness; the breakdown
+   * renders FAIL entries only.
+   */
+  qualitativeState?: 'PASS' | 'FAIL';
 }
 
 /**
@@ -240,6 +265,16 @@ export interface CategoryAnalysis {
   evaluationMode: string;
   threshold: { ac: number; re: number } | null;
   totalCount: number;
+  /**
+   * Total defect-type count for the category — the "M" in the "N of M failed"
+   * collapsed header for GRANULAR / N/A modes. Frozen before zero-count types
+   * were dropped from `defectItems`.
+   *
+   * OPTIONAL: absent on snapshots frozen before this field existed. Callers fall
+   * back to `defectItems.length`, which undercounts those legacy rows (their
+   * zero-count types are already gone) but is the best number available.
+   */
+  totalDefectTypes?: number;
   /** true=PASS, false=FAIL, null=qualitative/informational/not-yet-available (no verdict shown) */
   passed: boolean | null;
   /**
@@ -312,7 +347,39 @@ function CategoryRow({ cat }: { cat: CategoryAnalysis }) {
   const zeroTol = isZeroTolerance(cat.aqlLevel);
   const pf = isPassFail(cat.aqlLevel);
   const recordOnly = isRecordOnly(cat.aqlLevel);
-  const hasDefects = cat.defectItems.length > 0;
+
+  // Collapsed header + breakdown both branch by evaluation mode:
+  //   CUMULATIVE — "{totalCount} found" + full chip list (unchanged)
+  //   GRANULAR   — "{failed} of {types} failed" (each defect type is checked
+  //                independently against the category Ac — the engine already
+  //                does this, see aqlEvaluator.ts GRANULAR branch)
+  //   N/A        — "{failed} of {types} failed", where a "fail" is a defect
+  //                toggled FAIL in the wizard (qualitativeState decoded upstream);
+  //                PASS entries are never shown as chips.
+  const isGranular = cat.evaluationMode === 'GRANULAR';
+  const isQualitative = cat.evaluationMode === 'N/A';
+
+  // "M" in "N of M failed". `totalDefectTypes` is frozen before zero-count types
+  // were dropped; fall back to the post-filter length for legacy snapshots that
+  // predate the field (undercounts those rows — their zeros are already gone —
+  // but is the best number available). See CategoryAnalysis.totalDefectTypes.
+  const totalDefectTypes = cat.totalDefectTypes ?? cat.defectItems.length;
+  const granularFailCount = cat.defectItems.filter((d) => d.failing).length;
+  const qualFailItems = cat.defectItems.filter((d) => d.qualitativeState === 'FAIL');
+
+  const collapsedFailCount = isGranular
+    ? granularFailCount
+    : isQualitative
+      ? qualFailItems.length
+      : cat.totalCount;
+  const collapsedLabel = isGranular || isQualitative
+    ? `${collapsedFailCount} of ${totalDefectTypes} failed`
+    : `${cat.totalCount} found`;
+  const collapsedIsZero = collapsedFailCount === 0;
+
+  // What the expand toggle opens into. For N/A that is FAIL chips only, so a
+  // category with only PASS entries is not expandable (would open to nothing).
+  const hasBreakdown = isQualitative ? qualFailItems.length > 0 : cat.defectItems.length > 0;
 
   return (
     <div className={`px-4 py-3 transition-colors ${isFail ? 'bg-rose-500/[0.04]' : ''}`}>
@@ -383,14 +450,14 @@ function CategoryRow({ cat }: { cat: CategoryAnalysis }) {
         <div className="w-[400px] shrink-0">
           <button
             type="button"
-            onClick={() => hasDefects && setExpanded((e) => !e)}
-            disabled={!hasDefects}
+            onClick={() => hasBreakdown && setExpanded((e) => !e)}
+            disabled={!hasBreakdown}
             className={`flex items-center gap-1.5 outline-none ${
-              hasDefects ? 'cursor-pointer hover:opacity-80' : 'cursor-default'
+              hasBreakdown ? 'cursor-pointer hover:opacity-80' : 'cursor-default'
             }`}
-            title={hasDefects ? (expanded ? 'Collapse defect breakdown' : 'Expand defect breakdown') : undefined}
+            title={hasBreakdown ? (expanded ? 'Collapse defect breakdown' : 'Expand defect breakdown') : undefined}
           >
-            {hasDefects ? (
+            {hasBreakdown ? (
               expanded
                 ? <ChevronDown className="w-3.5 h-3.5 text-muted shrink-0" strokeWidth={2} />
                 : <ChevronRight className="w-3.5 h-3.5 text-muted shrink-0" strokeWidth={2} />
@@ -398,9 +465,9 @@ function CategoryRow({ cat }: { cat: CategoryAnalysis }) {
               <span className="w-3.5 h-3.5 shrink-0" />
             )}
             <span className={`text-sm font-mono ${
-              cat.totalCount === 0 ? 'text-muted' : isFail ? 'text-rose-400 font-bold' : 'text-primary'
+              collapsedIsZero ? 'text-muted' : isFail ? 'text-rose-400 font-bold' : 'text-primary'
             }`}>
-              {cat.totalCount} found
+              {collapsedLabel}
             </span>
             <ActualAqlBadge actual={cat.actualAqlAchieved} />
           </button>
@@ -435,28 +502,49 @@ function CategoryRow({ cat }: { cat: CategoryAnalysis }) {
         </div>
       </div>
 
-      {/* Defect pills — only reachable when expanded (and only exist to expand into when hasDefects) */}
-      {expanded && hasDefects && (
-        <div className="flex flex-wrap gap-2 mt-2 pl-5">
-          {cat.defectItems.map((item) => (
-            <div
-              key={item.id}
-              className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 border shadow-sm ${
-                item.failing
-                  ? 'bg-rose-500/10 border-rose-500/30'
-                  : 'bg-canvas border-gray-700/50'
-              }`}
-            >
-              <span className="font-mono text-[10px] text-primary">{item.name}</span>
-              <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded border min-w-[1.5rem] text-center ${
-                item.failing
-                  ? 'text-rose-400 bg-rose-500/15 border-rose-500/30'
-                  : 'text-muted bg-gray-800/50 border-gray-700/50'
-              }`}>
-                {item.count}
-              </span>
-            </div>
-          ))}
+      {/* Defect breakdown — only reachable when expanded (and only exists to
+          expand into when hasBreakdown). Branches by evaluation mode:
+            CUMULATIVE / GRANULAR — every recorded defect type as a name+count
+              chip (highlight logic unchanged), plus an instances caption.
+            N/A — FAIL entries only, each as a name + "FAIL" tag (no number —
+              `count` is a state code, not a quantity). PASS entries are not
+              rendered at all. No caption. */}
+      {expanded && hasBreakdown && (
+        <div className="mt-2 pl-5">
+          <div className="flex flex-wrap gap-2">
+            {(isQualitative ? qualFailItems : cat.defectItems).map((item) => (
+              <div
+                key={item.id}
+                className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 border shadow-sm ${
+                  isQualitative || item.failing
+                    ? 'bg-rose-500/10 border-rose-500/30'
+                    : 'bg-canvas border-gray-700/50'
+                }`}
+              >
+                <span className="font-mono text-[10px] text-primary">{item.name}</span>
+                {isQualitative ? (
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full text-rose-400 bg-rose-500/15 border border-rose-500/30">
+                    FAIL
+                  </span>
+                ) : (
+                  <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded border min-w-[1.5rem] text-center ${
+                    item.failing
+                      ? 'text-rose-400 bg-rose-500/15 border-rose-500/30'
+                      : 'text-muted bg-gray-800/50 border-gray-700/50'
+                  }`}>
+                    {item.count}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+          {/* Instances caption — quantitative modes only. Helper text, but the
+              numbers are data, so font-mono per §1.3. */}
+          {!isQualitative && (
+            <p className="text-[10px] font-mono text-muted mt-2">
+              {cat.totalCount} instances total across {totalDefectTypes} defect types
+            </p>
+          )}
         </div>
       )}
     </div>

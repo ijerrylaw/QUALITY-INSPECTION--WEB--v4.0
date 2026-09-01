@@ -107,6 +107,165 @@ describe('AqlCategoryAnalysisPanel: Actual AQL relocation', () => {
   });
 });
 
+describe('AqlCategoryAnalysisPanel: header/breakdown revision (2026-09-01)', () => {
+  const renderPanel = (cat: CategoryAnalysis) =>
+    render(
+      <AqlCategoryAnalysisPanel
+        categoryAnalysis={[cat]}
+        unclassified={[]}
+        anyFail={cat.passed === false}
+        noProfileLinked={false}
+        previewStatus="snapshot"
+      />,
+    );
+
+  test('CUMULATIVE: collapsed label unchanged ("{n} found"), expanded adds the instances caption', async () => {
+    const cat = baseCategory({
+      name: 'BARRIER',
+      evaluationMode: 'CUMULATIVE',
+      threshold: { ac: 3, re: 4 },
+      totalCount: 2,
+      totalDefectTypes: 3,
+      passed: true,
+      defectItems: [
+        { id: 'b1', name: 'Hole', count: 1, failing: false },
+        { id: 'b2', name: 'Tear', count: 1, failing: false },
+      ],
+    });
+    const { container, getByText } = renderPanel(cat);
+    expect(getByText('2 found')).toBeTruthy();
+    (container.querySelector('button[title="Expand defect breakdown"]') as HTMLButtonElement)
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await waitFor(() => expect(getByText('Hole')).toBeTruthy());
+    expect(getByText('2 instances total across 3 defect types')).toBeTruthy();
+  });
+
+  test('GRANULAR: every defect type over Ac counts toward "N of M failed" — not a max-only 1', () => {
+    // Spec scenario: three VISUALS defect types recorded at 8 / 9 / 10 against
+    // Ac 7. The engine (aqlEvaluator.ts GRANULAR branch) marks each independently
+    // failing because each count > 7; the frontend has no access to that engine
+    // (backend-only, no backend test harness), so the `failing` flags are set
+    // here exactly as it would set them. A fourth, in-spec type is dropped by the
+    // zero-count filter before freeze, so `totalDefectTypes` (4) is the honest
+    // denominator while `defectItems` holds only the 3 non-zero types.
+    const cat = baseCategory({
+      name: 'VISUALS',
+      evaluationMode: 'GRANULAR',
+      aqlLevel: '4.0',
+      threshold: { ac: 7, re: 8 },
+      totalCount: 27, // 8 + 9 + 10
+      totalDefectTypes: 4,
+      passed: false,
+      defectItems: [
+        { id: 'v1', name: 'Scratch', count: 8, failing: true },
+        { id: 'v2', name: 'Smear', count: 9, failing: true },
+        { id: 'v3', name: 'Bubble', count: 10, failing: true },
+      ],
+    });
+    const { getByText, queryByText } = renderPanel(cat);
+    expect(getByText('3 of 4 failed')).toBeTruthy();
+    expect(queryByText('1 of 4 failed')).toBeNull(); // not max-only
+    expect(queryByText(/found$/)).toBeNull();        // not the CUMULATIVE label
+  });
+
+  test('GRANULAR: expanded breakdown keeps name+count chips and adds the instances caption', async () => {
+    const cat = baseCategory({
+      name: 'VISUALS',
+      evaluationMode: 'GRANULAR',
+      threshold: { ac: 7, re: 8 },
+      totalCount: 27,
+      totalDefectTypes: 4,
+      passed: false,
+      defectItems: [
+        { id: 'v1', name: 'Scratch', count: 8, failing: true },
+        { id: 'v2', name: 'Smear', count: 9, failing: true },
+        { id: 'v3', name: 'Bubble', count: 10, failing: true },
+      ],
+    });
+    const { container, getByText } = renderPanel(cat);
+    (container.querySelector('button[title="Expand defect breakdown"]') as HTMLButtonElement)
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await waitFor(() => expect(getByText('Scratch')).toBeTruthy());
+    expect(getByText('8')).toBeTruthy();
+    expect(getByText('27 instances total across 4 defect types')).toBeTruthy();
+  });
+
+  test('N/A qualitative: 1 PASS + 1 FAIL renders "1 of N failed" and exactly one FAIL chip', async () => {
+    const cat = baseCategory({
+      name: 'OTHERS',
+      aqlLevel: 'PASS/FAIL',
+      evaluationMode: 'N/A',
+      threshold: null,
+      totalCount: 1, // engine FAIL-item count, NOT the old 1+2=3 state-code sum
+      totalDefectTypes: 2,
+      passed: false,
+      defectItems: [
+        { id: 'd_don', name: 'Donning', count: 2, failing: true, qualitativeState: 'FAIL' },
+        { id: 'd_dof', name: 'Doffing', count: 1, failing: false, qualitativeState: 'PASS' },
+      ],
+    });
+    const { container, getByText, queryByText } = renderPanel(cat);
+
+    expect(getByText('1 of 2 failed')).toBeTruthy();
+    // The old bug rendered the raw FAIL state code "2" beside the name.
+    expect(queryByText('Donning 2')).toBeNull();
+
+    (container.querySelector('button[title="Expand defect breakdown"]') as HTMLButtonElement)
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await waitFor(() => expect(getByText('Donning')).toBeTruthy());
+
+    // Exactly one chip, and it is the FAIL one — PASS entries are not rendered at all.
+    expect(queryByText('Doffing')).toBeNull();
+    const chip = getByText('Donning').closest('div') as HTMLElement;
+    const chipRow = chip.parentElement as HTMLElement;
+    expect(chipRow.children).toHaveLength(1);
+    // The chip carries a "FAIL" text tag, not a number. (A second "FAIL" — the
+    // RESULT verdict badge — also exists on the row, hence the scoped check.)
+    expect(chip.textContent).toContain('Donning');
+    expect(chip.textContent).toContain('FAIL');
+    expect(chip.textContent).not.toMatch(/\d/); // no numeric count tag
+    // No instances caption for N/A mode.
+    expect(queryByText(/instances total/)).toBeNull();
+  });
+
+  test('N/A qualitative: a category with only PASS entries is not expandable', () => {
+    const cat = baseCategory({
+      name: 'OTHERS',
+      aqlLevel: 'PASS/FAIL',
+      evaluationMode: 'N/A',
+      threshold: null,
+      totalCount: 0,
+      totalDefectTypes: 2,
+      passed: true,
+      defectItems: [
+        { id: 'd_don', name: 'Donning', count: 1, failing: false, qualitativeState: 'PASS' },
+        { id: 'd_dof', name: 'Doffing', count: 1, failing: false, qualitativeState: 'PASS' },
+      ],
+    });
+    const { getByText, container } = renderPanel(cat);
+    expect(getByText('0 of 2 failed')).toBeTruthy();
+    expect(container.querySelector('button[title="Expand defect breakdown"]')).toBeNull();
+    expect((container.querySelector('button') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  test('legacy snapshot without totalDefectTypes falls back to defectItems.length, no crash', () => {
+    const cat = baseCategory({
+      name: 'VISUALS',
+      evaluationMode: 'GRANULAR',
+      threshold: { ac: 7, re: 8 },
+      totalCount: 17,
+      totalDefectTypes: undefined, // pre-fix frozen row
+      passed: false,
+      defectItems: [
+        { id: 'v1', name: 'Scratch', count: 8, failing: true },
+        { id: 'v2', name: 'Smear', count: 9, failing: true },
+      ],
+    });
+    const { getByText } = renderPanel(cat);
+    expect(getByText('2 of 2 failed')).toBeTruthy();
+  });
+});
+
 describe('AqlCategoryAnalysisPanel: TARGET column fits its worst-case content on one line', () => {
   test('AQL level chip + eval mode word + Ac/Re chip do not wrap inside the 220px TARGET column', () => {
     // Deliberately the widest realistic shape: CUMULATIVE is the longer of

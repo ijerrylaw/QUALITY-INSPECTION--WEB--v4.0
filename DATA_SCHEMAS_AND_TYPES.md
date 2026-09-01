@@ -108,6 +108,24 @@ export interface Submission {
    * ABSENT entirely on snapshots frozen before this field existed — also not
    * backfilled, so frontend types must treat it as optional and render the
    * chip only when present.
+   *
+   * Each entry also carries `totalDefectTypes: number` — how many defect-type
+   * definitions the category has, captured BEFORE zero-count entries are
+   * dropped from `defectItems`. It is the denominator for the panel's
+   * "N of M failed" header (GRANULAR / N/A modes). ABSENT on snapshots frozen
+   * before this field existed; readers fall back to `defectItems.length`,
+   * which undercounts those legacy rows (their zero-count types are already
+   * gone) but is the best number available.
+   *
+   * Per-defect entries in `defectItems[]` are
+   *   { id, name, count: number, failing: boolean, qualitativeState?: 'PASS' | 'FAIL' }
+   * `qualitativeState` is present ONLY for N/A (qualitative PASS/FAIL)
+   * categories, decoded once at freeze time from the shared `count` state code
+   * (1 = PASS, 2 = FAIL — ISO2859_MATH_ENGINE.md §2) so no reader re-interprets
+   * `count` as a quantity for those. Both PASS and FAIL entries are frozen (audit
+   * completeness); the panel renders FAIL-only. For N/A categories the entry's
+   * `count` remains the raw state code and must not be summed — the category's
+   * own `totalCount` is the engine's FAIL-item count, not `Σ count`.
    */
   gradingSnapshot: string | null;
   /**

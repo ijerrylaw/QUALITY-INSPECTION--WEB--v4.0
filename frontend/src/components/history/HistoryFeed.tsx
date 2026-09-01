@@ -82,19 +82,39 @@ function buildCategoryAnalysis(
   return categories.map((cat): CategoryAnalysis => {
     const aqlLevel = String(cat.aqlLevel ?? cat.aql ?? '');
     const evalMode = String(cat.evaluationMode ?? cat.evalMode ?? '');
+    const isQualitative = evalMode === 'N/A';
 
     // Match defect definitions to this category by id or name
     const catDefs = defectDefs.filter(
       (d: any) => d.categoryId === cat.id || d.categoryId === cat.name,
     );
 
+    // Denominator for the panel's "N of M failed" header — captured before the
+    // zero-count filter below. Mirrors buildFrozenCategoryAnalysis() server-side.
+    const totalDefectTypes = catDefs.length;
+
     const defectItems: Omit<DefectItem, 'failing'>[] = catDefs
-      .map((def: any) => ({ id: String(def.id), name: String(def.name), count: cleanDefects[def.id] ?? 0 }))
+      .map((def: any) => {
+        const raw = cleanDefects[def.id] ?? 0;
+        const item: Omit<DefectItem, 'failing'> = { id: String(def.id), name: String(def.name), count: raw };
+        // Decode the N/A state code (1=PASS, 2=FAIL) — keep both, the panel
+        // filters to FAIL-only at render. Mirrors the server freeze path.
+        if (isQualitative) item.qualitativeState = raw === 2 ? 'FAIL' : 'PASS';
+        return item;
+      })
       .filter((d) => d.count > 0);
 
-    const totalCount = defectItems.reduce((s, d) => s + d.count, 0);
-
     const serverResult = resultsById.get(String(cat.id));
+
+    // N/A `count` is a state code, not a quantity — don't sum it (the old bug:
+    // 1×PASS + 1×FAIL surfaced as 3). Use the server's own FAIL-item count,
+    // matching buildFrozenCategoryAnalysis().
+    const totalCount = isQualitative
+      ? (serverResult
+          ? serverResult.failingDefects.length
+          : defectItems.filter((d) => d.qualitativeState === 'FAIL').length)
+      : defectItems.reduce((s, d) => s + d.count, 0);
+
     const passed: boolean | null = serverResult ? serverResult.passed : null;
     const threshold = serverResult?.threshold ?? null;
 
@@ -118,6 +138,7 @@ function buildCategoryAnalysis(
       evaluationMode: evalMode,
       threshold,
       totalCount,
+      totalDefectTypes,
       passed,
       // Live re-grade path (legacy rows with no frozen snapshot) — carry the
       // server's computed value through so those rows show the chip too.
