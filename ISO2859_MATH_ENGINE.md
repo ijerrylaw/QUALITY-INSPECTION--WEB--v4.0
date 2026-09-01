@@ -43,7 +43,9 @@ A second, **independent** data point recorded alongside the assigned-AQL verdict
 
 It answers *"what quality level did this lot actually demonstrate?"* — not *"did it pass?"*. The two are deliberately decoupled: a category assigned `AND` (zero tolerance) that recorded 1 defect **fails** its own verdict yet can still report a tight Actual AQL. That is the intended behavior, not a contradiction.
 
-* **The ladder:** `findActualAqlAchieved()` walks `SUPPORTED_AQL_LEVELS` (`'0.65'`, `'1.0'`, `'1.5'`, `'2.5'`, `'4.0'`, `'6.5'`, `'10'`) in ascending order, calling the **same `getAQLThresholds()`** used for the assigned-AQL lookup — the matrix is never read directly and never duplicated. `Ac` is monotonically non-decreasing along that list for any fixed bracket (verified across all 13 rows), so the first level satisfying `count ≤ Ac` is by construction the tightest.
+* **The ladder:** `findActualAqlAchieved()` walks `ACHIEVABLE_AQL_LEVELS` (`'0.65'`, `'1.0'`, `'1.5'`, `'2.5'`, `'4.0'`, `'6.5'`) in ascending order, calling the **same `getAQLThresholds()`** used for the assigned-AQL lookup — the matrix is never read directly and never duplicated. `Ac` is monotonically non-decreasing along that list for any fixed bracket (verified across all 13 rows), so the first level satisfying `count ≤ Ac` is by construction the tightest.
+
+  The ladder stops at `'6.5'` **deliberately**, mirroring Configuration Control's assignable whitelist (`QualityRules.tsx`'s `ISO_WHITELIST`) exactly, so it can never report a level a category could not have been *assigned*. `ACHIEVABLE_AQL_LEVELS` is a strict subset of `SUPPORTED_AQL_LEVELS`, which still carries all 7 levels — see the note below.
 
 * **Which count is compared** — mode-dependent, and frozen as `evaluatedCount` because for GRANULAR it deliberately differs from `totalCount`:
   - **CUMULATIVE** — the category **sum** (the same value its assigned verdict compares).
@@ -52,7 +54,7 @@ It answers *"what quality level did this lot actually demonstrate?"* — not *"d
 
 * **Three recorded states — never null, never blank, for any graded category:**
   - `ACHIEVED` — carries the level plus its Ac/Re. `'0.65'` is the tightest column the table has, so it reads as *"0.65 or better"*; the metric cannot resolve finer.
-  - `EXCEEDS_ALL` — the count busts even the loosest level. An **explicit hard-fail state** carrying the loosest level's Ac/Re (the bar that was still missed), so a catastrophic category is visibly distinct from "not computed".
+  - `EXCEEDS_ALL` — the count busts even the loosest **achievable** level (`'6.5'`). An **explicit hard-fail state** carrying that level's Ac/Re (the bar that was still missed), so a catastrophic category is visibly distinct from "not computed". A count that would only have fit under the matrix's `'10'` column lands here, since `'10'` is not an achievable level.
   - `QUALITATIVE` — an N/A-mode (PASS/FAIL) category. Its `defectCounts` values are state codes (§2), not defect counts, so there is no count to grade. Recorded as an explicit state rather than a fabricated AQL level derived from a state code.
 
 * **Scope:** every category the engine grades. RECORD ONLY / OFF categories are excluded by the existing empty-string `evaluationMode` skip path (§2) — they never receive a `CategoryResult`, so their frozen value is `null`, meaning *not graded* (never *graded but unknown*).
@@ -63,7 +65,24 @@ It answers *"what quality level did this lot actually demonstrate?"* — not *"d
 
 **Source:** `findActualAqlAchieved()` / `ActualAqlAchieved` in `backend/src/engine/aqlEvaluator.ts`; frozen via `buildFrozenCategoryAnalysis()` in `backend/src/engine/resolveVerdict.ts`.
 
-> **Vocabulary asymmetry (intentional):** the ladder scans `'10'`, but Configuration Control's assignable whitelist (`QualityRules.tsx`'s `ISO_WHITELIST`) stops at `'6.5'`. So an *actual* level of `10` can be reported for a category whose *assigned* level could never be `10`. See `AUDIT_REPORT.md` #29.
+> **Vocabulary asymmetry — resolved 2026-09-01** (commit `347549f`; `AUDIT_REPORT.md` #29).
+> The ladder previously scanned all 7 `SUPPORTED_AQL_LEVELS` including `'10'`, while
+> `ISO_WHITELIST` stopped at `'6.5'` — so an *actual* level of `10` could be reported for a
+> category whose *assigned* level could never be `10`. That asymmetry was **removed by
+> narrowing the ladder**, not left in place: `ACHIEVABLE_AQL_LEVELS` (6 levels) now defines
+> what the ladder scans and reports, and `ISO_WHITELIST` remains the source of truth for what
+> is assignable.
+>
+> **The matrix data is untouched.** `SUPPORTED_AQL_LEVELS` still lists all 7 levels and
+> `ISO_2859_MATRIX` still carries its full `'10'` column for every bracket. `getAQLThresholds()`
+> resolves `'10'` normally, so a category whose assigned `aqlLevel` is `'10'` (reachable by
+> direct API call, though not through the admin UI) still grades against the correct Ac/Re —
+> including the exact-key-before-padded-key fix that made AQL 10 resolve at all. **Only what the
+> achievement ladder scans and reports changed.**
+>
+> Forward-only: any frozen `gradingSnapshot` row predating the change may still carry an actual
+> level of `'10'`. Those are accepted historical artifacts — grading is never recomputed after
+> freeze (`AUDIT_REPORT.md` #18) and nothing was backfilled.
 
 ---
 

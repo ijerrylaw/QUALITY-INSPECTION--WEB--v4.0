@@ -35,12 +35,49 @@ with its full original context, reasoning, and verification trail.
    for deletion or updating.
    → `CHANGELOG.md` §15.
 
-10. **Three independently-maintained "default profile" seeds disagree on
-    BARRIER's `evaluationMode`; PACKAGING drift now isolated to one of
-    them.** ~~The backend's `HARDCODED_DEFAULT_PROFILE`
+10. **RESOLVED 2026-09-01** (commit `0ea09a1`). ~~Three independently-maintained
+    "default profile" seeds disagree on BARRIER's `evaluationMode`; PACKAGING
+    drift isolated to one of them.~~ ~~The backend's `HARDCODED_DEFAULT_PROFILE`
     (`resolveVerdict.ts`) sets `CUMULATIVE` for BARRIER / `''` for
     PACKAGING; the frontend's separate hardcoded fallback
     (`ConfigContext.tsx`) sets `'N/A'` for both.~~
+
+    **Fix — one canonical seed, machine-enforced.** The three hand-written
+    copies were replaced by a single source of truth,
+    `backend/src/engine/defaultProfileSeed.ts`, which all three consumers now
+    derive from instead of restating:
+    - `resolveVerdict.ts`'s `HARDCODED_DEFAULT_PROFILE`
+    - `ConfigContext.tsx`'s zero-profile fallback (BARRIER `'N/A'` → `CUMULATIVE`)
+    - `QualityRules.tsx`'s `defaultProfiles` seed (BARRIER *and* PACKAGING
+      `'N/A'` → canonical)
+
+    Canonical per-category values, which stay INDEPENDENT of each other rather
+    than one blanket default: BARRIER `CUMULATIVE` (the actual #10
+    disagreement — a numeric zero-tolerance AND category, never `'N/A'`),
+    CRITICAL/MAJOR `CUMULATIVE`, MINOR `GRANULAR`, PACKAGING `''` (preserving
+    the 2026-08-25 true-exclusion fix intact). Only field-name adaptation
+    (`aqlLevel`/`evaluationMode` vs `aql`/`evalMode` vs `currentClass`) stays
+    local to each consumer.
+
+    **Why it's a mirror, not a shared import.** The frontend cannot import from
+    `backend/` — `frontend/tsconfig.app.json` is `include: ["src"]` with no path
+    aliases, which is why ~30 other constants in this codebase are hand-mirrored.
+    `frontend/src/lib/defaultProfileSeed.ts` is therefore a deliberate mirror.
+    **Unlike every other mirror in the codebase, this pair is machine-enforced:**
+    `frontend/src/lib/__tests__/defaultProfileSeed.sync.test.ts` imports BOTH
+    halves (Vitest resolves through Vite, so a test can cross the boundary even
+    though application code cannot) and asserts deep equality — so a recurrence
+    of this exact finding fails CI instead of shipping silently. Verified by
+    injecting the original BARRIER→`'N/A'` drift and confirming the test goes red.
+
+    **Backend grading is byte-identical to before** — the derived profile was
+    asserted deep-equal to the pre-change inline literal, categories and defect
+    definitions both. No submission grades differently; #18's frozen
+    `gradingSnapshot` rows are untouched.
+
+    ---
+
+    *Historical context retained below.*
 
     **PACKAGING half fixed 2026-08-25** (RECORD ONLY build): `ConfigContext.tsx`'s
     fallback now sets `''` for PACKAGING too, matching `resolveVerdict.ts` —
@@ -67,16 +104,16 @@ with its full original context, reasoning, and verification trail.
       it stops being a "fallback" and becomes the live profile — a path the
       other two fallbacks don't have.
 
-    **Audit-confirmed 2026-09-01 (current scope):**
-    - **PACKAGING between `resolveVerdict.ts` and `ConfigContext.tsx` is
-      resolved** — both now use `''`. That half of the original finding is
-      closed.
-    - **Remaining (a):** BARRIER is an unchanged three-way split —
+    **Audit-confirmed 2026-09-01** — the scope that the fix above then closed:
+    - **PACKAGING between `resolveVerdict.ts` and `ConfigContext.tsx` was
+      already resolved** — both used `''`. That half of the original finding
+      was closed by the 2026-08-25 build.
+    - **Was remaining (a):** BARRIER was an unchanged three-way split —
       `resolveVerdict.ts` `CUMULATIVE` (correct) / `ConfigContext.tsx`
       `'N/A'` / `QualityRules.tsx` `defaultProfiles` seed `'N/A'`.
-    - **Remaining (b):** PACKAGING is still `'N/A'` *specifically* in the
+    - **Was remaining (b):** PACKAGING was still `'N/A'` *specifically* in the
       `QualityRules.tsx` `defaultProfiles` seed (the third copy), while
-      `resolveVerdict.ts` and `ConfigContext.tsx` agree it should be `''`.
+      `resolveVerdict.ts` and `ConfigContext.tsx` agreed it should be `''`.
 
     **Diagnosed 2026-08-11:**
     - **Backend** — `backend/src/engine/resolveVerdict.ts:38-59`
@@ -185,10 +222,61 @@ with its full original context, reasoning, and verification trail.
     `db push`, or use `prisma migrate deploy` (which auto-regenerates) in
     production workflows.
 
-17. **`ConfigContext.tsx`'s `getResolvedProfile()` defaults every category's
+17. **RESOLVED 2026-09-01** (commit `0ea09a1`, same build as #10).
+    ~~`ConfigContext.tsx`'s `getResolvedProfile()` defaults every category's
     `evalMode` to `'CUMULATIVE'` whenever neither `evalMode` nor
     `evaluationMode` is set — on ANY profile, not just the zero-usable-profile
-    case the recent fix (commit `606b5e4`) addressed.**
+    case the recent fix (commit `606b5e4`) addressed.~~
+
+    **Fix, in three parts.**
+    1. **The substitution is no longer silent.** `getResolvedProfile()` still
+       resolves a safe display value — throwing would take down the six
+       render-path callers that read it through `useMemo` (`HistoryFeed`,
+       `StepDefects`, `StepReviewSubmit`, `SubmissionSummary`, `WizardPage`,
+       plus ConfigContext's own memos) — but now tags the category with
+       `AQLCategory.evalModeUnset: true`. A misconfigured category is therefore
+       distinguishable from one deliberately set to `CUMULATIVE`, which is
+       precisely the distinction the old `?? 'CUMULATIVE'` destroyed.
+       `evalModeUnset` is set at resolve time only and never persisted.
+    2. **Save-time hard validation.** `PATCH /api/config` now rejects any
+       profile carrying a category with no evaluation mode —
+       `validateInspectionProfiles()` in `backend/src/routes/config.routes.ts`,
+       returning `400` naming each offending category. Scoped to payloads that
+       actually supply `inspectionProfiles`, so a PATCH touching an unrelated
+       field is never blocked by a pre-existing bad profile (same scoping rule
+       as the adjacent `validateProductMatrixConfig()` check).
+    3. **Admin visibility.** `QualityRules.tsx` renders an amber **NOT SET**
+       badge on any such category, so an admin can see and fix it before the
+       save validation blocks them. It reads RAW `config.inspectionProfiles`,
+       not `getResolvedProfile()` output — the latter has already substituted a
+       value, so the badge could never fire from it.
+
+    **`''` is NOT unset — the load-bearing subtlety.** An empty evaluation mode
+    is a real, deliberate value (RECORD ONLY / true exclusion, the only thing
+    that triggers `aqlEvaluator.ts`'s `if (!category.evaluationMode) continue;`
+    skip path). Every check added here uses `??` never `||` and distinguishes
+    genuinely absent (`undefined`/`null`) from `''`; treating `''` as missing
+    would have broken the entire RECORD ONLY feature shipped 2026-08-25.
+    Both field spellings are dual-read as well — real admin-authored saves
+    persist `evalMode`, while the seeds and engine use `evaluationMode`, so
+    checking only one would have rejected every genuine save.
+
+    **Forward-only.** Nothing is backfilled or rewritten. All 3 live profiles
+    (15 categories) already carry explicit modes, so the new validation blocks
+    nothing today; any pre-existing category with an unset mode keeps grading
+    against `resolveVerdict.ts`'s own fallbacks and is simply refused the next
+    time someone tries to SAVE it, with the NOT SET badge showing which one.
+
+    **Pending manual verification:** the NOT SET badge and the save-rejection
+    message have not been live-clicked — Configuration Control is Group A/B
+    (M365/MSAL) gated, the same sandbox limitation as items #19/#20/#21. Note
+    the badge cannot appear on any currently-configured profile, since none has
+    an unset mode.
+
+    ---
+
+    *Original finding retained below.*
+
     `frontend/src/context/ConfigContext.tsx:589-590`:
     ```
     evalMode: cat.evalMode ?? cat.evaluationMode ?? 'CUMULATIVE',
@@ -208,10 +296,12 @@ with its full original context, reasoning, and verification trail.
     doc comment at `ConfigContext.tsx:293-302`, which already calls out that
     callers must pass the raw profile, never this function's output, to avoid
     exactly this masking) but not yet logged as its own finding until now.
-    Not yet scoped — needs a decision on what an unset evalMode *should* do
+    ~~Not yet scoped — needs a decision on what an unset evalMode *should* do
     (surface as an error/warning in `QualityRules.tsx`? require the field at
     save time? keep the default but only for the documented zero-state case?)
-    before a fix is drafted.
+    before a fix is drafted.~~ **Decided 2026-09-01:** all three at once —
+    warn in `QualityRules.tsx`, require the field at save time, and keep the
+    default only as a tagged last-resort display value. See the fix above.
 
 18. **RESOLVED 2026-09-01.** ~~Defect breakdown display silently re-grades
     against current config, can contradict the submission's own frozen
@@ -511,8 +601,39 @@ with its full original context, reasoning, and verification trail.
     `isCanonicalThicknessDim()` check already used to gate the Trash
     button, in both files identically.
 
-29. **AQL level vocabulary asymmetry between the assignable whitelist and
-    the Actual AQL ladder.** Raised by the "Actual AQL Achieved" build
+29. **RESOLVED 2026-09-01** (commit `347549f`; doc update deferred at the time
+    and completed here). ~~AQL level vocabulary asymmetry between the
+    assignable whitelist and the Actual AQL ladder.~~
+
+    **Resolution — the ladder was narrowed.** The open question below ("add
+    `'10'` to `ISO_WHITELIST`, or narrow the ladder to the assignable six")
+    was decided in favour of narrowing. `ISO_WHITELIST` remains the source of
+    truth for what is assignable, and the achievement ladder now matches it:
+    - New `ACHIEVABLE_AQL_LEVELS` (`backend/src/engine/iso2859-matrix.ts`) —
+      the six assignable levels, `'0.65'` … `'6.5'`. `findActualAqlAchieved()`
+      scans and reports only these, so it can never surface a level a category
+      could not have been assigned.
+    - `EXCEEDS_ALL` now carries `'6.5'`'s Ac/Re (the loosest *achievable*
+      bar that was missed) instead of `'10'`'s. A count that would only have
+      fit under the matrix's `'10'` column is now `EXCEEDS_ALL`.
+    - `ActualAqlAchieved.aqlLevel` narrowed to `AchievableAQLLevel | null`.
+    - `SUPPORTED_AQL_LEVELS` (all 7) and the `ISO_2859_MATRIX` `'10'` columns
+      are deliberately **kept** — `getAQLThresholds()` still resolves a
+      directly-supplied `'10'` assigned level, so the latent-bug fix below
+      stays intact. Only what the ladder *scans and reports* changed.
+
+    Guarded by `backend/src/engine/__tests__/findActualAqlAchieved.test.ts`,
+    including a full bracket × count sweep asserting `'10'` is never returned.
+
+    **Forward-only:** any pre-existing frozen `gradingSnapshot` row carrying an
+    actual level of `'10'` is an accepted historical artifact — grading is never
+    recomputed after freeze (#18), and nothing was backfilled.
+
+    ---
+
+    *Original finding retained below.*
+
+    Raised by the "Actual AQL Achieved" build
     (2026-08-27). The ladder (`findActualAqlAchieved()`,
     `ISO2859_MATH_ENGINE.md` §2A) scans all 7 `SUPPORTED_AQL_LEVELS`
     including `'10'`, while Configuration Control's assignable whitelist
@@ -522,9 +643,9 @@ with its full original context, reasoning, and verification trail.
     to be independent of what's currently assignable, and including `'10'`
     means fewer categories fall into the `EXCEEDS_ALL` hard-fail state) —
     recorded here because the two vocabularies are now deliberately
-    different, not because the current behavior is wrong. Open question for
+    different, not because the current behavior is wrong. ~~Open question for
     a future build: add `'10'` to `ISO_WHITELIST`, or narrow the ladder to
-    the assignable six.
+    the assignable six.~~ (Decided — see the resolution above.)
 
     **Latent bug this exposed (already fixed, not open):** `'10'` never
     resolved at all before this build. `getAQLThresholds()`'s
@@ -582,18 +703,39 @@ with its full original context, reasoning, and verification trail.
     is the accepted exception, not the whole chip spec.
     → `CHANGELOG.md` §37.
 
-33. **No backend test harness — `aqlEvaluator.ts`'s per-defect GRANULAR
-    grading is not tested at the engine level.** Raised by the DEFECTS
-    header/breakdown fix (2026-09-01, commit `f66bb99`). There is no
-    `backend/**/*.test.ts` and no backend vitest/jest config anywhere —
-    every automated test in the repo is frontend-side. The GRANULAR rule
-    (each defect type checked against Ac/Re independently, not by the
-    category's single max count) is currently guarded only by a frontend
-    panel test (`aqlCategoryAnalysisPanel.test.tsx`) that hand-sets the
-    expected `failing` flags on mock data; `evaluateAQLVerdict()` itself is
-    never invoked by any test. Future scoped task: stand up a minimal
-    backend vitest harness matching the frontend toolchain, and port the
-    GRANULAR 8/9/10-vs-Ac7 case to call the engine directly.
+33. **`aqlEvaluator.ts`'s per-defect GRANULAR grading is still not tested at
+    the engine level** — narrowed 2026-09-01; the *harness* half is done, the
+    *GRANULAR coverage* half is not. Raised by the DEFECTS header/breakdown
+    fix (2026-09-01, commit `f66bb99`).
+
+    **Narrowed 2026-09-01** after a discovery check against current code:
+    - **RESOLVED — the "no backend test harness" half.** ~~There is no
+      `backend/**/*.test.ts` and no backend vitest/jest config anywhere —
+      every automated test in the repo is frontend-side.~~ A backend harness
+      now exists (commit `347549f`): a `test` script in `backend/package.json`
+      running the root-hoisted vitest, with suites under
+      `backend/src/**/__tests__/`. No new dependency or config was required.
+    - **STILL OPEN — the original GRANULAR concern.** The harness covers
+      *adjacent* engine logic, not the rule this item was actually logged for:
+      `findActualAqlAchieved.test.ts` (`347549f`) tests the Actual-AQL
+      achievement ladder, and `validateInspectionProfiles.test.ts` (`0ea09a1`)
+      tests config-save validation. **`evaluateAQLVerdict()` — the function
+      that implements GRANULAR per-defect grading — is still invoked by zero
+      tests, backend or frontend.** (Verified by search: the `GRANULAR`
+      occurrences in existing test files are string literals in mock/seed data,
+      not exercises of the grading rule.)
+
+    So the blocker is gone but the gap is not. The GRANULAR rule (each defect
+    type checked against Ac/Re independently, not by the category's single max
+    count) remains guarded only by a frontend panel test
+    (`aqlCategoryAnalysisPanel.test.tsx`) that hand-sets the expected `failing`
+    flags on mock data.
+
+    **Remaining task, now much smaller:** port the GRANULAR 8/9/10-vs-Ac7 case
+    into a new suite under `backend/src/engine/__tests__/` calling
+    `evaluateAQLVerdict()` directly. No harness setup needed — add the file and
+    it runs. `findActualAqlAchieved.test.ts` is a working template for how to
+    test the engine without any Prisma/I/O involvement.
 
 34. **`StepReviewSubmit.tsx`'s "Total Defects Recorded" KPI folds N/A
     fail-counts into a defect tally.** The KPI sums `cr.totalCount` across
