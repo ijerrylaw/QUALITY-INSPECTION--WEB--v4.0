@@ -34,6 +34,13 @@ import {
 } from 'react';
 import type { ReactNode } from 'react';
 import { resolveAccentPair } from '../lib/accentColors';
+import {
+  DEFAULT_AQL_CATEGORY_SEED,
+  DEFAULT_DEFECT_DEFINITION_SEED,
+  DEFAULT_EVAL_MODE,
+  DEFAULT_PROFILE_ID,
+  isEvalModeUnset,
+} from '../lib/defaultProfileSeed';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PRIMITIVE OPTION TYPES
@@ -348,6 +355,19 @@ export interface AQLCategory {
   evaluationMode?: EvaluationMode;
   /** Legacy alias used by QualityRules */
   evalMode?: EvaluationMode | string;
+  /**
+   * Set by getResolvedProfile() ONLY — true when this category carried no
+   * evaluation mode under either spelling and one was substituted for display
+   * (AUDIT_REPORT.md #17). Never persisted, and never present on raw
+   * `config.inspectionProfiles` data.
+   *
+   * A `true` here means "misconfigured, needs an admin to pick a mode", NOT a
+   * real evaluation mode — `evalMode`/`evaluationMode` alongside it carry the
+   * substituted DEFAULT_EVAL_MODE, not anything the admin chose. Readers that
+   * care about configuration validity (QualityRules.tsx's warning badge) must
+   * check this flag rather than trusting the resolved mode.
+   */
+  evalModeUnset?: boolean;
   // UI decoration fields (optional — used by Kanban in QualityRules)
   iconName?: string;
   color?: string;
@@ -382,8 +402,11 @@ export interface InspectionProfile {
  *
  * Callers must pass the RAW profile object (e.g. from
  * `config.inspectionProfiles.find(...)`), never `getResolvedProfile()`'s
- * output — its category normalisation defaults a missing evalMode to
- * 'CUMULATIVE', which would mask exactly the unusable state this checks for.
+ * output — its category normalisation substitutes DEFAULT_EVAL_MODE for a
+ * missing evalMode, which would mask exactly the unusable state this checks
+ * for. (Since AUDIT_REPORT.md #17 that substitution is at least tagged with
+ * `evalModeUnset: true`, so it is no longer silent — but this function reads
+ * the mode itself, so the raw-profile rule still stands.)
  */
 export function hasUsableCategories(profile: { aqlCategories?: AQLCategory[] } | null | undefined): boolean {
   return (profile?.aqlCategories ?? []).some((c) => {
@@ -575,29 +598,27 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       // If the backend has no profiles configured yet, inject the built-in
       // default profile so the wizard dropdown is never empty.
       if (!data.inspectionProfiles || data.inspectionProfiles.length === 0) {
+        // Values come from defaultProfileSeed.ts — the canonical seed shared with
+        // resolveVerdict.ts's HARDCODED_DEFAULT_PROFILE (machine-enforced mirror,
+        // see that file's header). Previously restated inline here, which is how
+        // BARRIER drifted to 'N/A' while the backend graded it CUMULATIVE:
+        // AUDIT_REPORT.md #10. Only the field-name adaptation is local.
         data.inspectionProfiles = [
           {
-            id: 'prof_default',
+            id: DEFAULT_PROFILE_ID,
             name: 'GLOBAL STANDARD',
             isDefault: true,
-            aqlCategories: [
-              { id: 'BARRIER',   name: 'BARRIER',   aqlLevel: 'AND',           evaluationMode: 'N/A' },
-              { id: 'CRITICAL',  name: 'CRITICAL',  aqlLevel: '1.5',           evaluationMode: 'CUMULATIVE' },
-              { id: 'MAJOR',     name: 'MAJOR',     aqlLevel: '2.5',           evaluationMode: 'CUMULATIVE' },
-              { id: 'MINOR',     name: 'MINOR',     aqlLevel: '4.0',           evaluationMode: 'GRANULAR' },
-              // '' (not 'N/A') — matches resolveVerdict.ts's HARDCODED_DEFAULT_PROFILE,
-              // hits aqlEvaluator.ts's true-exclusion skip path. See AUDIT_REPORT.md #10.
-              { id: 'PACKAGING', name: 'PACKAGING', aqlLevel: 'PASS/FAIL', evaluationMode: '' },
-            ],
-            defectDefinitions: [
-              { id: 'def_hole',     name: 'Hole',       categoryId: 'BARRIER' },
-              { id: 'def_tear',     name: 'Tear',       categoryId: 'BARRIER' },
-              { id: 'def_stain',    name: 'Stain',      categoryId: 'CRITICAL' },
-              { id: 'def_particle', name: 'Particle',   categoryId: 'CRITICAL' },
-              { id: 'def_dirt',     name: 'Dirt',       categoryId: 'MAJOR' },
-              { id: 'def_flow',     name: 'Flow Mark',  categoryId: 'MINOR' },
-              { id: 'def_box',      name: 'Box Damage', categoryId: 'PACKAGING' },
-            ],
+            aqlCategories: DEFAULT_AQL_CATEGORY_SEED.map(c => ({
+              id: c.id,
+              name: c.name,
+              aqlLevel: c.aql,
+              evaluationMode: c.evalMode as EvaluationMode,
+            })),
+            defectDefinitions: DEFAULT_DEFECT_DEFINITION_SEED.map(d => ({
+              id: d.id,
+              name: d.name,
+              categoryId: d.categoryId,
+            })),
           }
         ];
       }
@@ -667,14 +688,35 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
     if (!profile) return null;
 
-    // Normalise AQLCategory aliases so both `aql` and `aqlLevel` are always set
-    const normalisedCategories: AQLCategory[] = (profile.aqlCategories ?? []).map(cat => ({
-      ...cat,
-      aql: cat.aql ?? cat.aqlLevel ?? '',
-      aqlLevel: cat.aqlLevel ?? cat.aql ?? '',
-      evalMode: cat.evalMode ?? cat.evaluationMode ?? 'CUMULATIVE',
-      evaluationMode: (cat.evaluationMode ?? cat.evalMode ?? 'CUMULATIVE') as EvaluationMode,
-    }));
+    // Normalise AQLCategory aliases so both `aql` and `aqlLevel` are always set.
+    //
+    // AUDIT_REPORT.md #17 — this step used to write `?? 'CUMULATIVE'` SILENTLY,
+    // so a category with no evaluation mode at all became indistinguishable from
+    // one deliberately configured as CUMULATIVE. Every caller then rendered and
+    // behaved as if a real quantitative mode had been chosen.
+    //
+    // It still resolves to a safe display value (throwing here would take down
+    // the six render-path callers that read this through useMemo — HistoryFeed,
+    // StepDefects, StepReviewSubmit, SubmissionSummary, WizardPage), but the
+    // substitution is no longer silent: `evalModeUnset` tags exactly which
+    // categories were defaulted, so the admin UI can warn and save-time
+    // validation can reject. `''` (RECORD ONLY) is NOT unset — see
+    // isEvalModeUnset()'s docs.
+    const normalisedCategories: AQLCategory[] = (profile.aqlCategories ?? []).map(cat => {
+      const unset = isEvalModeUnset(cat);
+      const resolvedMode = unset
+        ? DEFAULT_EVAL_MODE
+        : (cat.evaluationMode ?? cat.evalMode) as string;
+
+      return {
+        ...cat,
+        aql: cat.aql ?? cat.aqlLevel ?? '',
+        aqlLevel: cat.aqlLevel ?? cat.aql ?? '',
+        evalMode: resolvedMode,
+        evaluationMode: resolvedMode as EvaluationMode,
+        evalModeUnset: unset,
+      };
+    });
 
     return {
       ...profile,

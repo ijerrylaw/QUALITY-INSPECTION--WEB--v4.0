@@ -33,6 +33,12 @@ import {
 } from 'lucide-react';
 import { useConfig } from '../../context/ConfigContext';
 import { useToast } from '../../components/ui/ToastProvider';
+import {
+  DEFAULT_AQL_CATEGORY_SEED,
+  DEFAULT_DEFECT_DEFINITION_SEED,
+  DEFAULT_PROFILE_ID,
+  isEvalModeUnset,
+} from '../../lib/defaultProfileSeed';
 
 interface QualityRulesProps {
   onDirty: () => void;
@@ -87,27 +93,29 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   const { addToast } = useToast();
 
   // ── Local State ─────────────────────────────────────────────────────────
+  // Seed values come from defaultProfileSeed.ts — the canonical source shared
+  // with resolveVerdict.ts and ConfigContext.tsx (machine-enforced mirror).
+  // This copy previously restated them and carried the stale BARRIER: 'N/A' /
+  // PACKAGING: 'N/A' pair, which mattered more here than in the other two:
+  // this seed backs a real editable admin form, so hitting Save on a
+  // zero-profile install PERSISTED those wrong values as the live profile.
+  // See AUDIT_REPORT.md #10.
   const defaultProfiles = [
     {
-      id: 'prof_default',
+      id: DEFAULT_PROFILE_ID,
       name: 'GLOBAL STANDARD',
       isDefault: true,
-      aqlCategories: [
-        { id: 'BARRIER',   name: 'BARRIER',   aql: 'AND',           evalMode: 'N/A' },
-        { id: 'CRITICAL',  name: 'CRITICAL',  aql: '1.5',           evalMode: 'CUMULATIVE' },
-        { id: 'MAJOR',     name: 'MAJOR',     aql: '2.5',           evalMode: 'CUMULATIVE' },
-        { id: 'MINOR',     name: 'MINOR',     aql: '4.0',           evalMode: 'GRANULAR' },
-        { id: 'PACKAGING', name: 'PACKAGING', aql: 'PASS/FAIL', evalMode: 'N/A' },
-      ],
-      defectDefinitions: [
-        { id: 'def_hole', name: 'Hole', categoryId: 'BARRIER' },
-        { id: 'def_tear', name: 'Tear', categoryId: 'BARRIER' },
-        { id: 'def_stain', name: 'Stain', categoryId: 'CRITICAL' },
-        { id: 'def_particle', name: 'Particle', categoryId: 'CRITICAL' },
-        { id: 'def_dirt', name: 'Dirt', categoryId: 'MAJOR' },
-        { id: 'def_flow', name: 'Flow Mark', categoryId: 'MINOR' },
-        { id: 'def_box', name: 'Box Damage', categoryId: 'PACKAGING' },
-      ]
+      aqlCategories: DEFAULT_AQL_CATEGORY_SEED.map(c => ({
+        id: c.id,
+        name: c.name,
+        aql: c.aql,
+        evalMode: c.evalMode,
+      })),
+      defectDefinitions: DEFAULT_DEFECT_DEFINITION_SEED.map(d => ({
+        id: d.id,
+        name: d.name,
+        categoryId: d.categoryId,
+      })),
     }
   ];
 
@@ -735,6 +743,22 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                               ))
                             )}
                           </select>
+                        ) : isEvalModeUnset(cat) ? (
+                          /* AUDIT_REPORT.md #17 — this category carries NO
+                             evaluation mode at all. Only reachable on profiles
+                             saved before save-time validation existed (forward-
+                             only fix, nothing was backfilled). Surfaced here so
+                             an admin can see and fix it BEFORE the save-time
+                             validation blocks them with an error. Distinct from
+                             evalMode === '' just below, which is a deliberate
+                             RECORD ONLY, not a missing value. */
+                          <span
+                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400 text-[10px] font-bold uppercase tracking-wide"
+                            title="No Evaluation Mode is set for this category. Edit it and choose a mode — saving this profile will be rejected until you do."
+                          >
+                            <AlertTriangle className="w-3 h-3 shrink-0" strokeWidth={2} />
+                            NOT SET
+                          </span>
                         ) : (
                           <span className="font-mono text-sm text-primary inline-flex items-center gap-1.5">
                             {cat.evalMode === '' ? (

@@ -193,6 +193,59 @@ function validateProductMatrixConfig(matrix: unknown): InvalidTargetField[] {
   return errors;
 }
 
+/** One category rejected by validateInspectionProfiles(). */
+interface UnsetEvalModeCategory {
+  profileId: string;
+  profileName: string;
+  categoryId: string;
+  categoryName: string;
+}
+
+/**
+ * Rejects any inspection profile carrying a category with NO evaluation mode
+ * (AUDIT_REPORT.md #17). Before this existed, such a category was silently
+ * normalised to CUMULATIVE client-side and behaved as a real quantitative mode
+ * without anyone having chosen it.
+ *
+ * Deliberately narrow — this rejects ONLY a genuinely absent value:
+ *   - `''`    is VALID (RECORD ONLY / true exclusion, aqlEvaluator.ts's skip path)
+ *   - `'N/A'` is VALID (qualitative PASS/FAIL)
+ * Treating `''` as missing here would break the entire RECORD ONLY feature.
+ * Both field spellings are checked (`evaluationMode` from the seeds/engine,
+ * `evalMode` from real admin-authored saves) — checking one would reject every
+ * genuine save from QualityRules.tsx.
+ *
+ * FORWARD-ONLY, by design: nothing is backfilled or rewritten. A pre-existing
+ * profile with an unset mode keeps working for grading (resolveVerdict.ts still
+ * has its own fallbacks) and is simply refused the next time someone tries to
+ * SAVE it — with QualityRules.tsx's amber "NOT SET" badge showing which category
+ * to fix first.
+ */
+function validateInspectionProfiles(profiles: unknown): UnsetEvalModeCategory[] {
+  const errors: UnsetEvalModeCategory[] = [];
+  if (!Array.isArray(profiles)) return errors;
+
+  for (const profile of profiles as any[]) {
+    const categories = profile?.aqlCategories;
+    if (!Array.isArray(categories)) continue;
+
+    for (const cat of categories) {
+      // `??` not `||`, so a deliberate '' is preserved as a real value.
+      const mode = cat?.evaluationMode ?? cat?.evalMode;
+      if (mode === undefined || mode === null) {
+        errors.push({
+          profileId:    String(profile?.id ?? ''),
+          profileName:  String(profile?.name ?? ''),
+          categoryId:   String(cat?.id ?? ''),
+          categoryName: String(cat?.name ?? ''),
+        });
+      }
+    }
+  }
+
+  return errors;
+}
+
 /**
  * Formats a raw Prisma AppConfig database record into a clean, parsed DTO.
  *
@@ -559,6 +612,31 @@ router.patch('/', requireRole('MANAGER', 'ADMIN'), async (req: Request, res: Res
         res.status(400).json({
           error: 'productMatrixConfig contains non-numeric target value(s)',
           invalidFields,
+        });
+        return;
+      }
+    }
+
+    // ── Inspection profile validation (AUDIT_REPORT.md #17) ───────────────────
+    // Every AQL category must carry an explicit evaluation mode. Runs only when
+    // the payload actually supplies inspectionProfiles, so a PATCH touching an
+    // unrelated field is never rejected because of a pre-existing bad profile —
+    // same scoping rule as the productMatrixConfig check above.
+    if (payload.inspectionProfiles !== undefined) {
+      const rawProfiles = typeof payload.inspectionProfiles === 'string'
+        ? safeParseJSON<any[]>(payload.inspectionProfiles as string, [])
+        : payload.inspectionProfiles;
+
+      const unsetEvalModes = validateInspectionProfiles(rawProfiles);
+      if (unsetEvalModes.length > 0) {
+        const detail = unsetEvalModes
+          .map((c) => `"${c.categoryName || c.categoryId}" (profile "${c.profileName || c.profileId}")`)
+          .join(', ');
+        res.status(400).json({
+          error:
+            `Every defect category must have an Evaluation Mode set. ` +
+            `Missing on: ${detail}.`,
+          unsetEvalModes,
         });
         return;
       }

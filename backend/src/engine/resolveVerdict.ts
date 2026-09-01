@@ -18,6 +18,11 @@
 
 import { evaluateAQLVerdict } from './aqlEvaluator';
 import type { ActualAqlAchieved, CategoryResult } from './aqlEvaluator';
+import {
+  DEFAULT_AQL_CATEGORY_SEED,
+  DEFAULT_DEFECT_DEFINITION_SEED,
+  DEFAULT_PROFILE_ID,
+} from './defaultProfileSeed';
 import { evaluateDimensions, evaluateWeight, hasUsableProductMatrix } from './dimensionEvaluator';
 import type { DimensionResult, ProductConfig, ProductDimensionDef } from './dimensionEvaluator';
 import { resolveProductRegistry } from '../lib/productEntry';
@@ -25,8 +30,16 @@ import prisma from '../lib/prismaClient';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HARDCODED GLOBAL STANDARD DEFAULT PROFILE
-// Mirrors ConfigContext.tsx getResolvedProfile() fallback.
 // Used when no profile is resolved from AppConfig or an explicit profileId.
+//
+// Category/defect VALUES are no longer restated here — they are derived from
+// defaultProfileSeed.ts, the single canonical source shared (via a machine-
+// enforced mirror) with ConfigContext.tsx and QualityRules.tsx. See
+// AUDIT_REPORT.md #10: three hand-written copies of this seed had drifted, with
+// BARRIER graded CUMULATIVE server-side while the UI displayed it as 'N/A'.
+//
+// This block now only ADAPTS the neutral seed into the engine's own field
+// dialect (aqlLevel / evaluationMode, currentClass / defaultClass).
 //
 // evaluationMode choices (per aqlEvaluator.ts):
 //   CUMULATIVE — sum all defect counts ≤ Ac; correct for zero-tolerance too
@@ -36,27 +49,21 @@ import prisma from '../lib/prismaClient';
 // ─────────────────────────────────────────────────────────────────────────────
 
 const HARDCODED_DEFAULT_PROFILE = {
-  id:   'prof_default',
+  id:   DEFAULT_PROFILE_ID,
   name: 'GLOBAL STANDARD (DEFAULT)',
-  aqlCategories: [
-    // AND = zero tolerance: CUMULATIVE mode with {ac:0,re:1} threshold
-    { id: 'BARRIER',   name: 'BARRIER',   aqlLevel: 'AND',           evaluationMode: 'CUMULATIVE' },
-    { id: 'CRITICAL',  name: 'CRITICAL',  aqlLevel: '1.5',           evaluationMode: 'CUMULATIVE' },
-    { id: 'MAJOR',     name: 'MAJOR',     aqlLevel: '2.5',           evaluationMode: 'CUMULATIVE' },
-    { id: 'MINOR',     name: 'MINOR',     aqlLevel: '4.0',           evaluationMode: 'GRANULAR'   },
-    // PACKAGING is qualitative; '' causes engine to skip it (informational only)
-    { id: 'PACKAGING', name: 'PACKAGING', aqlLevel: 'PASS/FAIL',     evaluationMode: ''           },
-  ],
-  defectDefinitions: [
-    // Engine matches defect defs to categories via currentClass === category.name || category.id
-    { id: 'def_hole',     name: 'Hole',       currentClass: 'BARRIER',   defaultClass: 'BARRIER'   },
-    { id: 'def_tear',     name: 'Tear',       currentClass: 'BARRIER',   defaultClass: 'BARRIER'   },
-    { id: 'def_stain',    name: 'Stain',      currentClass: 'CRITICAL',  defaultClass: 'CRITICAL'  },
-    { id: 'def_particle', name: 'Particle',   currentClass: 'CRITICAL',  defaultClass: 'CRITICAL'  },
-    { id: 'def_dirt',     name: 'Dirt',       currentClass: 'MAJOR',     defaultClass: 'MAJOR'     },
-    { id: 'def_flow',     name: 'Flow Mark',  currentClass: 'MINOR',     defaultClass: 'MINOR'     },
-    { id: 'def_box',      name: 'Box Damage', currentClass: 'PACKAGING', defaultClass: 'PACKAGING' },
-  ],
+  aqlCategories: DEFAULT_AQL_CATEGORY_SEED.map((c) => ({
+    id:             c.id,
+    name:           c.name,
+    aqlLevel:       c.aql,
+    evaluationMode: c.evalMode,
+  })),
+  // Engine matches defect defs to categories via currentClass === category.name || category.id
+  defectDefinitions: DEFAULT_DEFECT_DEFINITION_SEED.map((d) => ({
+    id:           d.id,
+    name:         d.name,
+    currentClass: d.categoryId,
+    defaultClass: d.categoryId,
+  })),
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -460,7 +467,7 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
     // If profilesList is non-empty but 'prof_default' specifically isn't in
     // it, fall through to the standard not-found handling below instead of
     // silently grading against the hardcoded profile.
-    if (!profile && profileId === 'prof_default' && profilesList.length === 0) {
+    if (!profile && profileId === DEFAULT_PROFILE_ID && profilesList.length === 0) {
       profile = HARDCODED_DEFAULT_PROFILE;
     }
 
@@ -498,7 +505,7 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
       const normalized  = normalizeForEngine(HARDCODED_DEFAULT_PROFILE);
       categories        = normalized.categories;
       defectDefinitions = normalized.defectDefinitions;
-      evaluationProfileId = 'prof_default';
+      evaluationProfileId = DEFAULT_PROFILE_ID;
       evaluationProfileName = HARDCODED_DEFAULT_PROFILE.name;
     } else {
       // AppConfig has real, admin-authored profiles, but none of them is
