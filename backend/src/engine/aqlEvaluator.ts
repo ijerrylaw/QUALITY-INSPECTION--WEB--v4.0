@@ -16,11 +16,12 @@
  */
 
 import {
+  ACHIEVABLE_AQL_LEVELS,
   AQLThreshold,
+  AchievableAQLLevel,
   INDETERMINATE_THRESHOLD,
   ISO_2859_MATRIX,
   SAMPLE_SIZE_BRACKETS,
-  SUPPORTED_AQL_LEVELS,
   SampleSizeBracket,
   SupportedAQLLevel,
   ZERO_TOLERANCE_THRESHOLD,
@@ -49,7 +50,7 @@ export interface DefectDefinition {
   currentClass: string;
 }
 
-export type { AQLThreshold, SampleSizeBracket, SupportedAQLLevel };
+export type { AQLThreshold, SampleSizeBracket, SupportedAQLLevel, AchievableAQLLevel };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BRACKET SMOOTHING
@@ -147,9 +148,10 @@ export function getAQLThresholds(sampleSize: number, aqlLevel: string): AQLThres
  * Which of the three possible outcomes a category's Actual AQL computation landed on.
  *
  *   ACHIEVED    — the observed count still satisfies at least one standard AQL level.
- *   EXCEEDS_ALL — the observed count busts even the loosest level in the table.
- *                 An explicit hard-fail state, deliberately NOT null/blank, so a
- *                 catastrophic category is visibly distinct from "not computed".
+ *   EXCEEDS_ALL — the observed count busts even the loosest achievable level
+ *                 ('6.5' — see ACHIEVABLE_AQL_LEVELS). An explicit hard-fail
+ *                 state, deliberately NOT null/blank, so a catastrophic
+ *                 category is visibly distinct from "not computed".
  *   QUALITATIVE — an N/A-mode (PASS/FAIL) category. Its `defectCounts` values are
  *                 state codes (0=unrecorded, 1=pass, 2=fail), not defect counts
  *                 (ISO2859_MATH_ENGINE.md §2), so there is no count to run the
@@ -175,12 +177,16 @@ export type ActualAqlStatus = 'ACHIEVED' | 'EXCEEDS_ALL' | 'QUALITATIVE';
 export interface ActualAqlAchieved {
   status: ActualAqlStatus;
   /**
-   * The achieved level ('0.65'…'10'). Null for EXCEEDS_ALL and QUALITATIVE.
+   * The achieved level ('0.65'…'6.5' — see ACHIEVABLE_AQL_LEVELS). Null for
+   * EXCEEDS_ALL and QUALITATIVE.
    *
    * '0.65' is the tightest level the table carries, so it reads as "0.65 or better" —
-   * the metric cannot resolve finer than the matrix's own leftmost column.
+   * the metric cannot resolve finer than the matrix's own leftmost column. '6.5'
+   * is the loosest level the ladder will report; a count that only fits under the
+   * matrix's '10' column is EXCEEDS_ALL, since '10' is not an assignable level
+   * (AUDIT_REPORT.md #29).
    */
-  aqlLevel: SupportedAQLLevel | null;
+  aqlLevel: AchievableAQLLevel | null;
   /**
    * Ac/Re of the achieved level. For EXCEEDS_ALL this carries the LOOSEST level's
    * Ac/Re — i.e. the bar that was still missed — so the hard-fail state stays
@@ -216,13 +222,18 @@ export const QUALITATIVE_ACTUAL_AQL: Readonly<ActualAqlAchieved> = {
  * level set: instead of resolving Ac/Re for ONE assigned level, it walks every level
  * and reports the tightest one the observed count still fits under.
  *
- * SUPPORTED_AQL_LEVELS is ordered tightest → loosest ('0.65' … '10'), and Ac is
+ * ACHIEVABLE_AQL_LEVELS is ordered tightest → loosest ('0.65' … '6.5'), and Ac is
  * monotonically non-decreasing along it for any fixed bracket (verified across all 13
  * rows of ISO_2859_MATRIX). So the FIRST level that accommodates the count is by
  * construction the tightest — a forward scan, no sorting or comparison needed.
  *
+ * The scan stops at '6.5' on purpose — it mirrors QualityRules.tsx's assignable
+ * ISO_WHITELIST, so the ladder can never report a level a category could not have
+ * been assigned. A count that would only have fit under the matrix's '10' column
+ * resolves to EXCEEDS_ALL instead. See AUDIT_REPORT.md #29.
+ *
  * Reuses getAQLThresholds() rather than reading ISO_2859_MATRIX directly, so bracket
- * snapping and the matrix stay single-sourced. None of the 7 level strings trips that
+ * snapping and the matrix stay single-sourced. None of the 6 level strings trips that
  * function's zero-tolerance guard (/and/i, /zero.?tolerance/i, /^0$/), so every
  * iteration reaches a real matrix cell.
  *
@@ -233,15 +244,17 @@ export function findActualAqlAchieved(
   sampleSize: number,
   observedCount: number,
 ): ActualAqlAchieved {
-  for (const level of SUPPORTED_AQL_LEVELS) {
+  for (const level of ACHIEVABLE_AQL_LEVELS) {
     const threshold = getAQLThresholds(sampleSize, level);
     if (observedCount <= threshold.ac) {
       return { status: 'ACHIEVED', aqlLevel: level, threshold, evaluatedCount: observedCount };
     }
   }
 
-  // Busted even the loosest level — explicit hard-fail state, never null/blank.
-  const loosest = SUPPORTED_AQL_LEVELS[SUPPORTED_AQL_LEVELS.length - 1];
+  // Busted even the loosest achievable level ('6.5') — explicit hard-fail state,
+  // never null/blank. '10' is a matrix column but not an assignable level, so it
+  // is deliberately not scanned here (AUDIT_REPORT.md #29).
+  const loosest = ACHIEVABLE_AQL_LEVELS[ACHIEVABLE_AQL_LEVELS.length - 1];
   return {
     status: 'EXCEEDS_ALL',
     aqlLevel: null,

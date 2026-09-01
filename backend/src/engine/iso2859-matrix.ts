@@ -104,6 +104,32 @@ export const SUPPORTED_AQL_LEVELS = [
 
 export type SupportedAQLLevel = (typeof SUPPORTED_AQL_LEVELS)[number];
 
+/**
+ * The subset of SUPPORTED_AQL_LEVELS that the "Actual AQL Achieved" ladder
+ * (findActualAqlAchieved(), aqlEvaluator.ts) is allowed to scan and report.
+ *
+ * Deliberately stops at '6.5', matching Configuration Control's assignable
+ * whitelist (QualityRules.tsx's ISO_WHITELIST) exactly. '10' is a real matrix
+ * column — kept in SUPPORTED_AQL_LEVELS and in ISO_2859_MATRIX so a directly
+ * supplied '10' still resolves — but it can never be *assigned* to a category,
+ * so it must never be reported as an *achieved* level either. A count that
+ * would only have fit under '10' now resolves to EXCEEDS_ALL against '6.5',
+ * the loosest achievable level. See AUDIT_REPORT.md #29.
+ *
+ * Same ordering guarantee as SUPPORTED_AQL_LEVELS: tightest → loosest, with Ac
+ * monotonically non-decreasing for any fixed bracket.
+ */
+export const ACHIEVABLE_AQL_LEVELS = [
+  '0.65',
+  '1.0',
+  '1.5',
+  '2.5',
+  '4.0',
+  '6.5',
+] as const;
+
+export type AchievableAQLLevel = (typeof ACHIEVABLE_AQL_LEVELS)[number];
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ISO 2859-1 TABLE II-A — NORMAL INSPECTION, SINGLE SAMPLING
 // ─────────────────────────────────────────────────────────────────────────────
