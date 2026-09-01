@@ -35,8 +35,9 @@ with its full original context, reasoning, and verification trail.
    for deletion or updating.
    → `CHANGELOG.md` §15.
 
-10. **Two independently-maintained "default profile" fallbacks disagree
-    on `evaluationMode`.** ~~The backend's `HARDCODED_DEFAULT_PROFILE`
+10. **Three independently-maintained "default profile" seeds disagree on
+    BARRIER's `evaluationMode`; PACKAGING drift now isolated to one of
+    them.** ~~The backend's `HARDCODED_DEFAULT_PROFILE`
     (`resolveVerdict.ts`) sets `CUMULATIVE` for BARRIER / `''` for
     PACKAGING; the frontend's separate hardcoded fallback
     (`ConfigContext.tsx`) sets `'N/A'` for both.~~
@@ -65,6 +66,17 @@ with its full original context, reasoning, and verification trail.
       persisted into `AppConfig.inspectionProfiles` for real, at which point
       it stops being a "fallback" and becomes the live profile — a path the
       other two fallbacks don't have.
+
+    **Audit-confirmed 2026-09-01 (current scope):**
+    - **PACKAGING between `resolveVerdict.ts` and `ConfigContext.tsx` is
+      resolved** — both now use `''`. That half of the original finding is
+      closed.
+    - **Remaining (a):** BARRIER is an unchanged three-way split —
+      `resolveVerdict.ts` `CUMULATIVE` (correct) / `ConfigContext.tsx`
+      `'N/A'` / `QualityRules.tsx` `defaultProfiles` seed `'N/A'`.
+    - **Remaining (b):** PACKAGING is still `'N/A'` *specifically* in the
+      `QualityRules.tsx` `defaultProfiles` seed (the third copy), while
+      `resolveVerdict.ts` and `ConfigContext.tsx` agree it should be `''`.
 
     **Diagnosed 2026-08-11:**
     - **Backend** — `backend/src/engine/resolveVerdict.ts:38-59`
@@ -119,17 +131,24 @@ with its full original context, reasoning, and verification trail.
     own unresolved-explicit-id behavior).
     → `CHANGELOG.md` §3.B6.
 
-12. **Minor color-token drift: `BatchEntry.tsx` and dead files use
-    non-canonical Tailwind colors instead of the mandated tokens.**
-    `BatchEntry.tsx` uses `red-500`/`hover:bg-red-500/10` instead of the
-    mandated `rose-500` token. The fully dead `components/wizard/*`/
-    `ConfigDashboard.tsx` files use non-canonical `green-`/`red-`/
-    `yellow-` classes instead of `emerald`/`rose`/`amber` — not live bugs,
-    but a landmine if any dead file is ever reconnected.
+12. **Minor color-token drift: one live line in `BatchEntry.tsx` uses a
+    non-canonical Tailwind color instead of the mandated token.**
+    **Narrowed 2026-09-01** after an audit pass confirmed current state:
+    - **Still open:** a single line, `BatchEntry.tsx:877`, uses
+      `hover:text-red-500 hover:bg-red-500/10` instead of the mandated
+      `rose-500` token.
+    - **Resolved:** the former dead-file sub-finding is gone — the
+      `components/wizard/*` prototype files were deleted (commits
+      `40a81b7` / `735fb20`), and `ConfigDashboard.tsx` now correctly uses
+      `rose-400`/`rose-300` only.
+    - **New, not-yet-tracked observation (low priority):**
+      `DevToolsPage.tsx` uses raw `red-500`/`red-600`/`red-900`/`red-400`
+      tokens throughout. It's the dev-only page from item #24 and shares
+      that item's fate — if #24 is deleted pre-go-live this drift goes with
+      it, so it is not worth a separate fix now.
     (Split off from the former `Badge.tsx` finding — that component's own
     geometry violation is now fixed and resolved, see `CHANGELOG.md`
-    §18.6. These two sub-findings were never in that fix's scope and
-    remain open.)
+    §18.6.)
     → `CHANGELOG.md` §3.B8 (original finding).
 
 13. **A brand-new install's zero-state default profile is code-level, not
@@ -146,12 +165,18 @@ with its full original context, reasoning, and verification trail.
     qualitative-tier defect to confirm the entire verdict chain works
     end-to-end for this dimension type.
 
-15. **Amendment discard-guard's new-entry dirty-check is fragile.** The
-    dirty-check logic is anchored to `sequenceNo` being the only field
-    with no auto-population path. This is a hidden dependency: a future
-    config change that adds auto-population elsewhere would silently
-    bypass the dirty-check unless a matching exclusion is added. Recommend
-    adding a code comment noting this dependency at minimum.
+15. **RESOLVED 2026-09-01.** ~~Amendment discard-guard's new-entry
+    dirty-check is fragile — anchored to `sequenceNo` being the only field
+    with no auto-population path, a hidden dependency a future
+    auto-population change elsewhere would silently bypass.~~ The
+    new-submission dirty-check in `frontend/src/utils/wizardDirty.ts` was
+    reworked to key off an explicit `sequenceTouched` flag (set only on
+    real operator input) instead of relying on `sequenceNo` having no
+    auto-population path. The dependency — including the later-added
+    sequence-hint prefill and the `totalCarton`/`gloveWeight` auto-fill
+    paths that are also deliberately not treated as "dirty" — is now
+    documented inline with a comment block at the top of the
+    new-submission branch (`wizardDirty.ts` ~lines 110-126).
 
 16. **`prisma db push` does not auto-regenerate the Prisma client.** This
     has caused integration bugs twice (schema changes persisted but client
@@ -188,12 +213,38 @@ with its full original context, reasoning, and verification trail.
     save time? keep the default but only for the documented zero-state case?)
     before a fix is drafted.
 
-18. **Defect breakdown display silently re-grades against current config, can
-    contradict the submission's own frozen verdict.** `Submission.defects`
-    stores only an `id→count` map plus one final frozen `verdict` string
-    (documented, intentional design — DATA_SCHEMAS_AND_TYPES.md line 48).
-    No defect name, category, or per-category pass/fail is persisted at
-    submission time.
+18. **RESOLVED 2026-09-01.** ~~Defect breakdown display silently re-grades
+    against current config, can contradict the submission's own frozen
+    verdict.~~
+
+    **Fix:** `Submission.gradingSnapshot` (+ `gradingSnapshotProfileName`)
+    now freezes a self-contained per-category analysis
+    (`FrozenCategoryAnalysis`, `backend/src/engine/resolveVerdict.ts`) at
+    submission time and again at amendment-approval time
+    (`backend/src/routes/submissions.routes.ts`). `HistoryFeed.tsx`'s
+    `DefectBreakdownPanel` renders that frozen snapshot directly for any
+    submission that has one — no `getResolvedProfile()` name lookup, no
+    `/api/verdict/preview` re-POST — so the expanded panel and the
+    collapsed `VerdictBadge` can no longer disagree for new or amended
+    submissions. Both fix directions from the original write-up were taken:
+    (a) the persisted snapshot, plus (b) an explicit live-re-grade label
+    for the one case still using a live lookup (below).
+
+    **Caveat (accepted, not a regression):** pre-existing legacy rows
+    submitted before `gradingSnapshot` existed have no snapshot and are
+    deliberately NOT backfilled. Those rows still live re-grade against
+    current config on expand — but now render an explicit drift banner
+    (`HistoryFeed.tsx` ~line 632) stating the breakdown is a live
+    re-computation, not a historical reproduction, rather than silently
+    contradicting the badge. The original detail below is retained for
+    context.
+
+    ---
+
+    `Submission.defects` stores only an `id→count` map plus one final
+    frozen `verdict` string (documented, intentional design —
+    DATA_SCHEMAS_AND_TYPES.md line 48). No defect name, category, or
+    per-category pass/fail is persisted at submission time.
 
     `HistoryFeed.tsx`'s `DefectBreakdownPanel` does two live lookups against
     **current** config when a submission's row is expanded: (1) resolves
