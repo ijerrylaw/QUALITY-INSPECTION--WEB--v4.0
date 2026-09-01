@@ -531,3 +531,16 @@ with its full original context, reasoning, and verification trail.
     is the accepted exception, not the whole chip spec.
     → `CHANGELOG.md` §37.
 
+33. **No backend test harness — `aqlEvaluator.ts`'s per-defect GRANULAR
+    grading is not tested at the engine level.** Raised by the DEFECTS
+    header/breakdown fix (2026-09-01, commit `f66bb99`). There is no
+    `backend/**/*.test.ts` and no backend vitest/jest config anywhere —
+    every automated test in the repo is frontend-side. The GRANULAR rule
+    (each defect type checked against Ac/Re independently, not by the
+    category's single max count) is currently guarded only by a frontend
+    panel test (`aqlCategoryAnalysisPanel.test.tsx`) that hand-sets the
+    expected `failing` flags on mock data; `evaluateAQLVerdict()` itself is
+    never invoked by any test. Future scoped task: stand up a minimal
+    backend vitest harness matching the frontend toolchain, and port the
+    GRANULAR 8/9/10-vs-Ac7 case to call the engine directly.
+

@@ -146,6 +146,14 @@ interface CategoryVerdictRow {
   reason?: string;
   /** Undefined for synthesized RECORD ONLY rows — they are never graded. */
   actualAqlAchieved?: ActualAqlAchieved | null;
+  /**
+   * N/A (qualitative PASS/FAIL) rows only — how many PASS/FAIL defect types the
+   * category has in total. Drives the "{defectCount} of {this} failed" label
+   * that replaces the numeric "Count:" for qualitative rows, mirroring the
+   * History panel's collapsed label (commit f66bb99). Undefined for every other
+   * mode.
+   */
+  qualitativeTypeCount?: number;
 }
 
 /**
@@ -316,17 +324,28 @@ export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpd
       ? aqlCategories.reduce<CategoryVerdictRow[]>((rows, localCat) => {
           const cr = previewState.categoryResults.find((r) => r.categoryId === localCat.id);
           if (cr) {
+            // N/A (qualitative PASS/FAIL) categories encode state, not a tally:
+            // cr.totalCount is the count of FAIL items, and each failingDefect's
+            // `count` is a state code (2), NOT a defect quantity — so this row
+            // must not print "Count: N" or "<name>: 2 > ac(0)". Same root cause
+            // as the History panel fix (commit f66bb99).
+            const isQualitative = cr.evaluationMode === 'N/A';
             rows.push({
               categoryName: cr.categoryName,
               aql: localCat.aql ?? localCat.aqlLevel ?? '—',
-              evalMode: cr.evaluationMode === 'N/A' ? 'QUALITATIVE' : cr.evaluationMode,
+              evalMode: isQualitative ? 'QUALITATIVE' : cr.evaluationMode,
               defectCount: cr.totalCount,
+              qualitativeTypeCount: isQualitative
+                ? defectDefinitions.filter((d) => d.categoryId === localCat.id).length
+                : undefined,
               thresholds: { ac: cr.threshold.ac, re: cr.threshold.re, bracket: snapToDisplayBracket(sampleSize) },
               actualAqlAchieved: cr.actualAqlAchieved ?? null,
               result: cr.passed ? 'PASS' : 'FAIL',
               reason: cr.passed
                 ? undefined
-                : cr.failingDefects.map((fd) => `${fd.defectName}: ${fd.count} > ac(${fd.threshold.ac})`).join('; '),
+                : isQualitative
+                  ? cr.failingDefects.map((fd) => `${fd.defectName}: FAIL`).join('; ')
+                  : cr.failingDefects.map((fd) => `${fd.defectName}: ${fd.count} > ac(${fd.threshold.ac})`).join('; '),
             });
             return rows;
           }
@@ -539,7 +558,11 @@ export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpd
                     n={cv.thresholds.bracket} · ac={cv.thresholds.ac} · re={cv.thresholds.re}
                   </span>
                 )}
-                <span className="text-[10px] font-mono text-muted">Count: {cv.defectCount}</span>
+                <span className="text-[10px] font-mono text-muted">
+                  {cv.evalMode === 'QUALITATIVE'
+                    ? `${cv.defectCount} of ${cv.qualitativeTypeCount ?? cv.defectCount} failed`
+                    : `Count: ${cv.defectCount}`}
+                </span>
                 {cv.result === 'RECORD_ONLY' ? (
                   <span className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-gray-500/10 border border-gray-500/30 text-gray-400 inline-flex items-center gap-1">
                     <Eye className="w-3 h-3" strokeWidth={2} />
