@@ -664,12 +664,11 @@ with its full original context, reasoning, and verification trail.
       mismatch — this was the isolated case the original finding expected.
 
     No schema change, so no `prisma generate` needed. Backend 20/20 + frontend
-    59/59 tests green, both `tsc` clean. **Pending Jerry's manual check:** a
-    live wizard run for `N035MNV-OC-24FT` (PIN kiosk) to eyeball the dimension
-    card labels — not done in-session (no dev server up; starting one risks
-    colliding with another session's :4001/:4009 and would add `AccessLog`
-    noise). Confidence is high from the DB-level verification + the now-canonical
-    data matching known-good `N025SKB-OC-24FT`.
+    59/59 tests green, both `tsc` clean. **Live-verified 2026-09-02:** Jerry
+    ran the `N035MNV-OC-24FT` wizard via PIN kiosk and confirmed the dimension
+    cards now render `CUFF THICKNESS` / `PALM THICKNESS` / `FINGER THICKNESS`
+    each against its correct spec (0.050 / 0.060 / 0.090 MIN). Last open
+    verification step closed.
 
     ---
 
