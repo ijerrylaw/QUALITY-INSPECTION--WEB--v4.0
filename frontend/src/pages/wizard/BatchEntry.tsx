@@ -874,7 +874,7 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
                     <td className="py-2 px-3 text-center">
                       <button 
                         onClick={() => setRows(rows.filter(r => r.id !== row.id))}
-                        className="w-8 h-8 rounded text-muted hover:text-red-500 hover:bg-red-500/10 transition-colors mx-auto flex items-center justify-center"
+                        className="w-8 h-8 rounded text-muted hover:text-rose-500 hover:bg-rose-500/10 transition-colors mx-auto flex items-center justify-center"
                         title="Remove Lot"
                       >
                         <Trash2 className="w-4 h-4" />
