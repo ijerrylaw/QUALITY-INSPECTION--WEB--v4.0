@@ -168,10 +168,23 @@ with its full original context, reasoning, and verification trail.
     own unresolved-explicit-id behavior).
     → `CHANGELOG.md` §3.B6.
 
-12. **Minor color-token drift: one live line in `BatchEntry.tsx` uses a
-    non-canonical Tailwind color instead of the mandated token.**
+12. **RESOLVED 2026-09-02** (commit `b7d935a`). ~~Minor color-token drift:
+    one live line in `BatchEntry.tsx` uses a non-canonical Tailwind color
+    instead of the mandated token.~~ `BatchEntry.tsx:877`'s Remove Lot trash
+    button now uses `hover:text-rose-500 hover:bg-rose-500/10` instead of the
+    `red-500` pair, per `UI_DESIGN_SYSTEM.md`'s "Danger (Fail)" rule ("use
+    `rose-500`/`rose-400` utility classes for component-level failure
+    styling"). Confirmed the only `red-*` occurrence in the file; single-line
+    change, no logic touched; typecheck + lint + full frontend test suite (59
+    tests) green. `DevToolsPage.tsx`'s raw `red-*` tokens remain out of scope
+    — tied to item #24's fate.
+
+    ---
+
+    *Original finding retained below.*
+
     **Narrowed 2026-09-01** after an audit pass confirmed current state:
-    - **Still open:** a single line, `BatchEntry.tsx:877`, uses
+    - **Was still open:** a single line, `BatchEntry.tsx:877`, uses
       `hover:text-red-500 hover:bg-red-500/10` instead of the mandated
       `rose-500` token.
     - **Resolved:** the former dead-file sub-finding is gone — the
@@ -244,12 +257,24 @@ with its full original context, reasoning, and verification trail.
     documented inline with a comment block at the top of the
     new-submission branch (`wizardDirty.ts` ~lines 110-126).
 
-16. **`prisma db push` does not auto-regenerate the Prisma client.** This
-    has caused integration bugs twice (schema changes persisted but client
-    still used old types). Recommend documenting this as a required manual
-    step in project workflow notes: always run `prisma generate` after any
-    `db push`, or use `prisma migrate deploy` (which auto-regenerates) in
-    production workflows.
+16. **RESOLVED 2026-09-02.** ~~`prisma db push` does not auto-regenerate the
+    Prisma client. This has caused integration bugs twice (schema changes
+    persisted but client still used old types).~~ Documented in a new
+    `AI_RULES.md` §7 "PRISMA / DATABASE WORKFLOW" section, which now carries
+    both this project's standing DB-workflow rules together: (a) `prisma db
+    push` only, never `prisma migrate dev` (the existing rule — it had lived
+    only in `CHANGELOG.md` §5.2 as historical context, not in any operating-
+    protocol doc), and (b) the new note that `db push` leaves the generated
+    client untouched, so `prisma generate` must be run manually after every
+    `db push` (unlike `prisma migrate deploy`, which regenerates).
+
+    ---
+
+    *Original finding retained below.*
+
+    Recommend documenting this as a required manual step in project workflow
+    notes: always run `prisma generate` after any `db push`, or use `prisma
+    migrate deploy` (which auto-regenerates) in production workflows.
 
 17. **RESOLVED 2026-09-01** (commit `0ea09a1`, same build as #10).
     ~~`ConfigContext.tsx`'s `getResolvedProfile()` defaults every category's
@@ -581,8 +606,34 @@ with its full original context, reasoning, and verification trail.
     one-off, data-only correction script, not a config-save) before it can
     be fixed safely.
 
-26. **Doc updates deferred following the Weight/Length/Palm Width/Cuff/Palm/
-    Finger unification build (2026-08-26).** `DATA_SCHEMAS_AND_TYPES.md` §3
+26. **RESOLVED 2026-09-02.** ~~Doc updates deferred following the Weight/
+    Length/Palm Width/Cuff/Palm/Finger unification build (2026-08-26).~~
+    Both passes completed, written against the actual source
+    (`backend/src/engine/dimensionEvaluator.ts` / `resolveVerdict.ts`), not
+    the finding prose:
+    - **`DATA_SCHEMAS_AND_TYPES.md` §3** — `ProductConfig` now documents
+      `lengthIsGraded` / `palmWidthIsGraded` (the fixed-row equivalents of
+      `ProductDimensionDef.isGraded`, same "only literal `false` is ever
+      written, default never materialized" convention, read through
+      `isDimensionGraded()`), plus an explicit note that there is
+      deliberately **no** `weightIsGraded` — `evaluateWeight()` takes no
+      `isGraded` param and hard-codes `isGraded: true`; Glove Weight has a
+      real always-on evaluator with no record-only mode, by design.
+    - **`ISO2859_MATH_ENGINE.md` §5** — new bullets describe `evaluateWeight()`
+      as a scalar single-value threshold check (1-element `fails`, reusing the
+      same `target ± tolerance` / `'MIN'` formula as the 5-slot path), folded
+      into `failedDimensions` by `resolveVerdict.ts` and frozen into
+      `Submission.gloveWeightSnapshot`; and the presence-axis rule that
+      `mergeCanonicalDimensionDefs()` makes Cuff/Palm/Finger Thickness (matched
+      by normalized name, never id) permanent non-deletable slots on every
+      product, while Beading Thickness is deliberately excluded and stays
+      optional/deletable.
+
+    ---
+
+    *Original finding retained below.*
+
+    `DATA_SCHEMAS_AND_TYPES.md` §3
     (`ProductDimensionDef`/`ProductConfig`/`SizeConfig`) needs a pass to
     document the new `ProductConfig.lengthIsGraded`/`palmWidthIsGraded`
     fields (mirroring `ProductDimensionDef.isGraded`'s existing docs, same
@@ -598,8 +649,23 @@ with its full original context, reasoning, and verification trail.
     not edited as part of this build, per standing convention (doc updates
     are their own explicit follow-up step, not a silent mid-task revision).
 
-27. **PARTIALLY RESOLVED 2026-08-26.** Doc updates deferred following the
-    wizard-visibility (OFF/RECORD ONLY/GRADED) build.
+27. **RESOLVED 2026-09-02** (`UI_DESIGN_SYSTEM.md` half was 2026-08-26).
+    ~~Doc updates deferred following the wizard-visibility (OFF/RECORD ONLY/
+    GRADED) build.~~ The remaining `DATA_SCHEMAS_AND_TYPES.md` §3 half is now
+    done: `ProductDimensionDef.wizardVisible` and
+    `ProductConfig.lengthWizardVisible` / `palmWidthWizardVisible` are
+    documented, mirroring `isGraded`'s "only literal `false` is ever written,
+    default never materialized" convention and read through the single-source
+    `isWizardVisible()` (`dimensionEvaluator.ts` / `ConfigContext.tsx`), while
+    stating explicitly that the flag is genuinely independent of `isGraded` —
+    toggling one never reads or writes the other, and all four
+    visible/off × graded/record-only combinations are valid. No Weight
+    counterpart (Glove Weight is always shown, always graded).
+
+    ---
+
+    *Original finding retained below.*
+
     - **`UI_DESIGN_SYSTEM.md` — RESOLVED.** New §4.14 documents the
       dimension mode control: it's since been replaced (`DimensionModeCycle`,
       a single cycling icon — Ruler/cyan=Graded, Eye/amber=Record Only,
