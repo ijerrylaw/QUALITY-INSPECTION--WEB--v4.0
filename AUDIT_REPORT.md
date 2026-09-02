@@ -620,9 +620,64 @@ with its full original context, reasoning, and verification trail.
     which point `NODE_ENV` must be manually confirmed as `production`. No
     action pending right now.
 
-25. **`N035MNV-OC-24FT`'s stored `dimensionDefs` have swapped ids/names —
+25. **RESOLVED 2026-09-02** (commit `547f5e2`, `dev.db` data-only). ~~`N035MNV-OC-24FT`'s
+    stored `dimensionDefs` have swapped ids/names — pre-existing data bug,
+    unrelated to and not fixed by the Weight/Length/Palm Width/Cuff/Palm/Finger
+    unification (2026-08-26).~~
+
+    **Fix.** Jerry decided 2026-09-02 to **delete the affected rows rather than
+    migrate their stored keys**: the only submissions against this product were
+    2 synthetic test rows (`cmtihe8li0001doc42s2arrew` size M 2026-09-01;
+    `cmtjgvxps0001eoc4e5ji6vtv` size M 2026-09-02 — the row cited in #14, whose
+    frozen-snapshot detail already lives in #14's prose), both `UNMODIFIED`
+    with **0** `AmendmentLog` rows. Deleted by primary key; the other 9
+    submissions (N025SKB ×6, N030MNV ×3), the 1 unrelated `AmendmentLog`, and
+    `AccessLog`/`PinUser` were untouched (`Submission` 11 → 9).
+
+    With no rows left pointing at the mismatched ids, the id↔name pairing was
+    corrected in place:
+    - `{id:"fingerThickness", name:"CUFF THICKNESS"}` → `id:"cuffThickness"`
+    - `{id:"dim_1785494533463", name:"FINGER THICKNESS"}` → `id:"fingerThickness"`
+    - `{id:"palmThickness", name:"PALM THICKNESS"}` — unchanged
+
+    Same key rename applied to `sizes[XS..XXL].dimensions` in every size.
+    `minSpec`/`tolerance` preserved verbatim (CUFF `0.050` MIN, PALM `0.060`
+    MIN, FINGER `0.090` MIN) — only the id strings moved, so the name↔spec
+    grading behaviour is byte-identical; `N035MNV-OC-24FT` now matches the
+    canonical `cuffThickness`/`palmThickness`/`fingerThickness` convention every
+    other product already uses. `dim_1785494533463`: 0 occurrences remain.
+
+    **Discovery-pass findings worth recording:**
+    - The swap existed in **both** stored blobs — `AppConfig.products` *and*
+      the legacy `AppConfig.productMatrixConfig` — not just the one quoted in
+      the original finding below. Both were corrected.
+    - **`AppConfig.products` is the live source of truth.**
+      `resolveProductRegistry()` (`backend/src/lib/productEntry.ts`) parses
+      `products` and *derives* `productMatrixConfig` from
+      `products[code].matrix`; `resolveVerdict.ts` grades against that derived
+      value, and the config/admin surface reads the same resolver. The raw
+      `productMatrixConfig` column is now only a fallback for an unmigrated DB
+      where `products` is empty. The `schema.prisma` comment calling `products`
+      "additive only, nothing reads it yet" **is stale**;
+      `DATA_SCHEMAS_AND_TYPES.md` §3.1 (cutover complete) is correct.
+    - No other product in the current config has any cuff/palm/finger id↔name
+      mismatch — this was the isolated case the original finding expected.
+
+    No schema change, so no `prisma generate` needed. Backend 20/20 + frontend
+    59/59 tests green, both `tsc` clean. **Pending Jerry's manual check:** a
+    live wizard run for `N035MNV-OC-24FT` (PIN kiosk) to eyeball the dimension
+    card labels — not done in-session (no dev server up; starting one risks
+    colliding with another session's :4001/:4009 and would add `AccessLog`
+    noise). Confidence is high from the DB-level verification + the now-canonical
+    data matching known-good `N025SKB-OC-24FT`.
+
+    ---
+
+    *Original finding retained below.*
+
+    `N035MNV-OC-24FT`'s stored `dimensionDefs` have swapped ids/names —
     pre-existing data bug, unrelated to and not fixed by the
-    Weight/Length/Palm Width/Cuff/Palm/Finger unification (2026-08-26).**
+    Weight/Length/Palm Width/Cuff/Palm/Finger unification (2026-08-26).
     Discovered while auditing `dev.db` for the canonical-id convention that
     build's presence-axis work relies on. Every other product with a
     `cuffThickness`/`palmThickness`/`fingerThickness` triplet has each id
