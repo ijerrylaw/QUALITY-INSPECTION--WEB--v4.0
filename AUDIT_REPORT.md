@@ -577,8 +577,9 @@ with its full original context, reasoning, and verification trail.
     (`StepDimensions.tsx:471`), unrelated to spec data, applies to every
     dimension card by design.
 
-24. **A dev-only "Delete All Submissions" tool exists (2026-08-26) and must be
-    manually confirmed dead/removed before go-live.** `DELETE
+24. **LOGGED 2026-09-02 — deliberate pre-launch checklist item, not an active
+    fix.** A dev-only "Delete All Submissions" tool exists (2026-08-26) and
+    must be manually confirmed dead/removed before go-live. `DELETE
     /api/dev/submissions/all` (`backend/src/routes/devTools.routes.ts`) wipes
     every `Submission` + `AmendmentLog` row (FK-safe order, single
     transaction) for dev/test cleanup — never touches `PinUser` or
@@ -602,14 +603,22 @@ with its full original context, reasoning, and verification trail.
       (dead-code-eliminated), and serving that build + logging in showed a
       genuinely blank content pane at `/dev-tools`.
 
-    **Why this is still an open item despite the gate being verified:** an
-    env-gated dev tool that deletes all inspection data is exactly the kind
-    of thing that must be a conscious pre-launch checklist item, not
-    something trusted to a flag alone. Before go-live: confirm the
-    deployment's `NODE_ENV` is actually set to `production`, and consider
-    deleting `devTools.routes.ts`/`DevToolsPage.tsx`/the `/dev-tools` route
-    and `/api/dev` mount outright rather than relying on the gate
-    indefinitely.
+    **Why this stays logged despite the gate being verified:** an env-gated
+    dev tool that deletes all inspection data is exactly the kind of thing
+    that must be a conscious pre-launch checklist item, not something trusted
+    to a flag alone. Before go-live: confirm the deployment's `NODE_ENV` is
+    actually set to `production`, and consider deleting
+    `devTools.routes.ts`/`DevToolsPage.tsx`/the `/dev-tools` route and
+    `/api/dev` mount outright rather than relying on the gate indefinitely.
+
+    **Decision 2026-09-02 (Jerry):** this stays a deliberate pre-launch
+    checklist item and is **not** to be actioned during active development.
+    The dev-tools wipe is still in regular use for test-data cleanup, so
+    removing it now would slow testing for no present safety benefit (both
+    structural gates above are verified). The delete-outright vs.
+    keep-gated call is explicitly deferred to immediately before go-live, at
+    which point `NODE_ENV` must be manually confirmed as `production`. No
+    action pending right now.
 
 25. **`N035MNV-OC-24FT`'s stored `dimensionDefs` have swapped ids/names —
     pre-existing data bug, unrelated to and not fixed by the
