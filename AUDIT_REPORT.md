@@ -29,10 +29,15 @@ with its full original context, reasoning, and verification trail.
    expected to be revisited once real QA input is available.
    → `CHANGELOG.md` §12.8.
 
-8. **`test_post.js`'s hardcoded `batchNumber` is stale** — no longer
-   matches the real `[Line][Side][YJJJ][Sequence]` lot-number format.
-   Inert manual script (not wired into any npm script or CI), candidate
-   for deletion or updating.
+8. **RESOLVED 2026-09-02** (commit `18e9df5`). ~~`test_post.js`'s hardcoded
+   `batchNumber` is stale — no longer matches the real
+   `[Line][Side][YJJJ][Sequence]` lot-number format. Inert manual script
+   (not wired into any npm script or CI), candidate for deletion or
+   updating.~~ Deleted rather than updated, per Jerry's decision. Confirmed
+   beforehand that nothing referenced it (no npm script, no CI config —
+   there is no `.github/workflows`, and no import/require anywhere in the
+   repo). Typecheck + lint + full frontend test suite (59) green after
+   removal.
    → `CHANGELOG.md` §15.
 
 10. **RESOLVED 2026-09-01** (commit `0ea09a1`). ~~Three independently-maintained
