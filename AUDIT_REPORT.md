@@ -196,11 +196,40 @@ with its full original context, reasoning, and verification trail.
     superseded by the single-tenant-per-deployment correction.
     → `CHANGELOG.md` §5.4, §9.2.
 
-14. **No qualitative (PASS/FAIL/NIL) defect category exists on any
-    currently configured profile.** This code path has zero live test
-    coverage. Flag for manual test pass when a profile first adds a
-    qualitative-tier defect to confirm the entire verdict chain works
-    end-to-end for this dimension type.
+14. **PARTIALLY RESOLVED 2026-09-02.** ~~No qualitative (PASS/FAIL/NIL)
+    defect category exists on any currently configured profile. This code
+    path has zero live test coverage. Flag for manual test pass when a
+    profile first adds a qualitative-tier defect to confirm the entire
+    verdict chain works end-to-end for this dimension type.~~
+
+    **Premise was already stale + FAIL path now covered end-to-end.**
+    `prof_default` in fact already carries a qualitative category — **OTHERS**
+    (`evalMode: 'N/A'`, `aql: 'PASS/FAIL'`, one defect "Donning"). The full
+    verdict chain was exercised on real data this session:
+    - Submission `cmtjgvxps0001eoc4e5ji6vtv` created through the **PIN wizard**
+      (Jason Tan / kiosk), `N035MNV-OC-24FT`, with OTHERS → Donning marked
+      **FAIL** (plus two GRANULAR VISUALS types independently failed, two
+      CUMULATIVE categories, one RECORD ONLY — mixed-mode in one record).
+    - Frozen `gradingSnapshot` verified directly (API, not UI): the OTHERS
+      category froze `evaluationMode: 'N/A'`, `totalCount: 1`, `passed: false`,
+      `actualAqlAchieved.status: 'QUALITATIVE'`, and its `defectItems[]` entry
+      carries `qualitativeState: 'FAIL'` — decoded from state code `2` at
+      freeze time (`DATA_SCHEMAS_AND_TYPES.md` §AppConfig /
+      `ISO2859_MATH_ENGINE.md` §2), not left as a raw state-code number. Lot
+      verdict `FAILED` end-to-end.
+    - `totalDefectTypes` froze before zero-count filtering (OTHERS 1,
+      VISUALS 30) — confirms the #33 / `f66bb99` denominator capture on real
+      stored data.
+    Backend engine coverage for the GRANULAR/QUALITATIVE grading paths landed
+    separately (#33, commit `45bf502`). No engine or schema change — the new
+    submission is local test data, committed as a dev.db checkpoint (`14f9cee`).
+
+    **Still open:** the **PASS** and **unrecorded (NIL / state 0)** states for
+    a qualitative category have not been observed in a frozen snapshot.
+    `prof_default`'s only qualitative category (OTHERS) has a single defect
+    type, so no PASS sibling can appear alongside the tested FAIL entry.
+    Revisit when a profile configures a multi-defect qualitative category, or
+    when a snapshot with a PASS/NIL qualitative entry is otherwise available.
 
 15. **RESOLVED 2026-09-01.** ~~Amendment discard-guard's new-entry
     dirty-check is fragile — anchored to `sequenceNo` being the only field
@@ -740,4 +769,35 @@ with its full original context, reasoning, and verification trail.
     `StepReviewSubmit.recordOnly.test.tsx` (asserts the KPI stays
     server-verdict-derived) and intentionally left as-is — logged for future
     consideration, not an active fix.
+
+35. **Accent-color preset system — all 5 presets verified 2026-09-02, no bug
+    found.** Only Cobalt (default) had ever been live-confirmed; Emerald,
+    Violet, Amber, Rose, and the propagation into Analytics chart theming had
+    never been checked. Verification pass (real Chromium via Vitest browser
+    mode). The `/system` → Company Branding accent dropdown is **Group A
+    only** — confirmed against `App.tsx`'s `RoleRoute allowedRoles={GROUP_A_ROLES}`
+    and `NAVIGATION_AND_RBAC.md` §4, not assumed.
+    - All 5 presets set the correct `--color-brand-primary` /
+      `--color-brand-secondary` on `:root` via `ConfigContext.tsx`'s accent
+      `useEffect`; a `var(--…)` consumer resolves to each preset's hex; and
+      cycling preset→preset leaves no stale value (every preset defines both
+      halves — no partial preset exists that could strand one).
+    - The Company Branding `<select>` renders exactly the 5 presets with the
+      right labels + a live swatch; selecting each through the real `onChange`
+      re-themes the swatch.
+    - Analytics charts derive from the **same single source of truth**
+      (`accentColors.ts` `resolveAccentPair`), not a disconnected hardcoded
+      palette — `AnalyticsDashboard.tsx:83-92` feeds `accentPair.primary` /
+      `.secondary` into the Recharts fill/stroke props (Pareto area fill,
+      cumulative trend line + dots, the "Minor Visual" pie slice). Per-preset
+      SVG assertion: the active preset's hexes appear and none of the other
+      four presets' hexes leak through a stale default. Pass/fail stacked bars
+      and the Major/Critical/Zero-Tolerance severity slices correctly stay
+      fixed semantic colors, not accent-driven.
+    Verification test was created, run, and removed — **no code change**; tree
+    clean at `14f9cee`. Two non-bug notes for context: the dropdown preview is
+    Save-gated (a picked preset re-themes app-wide only after
+    Save → PATCH `/api/config` → `refreshConfig`), and the Analytics page still
+    renders mock data (`NAVIGATION_AND_RBAC.md` §4 — "PLANNED — partial
+    implementation") — the theming wiring is real regardless.
 
