@@ -124,8 +124,8 @@ It answers *"what quality level did this lot actually demonstrate?"* — not *"d
 
 * **Server-Side Mirror:** `backend/src/engine/dimensionEvaluator.ts` mirrors this logic exactly (same threshold formulas, same quirks — e.g. `ProductDimensionDef.isMin` is intentionally never read; `isMin` is derived purely from whether a size's tolerance field is the literal string `'MIN'`). This is no longer a fully client-only, AQL-independent system: `resolveVerdict()` now combines both into the one persisted verdict — `(AQL verdict === 'FAILED') OR (failedDimensions > 0)` — so a dimension-only failure can no longer be silently dropped from what gets saved. See §2's engine source file list.
 
-* **Graded vs Record-only (`ProductDimensionDef.isGraded`):** A CUSTOM dimension can be marked **Record-only**, in which case it is excluded from grading entirely — no threshold comparison is attempted, and it can never contribute to `failedDimensions` or flip a verdict to FAIL. Everything else about it is unchanged: the operator still captures the same 5 slots (still pre-populated from `minSpec`, still required by the "complete all N slots" gate), the values are still persisted in `Submission.dimensions` for reporting/trending, and the stored `minSpec`/`tolerance` are never cleared or mutated. The two FIXED dimensions (GLOVE LENGTH, PALM WIDTH) are always graded and cannot be marked Record-only.
-  - **Default is implicit:** only the literal `false` means Record-only. See `ProductDimensionDef.isGraded` in `DATA_SCHEMAS_AND_TYPES.md` §3 for why the default must never be written to storage.
+* **Graded vs Record-only (`ProductDimensionDef.isGraded`):** A CUSTOM dimension can be marked **Record-only**, in which case it is excluded from grading entirely — no threshold comparison is attempted, and it can never contribute to `failedDimensions` or flip a verdict to FAIL. Everything else about it is unchanged: the operator still captures the same 5 slots (still pre-populated from `minSpec`, still required by the "complete all N slots" gate), the values are still persisted in `Submission.dimensions` for reporting/trending, and the stored `minSpec`/`tolerance` are never cleared or mutated. The two FIXED dimensions (GLOVE LENGTH, PALM WIDTH) can also be marked Record-only, but via `ProductConfig.lengthIsGraded`/`palmWidthIsGraded` (they have no def entry to carry `isGraded`) — same convention, applied by `evaluateDimensions()` to the synthetic fixed-row defs. GLOVE WEIGHT alone has no Record-only mode (see the `evaluateWeight()` bullet below).
+  - **Default is implicit:** only the literal `false` means Record-only. See `ProductDimensionDef.isGraded` / `ProductConfig.lengthIsGraded` in `DATA_SCHEMAS_AND_TYPES.md` §3 for why the default must never be written to storage.
   - **Applied in four places, all reading the same `isDimensionGraded()` rule:** `dimensionEvaluator.ts` (authoritative, server-side), `StepDimensions.tsx` (GUIDED, client-side real-time), `StepReviewSubmit.tsx` (client-side verdict combination), and `BatchEntry.tsx` (SPREADSHEET, display-only — it posts no verdict). Each computes an all-false `fails` array for a Record-only dimension rather than computing a comparison and discarding it, so downstream `fails.some(...)` consumers stay correct without knowing the flag exists.
   - **Locked codes:** the flag is part of `ProductConfig`, so `PATCH /api/config`'s existing whole-subtree deep diff already refuses to change it on a product code referenced by any Submission. No separate rule.
 
@@ -152,3 +152,57 @@ It answers *"what quality level did this lot actually demonstrate?"* — not *"d
   - Pre-filled untouched slots display as `text-muted` to signal auto-populated baseline.
   - Editing a slot converts it to `text-primary` (validated by the operator).
   - Out-of-spec values switch to `text-rose-400 bg-rose-500/5 border-rose-500/50`.
+
+* **Glove Weight is a scalar check, not a 5-slot dimension (`evaluateWeight()`):**
+  `backend/src/engine/dimensionEvaluator.ts`'s `evaluateWeight()` grades GLOVE
+  WEIGHT as a **single value** (`Submission.gloveWeight`) against
+  `SizeConfig.weightTarget` / `weightTolerance` — distinct from every other
+  dimension, which grades 5 measurement slots. It reuses the exact threshold
+  formulas above (`threshold = target − tolerance`; `maxThreshold = target +
+  tolerance` unless `tolerance === 0` or the tolerance field is the literal
+  `'MIN'`, in which case `maxThreshold = ∞`), just with a 1-element `fails`
+  array instead of 5. Before this evaluator existed, `weightTolerance` was
+  stored but never read for grading.
+  - **Always graded — no record-only mode, by design.** `evaluateWeight()`
+    takes no `isGraded` parameter and hard-codes `isGraded: true` on its
+    `DimensionResult`. There is deliberately no `ProductConfig.weightIsGraded`
+    and no wizard-visibility toggle for Weight (contrast
+    `lengthIsGraded`/`palmWidthIsGraded` for the other two fixed rows — see
+    `DATA_SCHEMAS_AND_TYPES.md` §3). Weight is evaluated whenever a
+    `weightTarget` is configured, full stop.
+  - **Result identity:** returned under the `FIXED_DIM_WEIGHT`
+    (`'__fixed_weight__'`) sentinel id, name `GLOVE WEIGHT`, with
+    `min`/`max`/`avg` all set to the single recorded value. `resolveVerdict()`
+    calls it alongside `evaluateDimensions()` and folds a Weight failure into
+    `failedDimensions` the same way, so a weight-only failure flips the
+    persisted verdict to FAIL just like any dimension-only failure. At submit
+    and amendment-approval the weight entry is pulled out of the computed
+    `dimensionResults` and frozen into `Submission.gloveWeightSnapshot`
+    (mirrors `gradingSnapshot`; null and not backfilled on legacy rows).
+
+* **Presence-axis rule — Cuff/Palm/Finger Thickness are permanent slots
+  (`mergeCanonicalDimensionDefs()`):** `mergeCanonicalDimensionDefs()`
+  (`dimensionEvaluator.ts`, with a deliberately-kept-in-sync twin in
+  `frontend/src/context/ConfigContext.tsx`) guarantees the three canonical
+  thickness dimensions — `cuffThickness` / "CUFF THICKNESS",
+  `palmThickness` / "PALM THICKNESS", `fingerThickness` / "FINGER THICKNESS" —
+  are present in every product's resolved dimension list, appending a virtual
+  def for any that is missing. It matches by **normalized name** (uppercased,
+  whitespace-collapsed), never by id, so a product whose canonical dimension
+  already exists under a legacy or mismatched id (e.g. a `dim_<timestamp>` id,
+  or the `N035MNV-OC-24FT` id/name-swap data bug, AUDIT_REPORT.md #25) already
+  satisfies presence and is left completely untouched — nothing is renamed or
+  re-ided, and an appended virtual def carries only identity/label (its
+  `minSpec`/`tolerance` still resolve per-size through `getDimSpec()`'s
+  empty-value fallback).
+  - **Beading Thickness is deliberately NOT canonical.** It stays a fully
+    optional, admin-added, deletable custom dimension with no presence
+    guarantee. Only Cuff/Palm/Finger Thickness are the permanent,
+    non-deletable slots. These three ids were chosen because 18/19 real
+    products in `dev.db` already converged on them independently — a
+    pre-existing de-facto convention, not one invented for this feature.
+  - **Ordering vs. the other axes:** presence is established here, before
+    evaluation. The OFF (`wizardVisible: false`) filter and the RECORD ONLY
+    (`isGraded: false`) skip both still apply afterward — a canonical
+    thickness slot is always *present* but can still be individually set OFF
+    or RECORD ONLY per product code.

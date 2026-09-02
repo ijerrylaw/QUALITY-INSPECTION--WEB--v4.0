@@ -379,6 +379,44 @@ export interface ProductConfig {
   weightDecimals?: number;      // Format precision for weight (0–3 decimals)
   lengthDecimals?: number;      // Format precision for length (0–3 decimals)
   palmWidthDecimals?: number;   // Format precision for palm width (0–3 decimals)
+  /**
+   * Graded vs Record-only for the two FIXED dimension rows, GLOVE LENGTH and
+   * PALM WIDTH. These are the per-product-code equivalents of
+   * `ProductDimensionDef.isGraded` for the fixed rows, which have no entry in
+   * `dimensionDefs` and so cannot carry the flag themselves. Semantics are
+   * identical: when explicitly `false`, the operator still captures all 5
+   * slots and they are still persisted, but no threshold comparison is
+   * attempted and the row can never contribute to a FAIL.
+   *
+   * SAME storage convention as `ProductDimensionDef.isGraded`: only the
+   * literal `false` is ever written — absent/undefined/true all grade, and
+   * the admin UI deletes the key rather than writing `true` on toggle-back,
+   * so PATCH /api/config's locked-code deep diff is never tripped by a
+   * materialized default. Read through `isDimensionGraded()`
+   * (`dimensionEvaluator.ts` / `ConfigContext.tsx`), which
+   * `evaluateDimensions()` applies to the synthetic fixed-row defs it builds
+   * from `matrixEntry.lengthIsGraded` / `.palmWidthIsGraded`.
+   *
+   * NO `weightIsGraded` COUNTERPART — BY DESIGN, NOT OVERSIGHT. GLOVE WEIGHT
+   * has a real grading evaluator (`evaluateWeight()`, see
+   * `ISO2859_MATH_ENGINE.md` §5) that is ALWAYS ON: it has no record-only
+   * mode and no visibility toggle. `evaluateWeight()` takes no `isGraded`
+   * parameter and hard-codes `isGraded: true` on its result. Weight is a
+   * scalar threshold check, always evaluated whenever a `weightTarget` is
+   * configured; there is deliberately no way to switch it to record-only.
+   */
+  lengthIsGraded?: boolean;
+  palmWidthIsGraded?: boolean;
+  /**
+   * Wizard visibility for the two FIXED rows — per-product-code equivalent of
+   * `ProductDimensionDef.wizardVisible`, and independent of
+   * `lengthIsGraded`/`palmWidthIsGraded` in exactly the same way (toggling one
+   * never touches the other). Only the literal `false` hides the row; the
+   * default is never materialized. Read through `isWizardVisible()`. Again NO
+   * Weight counterpart — Glove Weight is always shown and always graded.
+   */
+  lengthWizardVisible?: boolean;
+  palmWidthWizardVisible?: boolean;
 }
 
 export interface ProductDimensionDef {
@@ -395,8 +433,11 @@ export interface ProductDimensionDef {
    * still captures all 5 measurements and they are still persisted in
    * `Submission.dimensions`, but the dimension is excluded from ISO 2859
    * grading entirely — no threshold comparison is attempted and it can never
-   * contribute to a FAIL verdict. Applies ONLY to custom dimensions; the two
-   * fixed rows (GLOVE LENGTH, PALM WIDTH) are always graded.
+   * contribute to a FAIL verdict. This flag ONLY ever appears on a custom
+   * dimension def; the two fixed rows (GLOVE LENGTH, PALM WIDTH) carry the
+   * same graded/record-only choice on `ProductConfig.lengthIsGraded` /
+   * `palmWidthIsGraded` instead (see above), and GLOVE WEIGHT has no
+   * record-only mode at all.
    *
    * THE DEFAULT IS NEVER MATERIALIZED. Only the literal `false` means
    * record-only — absent/undefined/true all grade, and the admin UI removes
@@ -416,6 +457,32 @@ export interface ProductDimensionDef {
    * toggling, in either direction, at any toggle count.
    */
   isGraded?: boolean;
+  /**
+   * Wizard visibility (OFF vs shown). When explicitly `false`, the dimension
+   * is hidden from the operator entirely — filtered out of the rendered list
+   * in `StepDimensions.tsx`/`BatchEntry.tsx` before evaluation, so it never
+   * reaches `dimensionEvaluator.ts`'s loop and never appears in
+   * `Submission.dimensions` or `Submission.dimensionMins`. This is a strict
+   * superset of `isGraded: false` (RECORD ONLY): a RECORD ONLY dimension is
+   * still shown and still captured, just not graded; an OFF dimension is not
+   * shown at all. See `UI_DESIGN_SYSTEM.md` §4.14 for the three-state
+   * `DimensionModeCycle` control (Graded / Record Only / Off).
+   *
+   * SAME storage convention as `isGraded`: THE DEFAULT IS NEVER MATERIALIZED.
+   * Only the literal `false` hides the dimension — absent/undefined/true all
+   * show it, and the admin UI removes the key rather than writing `true` when
+   * toggling back on. Same reason as `isGraded`: PATCH /api/config's
+   * locked-code deep diff would 409 every save if a default were written onto
+   * existing defs. The single source of the rule is `isWizardVisible()`,
+   * declared in both `backend/src/engine/dimensionEvaluator.ts` and
+   * `frontend/src/context/ConfigContext.tsx`.
+   *
+   * GENUINELY INDEPENDENT of `isGraded` — the two flags never move together.
+   * Toggling wizard visibility never reads or writes `isGraded`, and vice
+   * versa; a dimension can carry any of the four (visible+graded,
+   * visible+record-only, off+graded, off+record-only) combinations.
+   */
+  wizardVisible?: boolean;
   decimals?: number;            // Format precision for dynamic dimensions (0–3 decimals)
 }
 

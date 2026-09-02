@@ -62,3 +62,10 @@ Model selection is controlled at the **Claude Code app level** (model picker in 
 
 * **Group C (PIN-based login) UI flows — self-testable, confirmed live.** Claude Code has directly click-tested, via Playwright against the real running dev backend, the full identity-first PIN login surface: directory search/filter, account selection, PIN pad entry, wrong-PIN failure/reset, the forced `mustChangePin` gate (`SetPinPage`), self-service PIN change, and "not you? go back" navigation. Going forward, attempt a real Playwright click-through for Group C UI changes as part of verification instead of defaulting to "needs Jerry's manual browser check."
 * **Group A/B (MSAL popup OAuth) — confirmed still blocked.** The Microsoft 365 SSO popup flow cannot be completed in this sandbox. Reserve the "needs Jerry's manual browser check" fallback for Group A/B (MSAL-authenticated) work only — it is not a blanket excuse to skip self-testing for Group C.
+
+---
+
+## 7. PRISMA / DATABASE WORKFLOW
+
+* **`prisma db push` only — never `prisma migrate dev`.** This is a standing project rule. The `backend/prisma/migrations/` folder is stale (only `20260723114800_init_schema` is on record; every schema change since was applied via `db push`), so `migrate dev` detects the drift and its only built-in remedy is `migrate reset`, which drops all data. Apply schema changes with `prisma db push` (additive/nullable, non-destructive), which reconciles the live DB directly against `schema.prisma` and ignores migration history. See `CHANGELOG.md` §5.2 for the full history of the drift.
+* **`prisma db push` does NOT regenerate the Prisma client.** Unlike `prisma migrate deploy`, `db push` writes the schema to the database but leaves the generated client (`@prisma/client` types) untouched. **Always run `prisma generate` manually after every `db push`.** Skipping it has caused integration bugs twice — the schema change persisted, but backend code kept compiling and running against the old generated types.
