@@ -703,39 +703,32 @@ with its full original context, reasoning, and verification trail.
     is the accepted exception, not the whole chip spec.
     → `CHANGELOG.md` §37.
 
-33. **`aqlEvaluator.ts`'s per-defect GRANULAR grading is still not tested at
-    the engine level** — narrowed 2026-09-01; the *harness* half is done, the
-    *GRANULAR coverage* half is not. Raised by the DEFECTS header/breakdown
-    fix (2026-09-01, commit `f66bb99`).
+33. **RESOLVED 2026-09-02** (commit `45bf502`; harness half was
+    `347549f`/`0ea09a1`). ~~`aqlEvaluator.ts`'s per-defect GRANULAR grading
+    is not tested at the engine level.~~ Raised by the DEFECTS
+    header/breakdown fix (2026-09-01, commit `f66bb99`).
 
-    **Narrowed 2026-09-01** after a discovery check against current code:
-    - **RESOLVED — the "no backend test harness" half.** ~~There is no
-      `backend/**/*.test.ts` and no backend vitest/jest config anywhere —
-      every automated test in the repo is frontend-side.~~ A backend harness
-      now exists (commit `347549f`): a `test` script in `backend/package.json`
-      running the root-hoisted vitest, with suites under
-      `backend/src/**/__tests__/`. No new dependency or config was required.
-    - **STILL OPEN — the original GRANULAR concern.** The harness covers
-      *adjacent* engine logic, not the rule this item was actually logged for:
-      `findActualAqlAchieved.test.ts` (`347549f`) tests the Actual-AQL
-      achievement ladder, and `validateInspectionProfiles.test.ts` (`0ea09a1`)
-      tests config-save validation. **`evaluateAQLVerdict()` — the function
-      that implements GRANULAR per-defect grading — is still invoked by zero
-      tests, backend or frontend.** (Verified by search: the `GRANULAR`
-      occurrences in existing test files are string literals in mock/seed data,
-      not exercises of the grading rule.)
+    **Fix — direct engine coverage for `evaluateAQLVerdict()`.**
+    `backend/src/engine/__tests__/evaluateAQLVerdict.test.ts` (9 tests) now
+    exercises the GRANULAR rule directly, pinned to a real ISO 2859-1 matrix
+    cell (n=125, AQL `'2.5'` → `{ac:7, re:8}`, read from `ISO_2859_MATRIX`, not
+    hardcoded): count 7 (= Ac) passes, count 8 (= Re) fails, count 10 fails.
+    This closes the gap that `347549f`/`0ea09a1` left — those added only
+    *adjacent* coverage (`findActualAqlAchieved.test.ts` for the Actual-AQL
+    ladder, `validateInspectionProfiles.test.ts` for config-save validation);
+    `evaluateAQLVerdict()` itself was still invoked by zero tests until now.
 
-    So the blocker is gone but the gap is not. The GRANULAR rule (each defect
-    type checked against Ac/Re independently, not by the category's single max
-    count) remains guarded only by a frontend panel test
-    (`aqlCategoryAnalysisPanel.test.tsx`) that hand-sets the expected `failing`
-    flags on mock data.
-
-    **Remaining task, now much smaller:** port the GRANULAR 8/9/10-vs-Ac7 case
-    into a new suite under `backend/src/engine/__tests__/` calling
-    `evaluateAQLVerdict()` directly. No harness setup needed — add the file and
-    it runs. `findActualAqlAchieved.test.ts` is a working template for how to
-    test the engine without any Prisma/I/O involvement.
+    **Discovery pass found no bug** — this was a pure coverage gap;
+    `evaluateAQLVerdict()` matches `ISO2859_MATH_ENGINE.md` §2 as written and
+    no engine code was changed. Confirmed by test:
+    - Each defect type is evaluated **independently** against Ac. A single
+      failing type fails the category, but `failingDefects` is scoped to the
+      failing type(s) only — passing siblings are neither pulled in nor able to
+      rescue the category, and multiple types can fail at once (not collapsed
+      to the single worst count).
+    - RECORD ONLY (`evaluationMode: ''`) produces no `CategoryResult` and cannot
+      affect the verdict — a large count on such a category is never treated as
+      GRANULAR failure data.
 
 34. **`StepReviewSubmit.tsx`'s "Total Defects Recorded" KPI folds N/A
     fail-counts into a defect tally.** The KPI sums `cr.totalCount` across
