@@ -157,10 +157,38 @@ with its full original context, reasoning, and verification trail.
       are. Unintentional drift, not two purposefully different behaviors.
     → `CHANGELOG.md` §3.B3 (secondary finding).
 
-11. **Confirmed live, 2026-08-10: an unrecognized explicit `profileId`
-    still hard-fails `POST /api/submissions` with a `404`**, instead of
+11. **RESOLVED 2026-09-02 — not a bug; deliberate behavior confirmed.**
+    ~~Confirmed live, 2026-08-10: an unrecognized explicit `profileId`
+    still hard-fails `POST /api/submissions` with a `404`, instead of
     degrading gracefully through the fallback chain the way a missing
-    `profileId` does. Verified directly: `curl -X POST
+    `profileId` does.~~
+
+    Jerry confirmed 2026-09-02 that the `404` is **intentional**: a
+    submission is a permanent record, so failing loudly on an explicit
+    `profileId` that resolves to nothing is preferable to silently grading
+    the record against a fallback profile the caller never asked for. The
+    asymmetry with `POST /api/verdict/preview` (which degrades a bad
+    `profileId` to the safety-net profile and returns `200`) is likewise
+    deliberate — preview results are disposable and never persisted, so a
+    graceful fallback there costs nothing.
+
+    Re-verified against current source this session (dev server not running;
+    curl not re-run, but the code paths are unambiguous):
+    `submissions.routes.ts` calls `resolveVerdict()` with the default
+    `onUnresolvedProfile: 'throw'`, which raises `VerdictProfileNotFoundError`
+    for an explicit id that is neither in `AppConfig.inspectionProfiles` nor
+    the `'prof_default'` sentinel; the route catches it, returns `404`, and
+    `return`s before any `prisma.submission.create`. `/api/verdict/preview`
+    passes `onUnresolvedProfile: 'fallback'`. Absent/empty `profileId` never
+    enters the throw path (`if (profileId)` guard in `resolveVerdict`).
+    Documented in `API_AND_INTEGRATION_SPEC.md`'s `POST /api/submissions`
+    section (commit `f1ee49b`).
+
+    ---
+
+    *Original finding retained below.*
+
+    Verified directly: `curl -X POST
     /api/verdict/preview` with a bogus `profileId` returns `200` and
     falls back to `prof_default` (this endpoint uses `resolveVerdict()`'s
     `'fallback'` mode); the same bogus `profileId` sent to `POST
