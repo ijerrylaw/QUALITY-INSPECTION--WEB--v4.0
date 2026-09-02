@@ -5,8 +5,11 @@ import { Badge } from '../ui/Badge';
 import { API_BASE_URL } from '../../context/ConfigContext';
 import { useAuth, authHeader } from '../../context/AuthContext';
 
-// Mirrors ApprovalsQueue.tsx's PAGE_SIZE/loadPage() pagination pattern — same
-// backend page/limit contract (GET /api/access-log).
+// Mirrors ApprovalsQueue.tsx's loadPage() pagination mechanism — same backend
+// page/limit contract (GET /api/access-log). The page SIZE differs
+// deliberately: the Approvals/History queues use 10 (small queues, so a
+// bigger page hid "Load More"), while the access log routinely holds
+// hundreds of rows and 50 is a reasonable first page.
 const PAGE_SIZE = 50;
 
 interface AccessLogRow {

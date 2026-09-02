@@ -36,8 +36,11 @@ interface PendingAmendment {
 // ── ApprovalsQueue ────────────────────────────────────────────────────────────
 
 // Mirrors HistoryFeed.tsx's PAGE_SIZE/loadPage() pagination pattern — same
-// backend page/limit contract (GET /api/amendments/pending, AUDIT_REPORT.md).
-const PAGE_SIZE = 50;
+// backend page/limit contract (GET /api/amendments/pending, AUDIT_REPORT.md
+// #20). 10, not the backend's own default (30) — a deliberately small page so
+// "Load More" actually surfaces at realistic pending-queue volumes (the queue
+// rarely holds 30+ rows, so a larger page size hid the control entirely).
+const PAGE_SIZE = 10;
 
 export function ApprovalsQueue() {
   const { user } = useAuth();

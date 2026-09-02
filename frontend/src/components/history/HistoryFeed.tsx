@@ -805,7 +805,12 @@ function submissionToCsvRow(sub: Submission): string {
 
 // ── HistoryFeed ───────────────────────────────────────────────────────────────
 
-const PAGE_SIZE = 50;
+// 10, not the backend's own default (50) — a deliberately small page so
+// "Load More" actually surfaces at realistic record volumes (AUDIT_REPORT.md
+// #20's sibling finding: a page size above the typical row count hid the
+// control entirely). EXPORT_PAGE_SIZE stays large — CSV export must pull in
+// bulk, not in 10s.
+const PAGE_SIZE = 10;
 const EXPORT_PAGE_SIZE = 200;
 const SEARCH_DEBOUNCE_MS = 300;
 
