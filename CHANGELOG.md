@@ -63,6 +63,7 @@ or summarized in the split — this is the original content, relocated.
 - [§38](#38-inspection-results-panel-post-review-cleanup-shipped-2026-08-27) — Inspection Results Panel — Post-Review Cleanup — Shipped 2026-08-27
 - [§39](#39-inspection-results-panel-layout-content-revision-shipped-2026-08-27) — Inspection Results Panel — Layout & Content Revision — Shipped 2026-08-27
 - [§40](#40-inspection-results-panel-actual-column-centering-hierarchy-swap-shipped-2026-08-27) — Inspection Results Panel — ACTUAL Column Centering & Hierarchy Swap — Shipped 2026-08-27
+- [§41](#41-qualitative-na-category-pass-state-snapshot-proof-odour-defect-type-2026-09-02) — Qualitative (N/A) Category — PASS-State Snapshot Proof + `Odour` Defect Type — 2026-09-02
 
 ---
 
@@ -5558,3 +5559,34 @@ gained the `1400px` wrapper described above.
 **Verification:** `tsc` clean both sides; all 28 Vitest tests green,
 including "THE GUARD" width-regression test and the newly-fixed alignment
 tests, confirmed by name in a verbose run.
+
+---
+
+## 41. Qualitative (N/A) Category — PASS-State Snapshot Proof + `Odour` Defect Type — 2026-09-02
+
+Closes `AUDIT_REPORT.md` open item #14 (previously "PARTIALLY RESOLVED
+2026-09-02"). The FAIL path for a qualitative (N/A-mode) category had already
+been proven live — submission `cmtjgvxps0001eoc4e5ji6vtv`, where
+`qualitativeState`, `totalDefectTypes`, and the lot verdict all froze into
+the `gradingSnapshot` correctly. What stayed unobservable: a PASS state for
+a qualitative defect type, because `prof_default`'s only qualitative category
+(OTHERS) had just one defect type (Donning) — no sibling to hold a PASS while
+another failed.
+
+**Unblocking config change:** Jerry added a second defect type, **Odour**, to
+the OTHERS category in `prof_default` (2026-09-02), specifically so a mixed
+PASS/FAIL qualitative category could exist.
+
+**Proof submission:** a real PIN-wizard submission under Jason Tan's account
+recorded **Donning = PASS, Odour = FAIL** in the OTHERS category. Jerry
+live-verified the Inspection Records expanded panel:
+
+- category header reads **"1 of 2 failed"** — the PASS defect type is counted
+  in the denominator;
+- only the **Odour FAIL chip** renders — PASS states are intentionally not
+  shown as chips, per the locked display spec (FAILs only);
+- category verdict is **FAIL** — any FAIL in a qualitative category fails the
+  category.
+
+Both PASS and FAIL qualitative states are now confirmed to freeze and render
+correctly from a live `gradingSnapshot`. Item #14 fully RESOLVED.

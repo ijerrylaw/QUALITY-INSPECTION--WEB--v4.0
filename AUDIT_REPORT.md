@@ -39,16 +39,6 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
     by the single-tenant-per-deployment correction. No fix scheduled.
     → `CHANGELOG.md` §5.4, §9.2.
 
-14. **PARTIALLY RESOLVED 2026-09-02.** FAIL path for a qualitative (N/A)
-    category confirmed end-to-end via a real PIN-wizard submission
-    (`cmtjgvxps0001eoc4e5ji6vtv`) — `qualitativeState`, `totalDefectTypes`,
-    and lot verdict all froze correctly. **Still open:** PASS and
-    unrecorded/NIL states for a qualitative category have never been
-    observed in a frozen snapshot (`prof_default`'s only qualitative
-    category, OTHERS, has just one defect type — no PASS sibling
-    possible). Revisit when a multi-defect qualitative category exists.
-    → `CHANGELOG.md` §14, §35.
-
 24. **Pre-launch checklist item — dev-tools wipe, not an active fix.** A
     dev-only "Delete All Submissions" tool (`DELETE
     /api/dev/submissions/all`, `/dev-tools`) exists for test-data cleanup.
@@ -111,6 +101,19 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
     `DevToolsPage.tsx`'s raw `red-*` tokens remain out of scope, tied to
     #24.
     → `CHANGELOG.md` §3.B8.
+
+14. **RESOLVED 2026-09-02 — live-verified by Jerry.** FAIL path was already
+    proven (submission `cmtjgvxps0001eoc4e5ji6vtv` — `qualitativeState`,
+    `totalDefectTypes`, and lot verdict all froze). The remaining gap — no
+    multi-defect qualitative category existed to observe a PASS sibling —
+    was closed by adding a second defect type (**Odour**) to
+    `prof_default`'s OTHERS category; a real PIN submission (Jason Tan) then
+    recorded Donning = PASS + Odour = FAIL in OTHERS. Panel live-verified:
+    header "1 of 2 failed", only the Odour FAIL chip shown (PASS counted in
+    the denominator, not rendered as a chip, per the locked spec), category
+    verdict FAIL. PASS and FAIL qualitative states now both confirmed to
+    freeze and render in a live `gradingSnapshot`.
+    → `CHANGELOG.md` §14, §35, §41.
 
 15. **RESOLVED 2026-09-01.** Amendment discard-guard's dirty-check
     reworked to key off an explicit `sequenceTouched` flag instead of
