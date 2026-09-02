@@ -21,6 +21,51 @@ or summarized in the split — this is the original content, relocated.
 
 ---
 
+## Table of Contents
+
+- [§1](#1-executive-summary-top-5-issues-by-risk) — Executive Summary — Top 5 Issues by Risk
+- [§2](#2-part-a-baseline-discovery) — Part A — Baseline Discovery
+- [§3](#3-part-b-targeted-verification) — Part B — Targeted Verification
+- [§4](#4-miscellaneous-findings-not-covered-by-the-numbered-items-above) — Miscellaneous findings (not covered by the numbered items above)
+- [§5](#5-known-issues-tracked-not-yet-fixed) — Known Issues (tracked, not yet fixed)
+- [§6](#6-step-11-end-to-end-verification-pass-phase-12-close-out) — Step 11 — End-to-End Verification Pass (Phase 1+2 close-out)
+- [§7](#7-pre-seeding-audit-step-1-profileconfig-vs-real-production-data) — Pre-Seeding Audit — Step 1: Profile/Config vs. Real Production Data
+- [§8](#8-five-open-questions-read-only-investigation) — Five Open Questions — Read-Only Investigation
+- [§9](#9-status-check-auth-fix-known-issues-refresh-relational-vs-blob-effort) — Status Check — Auth Fix, Known-Issues Refresh, Relational-vs-Blob Effort
+- [§10](#10-code-change-pass-auth-middleware-visual-tier-decision-relational-table-removal) — Code Change Pass — Auth Middleware, Visual-Tier Decision, Relational Table Removal
+- [§11](#11-permission-groups-abc-self-managed-pin-admin-idle-expiry-dev-gated-m365-mock) — Permission Groups (A/B/C), Self-Managed PIN Admin, Idle Expiry, Dev-Gated M365 Mock
+- [§12](#12-real-defect-taxonomy-seed-prof_default-47-defects-5-categories) — Real Defect Taxonomy Seed — `prof_default` (47 defects, 5 categories)
+- [§13](#13-five-independent-fixes-cleanup-backlog-pass) — Five Independent Fixes — Cleanup Backlog Pass
+- [§14](#14-inspection-records-50-row-cap-amendment-lookup-fix) — Inspection Records 50-Row Cap + Amendment Lookup Fix
+- [§15](#15-unified-lot-number-composition-editable-production-date-uniqueness-enforcement) — Unified Lot Number Composition, Editable Production Date, Uniqueness Enforcement
+- [§16](#16-filter-and-export-csv-on-inspection-records-commit-43dbbe7) — FILTER and EXPORT CSV on Inspection Records — commit `43dbbe7`
+- [§17](#17-staff-pin-access-self-service-pin-change-deactivated-staff-filter-hard-delete-descoped) — Staff PIN Access — Self-Service PIN Change, Deactivated-Staff Filter, Hard-Delete Descoped
+- [§18](#18-audit_reportmd-housekeeping-resolved-items-relocated-from-the-open-list) — AUDIT_REPORT.md Housekeeping — Resolved Items Relocated From the Open List
+- [§19](#19-false-positive-unsaved-changes-warning-on-untouched-wizard-entry-fixed-2026-08-14) — False-Positive "Unsaved Changes" Warning on Untouched Wizard Entry — Fixed 2026-08-14
+- [§20](#20-gradedrecord-only-dimension-mode-shipped-2026-08-19) — Graded/Record-only Dimension Mode — Shipped 2026-08-19
+- [§21](#21-merge-standalone-rename-into-the-inline-edit-flow-shipped-2026-08-20) — Merge Standalone Rename into the Inline Edit Flow — Shipped 2026-08-20
+- [§22](#22-close-the-locked-code-attributeprofileid-write-gap-shipped-2026-08-20) — Close the Locked-code Attribute/profileId Write Gap — Shipped 2026-08-20
+- [§23](#23-reject-duplicate-defect-names-within-a-profile-shipped-2026-08-20) — Reject Duplicate Defect Names Within a Profile — Shipped 2026-08-20
+- [§24](#24-fresh-categorydefect-ids-on-inspection-profile-duplicate-shipped-2026-08-20) — Fresh Category/Defect IDs on Inspection Profile Duplicate — Shipped 2026-08-20
+- [§25](#25-m365-admin-access-lifecycle-bootstrap-invite-offboarding-stage-1-backend-stage-2-frontend-shipped-2026-08-21) — M365 Admin Access Lifecycle — Bootstrap, Invite, Offboarding (Stage 1 backend + Stage 2 frontend) — Shipped 2026-08-21
+- [§26](#26-pin-access-employeeid-field-intern-role-shared-role-labels-shipped-2026-08-24) — PIN Access — employeeId Field, INTERN Role, Shared Role Labels — Shipped 2026-08-24
+- [§27](#27-doc-corrections-pass-amendmentlog-interface-sync-shipped-2026-08-24) — Doc-Corrections Pass + AmendmentLog Interface Sync — Shipped 2026-08-24
+- [§28](#28-amendment-request-review-modal-redesign-shipped-2026-08-24) — Amendment Request Review Modal Redesign — Shipped 2026-08-24
+- [§29](#29-retain-context-for-next-batch-tooltip-fix-localstorage-consolidation-shipped-2026-08-24) — Retain Context for Next Batch — Tooltip Fix + localStorage Consolidation — Shipped 2026-08-24
+- [§30](#30-aql-category-analysis-panel-widthclipping-root-cause-saga-shipped-2026-08-25) — AQL Category Analysis Panel — Width/Clipping Root-Cause Saga — Shipped 2026-08-25
+- [§31](#31-amendment-modal-polish-arc-shipped-2026-08-25) — Amendment Modal Polish Arc — Shipped 2026-08-25
+- [§32](#32-pin-security-redesign-identity-first-login-mustchangepin-admin-pin-reset-shipped-2026-08-25) — PIN Security Redesign — Identity-First Login, mustChangePin, Admin PIN Reset — Shipped 2026-08-25
+- [§33](#33-ai_rulesmd-6-confirmed-group-c-playwright-self-test-capability-shipped-2026-08-25) — AI_RULES.md §6 — Confirmed Group C Playwright Self-Test Capability — Shipped 2026-08-25
+- [§34](#34-aql-level-passfail-record-only-shipped-2026-08-25) — AQL Level PASS/FAIL + RECORD ONLY — Shipped 2026-08-25
+- [§35](#35-actual-aql-achieved-shipped-2026-08-27) — Actual AQL Achieved — Shipped 2026-08-27
+- [§36](#36-inspection-results-panel-restructure-shipped-2026-08-27) — Inspection Results Panel Restructure — Shipped 2026-08-27
+- [§37](#37-inspection-results-panel-visual-consistency-rework-shipped-2026-08-27) — Inspection Results Panel — Visual Consistency Rework — Shipped 2026-08-27
+- [§38](#38-inspection-results-panel-post-review-cleanup-shipped-2026-08-27) — Inspection Results Panel — Post-Review Cleanup — Shipped 2026-08-27
+- [§39](#39-inspection-results-panel-layout-content-revision-shipped-2026-08-27) — Inspection Results Panel — Layout & Content Revision — Shipped 2026-08-27
+- [§40](#40-inspection-results-panel-actual-column-centering-hierarchy-swap-shipped-2026-08-27) — Inspection Results Panel — ACTUAL Column Centering & Hierarchy Swap — Shipped 2026-08-27
+
+---
+
 *(Archived content begins below — verbatim, unedited, original title and all)*
 
 # AUDIT_REPORT.md
