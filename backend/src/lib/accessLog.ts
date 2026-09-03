@@ -18,7 +18,17 @@ export type AccessLogAction =
   | 'M365_LOGIN_FAILURE'
   | 'PIN_LOGIN_SUCCESS'
   | 'PIN_LOGIN_FAILURE'
-  | 'CONFIG_WRITE';
+  | 'CONFIG_WRITE'
+  /**
+   * A PATCH /api/config that was ATTEMPTED but rejected before anything
+   * persisted — currently only when the profile-registry sync would drop a
+   * locked defect/category (ProfileRegistrySyncError). The write is fully
+   * rolled back, so unlike CONFIG_WRITE nothing changed; the row exists so a
+   * rejected save is still visible in the audit trail rather than leaving a
+   * silent gap. The `_FAILURE` suffix matches the existing LOGIN_FAILURE
+   * naming, so AccessLogPanel.tsx renders it red with no frontend change.
+   */
+  | 'CONFIG_WRITE_FAILURE';
 
 export async function logAccess(
   req: Request,

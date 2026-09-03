@@ -25,7 +25,21 @@
  */
 
 import prisma from './prismaClient';
+import { Prisma } from '../../generated/prisma/client';
 import { fromEngineEvaluationMode } from './categoryEvaluationMode';
+
+/**
+ * The subset of the Prisma client these functions touch — satisfied by both
+ * the module singleton and a `prisma.$transaction(async (tx) => …)` client.
+ *
+ * PATCH /api/config wraps the AppConfig write and this whole projection in one
+ * interactive transaction, so a projection failure (e.g. a locked defect being
+ * dropped) rolls the JSON write back rather than leaving the stored profiles
+ * and the grading tables in a split-brain state. Every function below takes an
+ * optional `db`, defaulting to the singleton, so the one-off backfill script
+ * and the registry routes keep calling them with no transaction and no change.
+ */
+export type RegistryDb = Prisma.TransactionClient;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SOURCE SHAPES (AppConfig.inspectionProfiles JSON)
@@ -120,8 +134,10 @@ export class ProfileRegistrySyncError extends Error {
  * stored — a cached boolean could drift from the snapshots that are the actual
  * authority. Same reasoning as getProductCodeUsage() in config.routes.ts.
  */
-export async function loadLockState(): Promise<{ defects: Set<string>; categories: Set<string> }> {
-  const usage = await loadLockUsage();
+export async function loadLockState(
+  db: RegistryDb = prisma,
+): Promise<{ defects: Set<string>; categories: Set<string> }> {
+  const usage = await loadLockUsage(db);
   return {
     defects: new Set(usage.defects.keys()),
     categories: new Set(usage.categories.keys()),
@@ -141,11 +157,11 @@ export async function loadLockState(): Promise<{ defects: Set<string>; categorie
  * loadLockState() is a projection of this, so the boolean and the count can
  * never disagree about what "locked" means — one scan, one definition.
  */
-export async function loadLockUsage(): Promise<{
+export async function loadLockUsage(db: RegistryDb = prisma): Promise<{
   defects: Map<string, number>;
   categories: Map<string, number>;
 }> {
-  const submissions = await prisma.submission.findMany({
+  const submissions = await db.submission.findMany({
     where: { gradingSnapshot: { not: null } },
     select: { gradingSnapshot: true },
   });
@@ -370,9 +386,9 @@ export function planRegistry(
  * the current maximum. A code that moves is worse than a numbering gap, since
  * these are what people read off a picker.
  */
-export async function applyRegistryPlan(plan: RegistryPlan): Promise<void> {
-  const existingDefects = await prisma.defect.findMany({ select: { id: true, code: true } });
-  const existingCategories = await prisma.category.findMany({ select: { id: true, code: true } });
+export async function applyRegistryPlan(plan: RegistryPlan, db: RegistryDb = prisma): Promise<void> {
+  const existingDefects = await db.defect.findMany({ select: { id: true, code: true } });
+  const existingCategories = await db.category.findMany({ select: { id: true, code: true } });
   const defectCodeById = new Map(existingDefects.map((d) => [d.id, d.code]));
   const categoryCodeById = new Map(existingCategories.map((c) => [c.id, c.code]));
 
@@ -406,7 +422,7 @@ export async function applyRegistryPlan(plan: RegistryPlan): Promise<void> {
   // PATCH /api/config. Goes away at Stage 4, when the picker replaces
   // free-text naming and ids can only come from the registry.
   const existingDefectByNameKey = new Map(
-    (await prisma.defect.findMany({ select: { id: true, nameKey: true, name: true } }))
+    (await db.defect.findMany({ select: { id: true, nameKey: true, name: true } }))
       .map((d) => [d.nameKey, d]),
   );
   for (const d of plan.defects) {
@@ -420,7 +436,7 @@ export async function applyRegistryPlan(plan: RegistryPlan): Promise<void> {
     }
   }
   const existingCategoryByNameKey = new Map(
-    (await prisma.category.findMany({ select: { id: true, nameKey: true, name: true } }))
+    (await db.category.findMany({ select: { id: true, nameKey: true, name: true } }))
       .map((c) => [c.nameKey, c]),
   );
   for (const c of plan.categories) {
@@ -441,17 +457,17 @@ export async function applyRegistryPlan(plan: RegistryPlan): Promise<void> {
       nameKey: c.nameKey,
       evaluationMode: c.evaluationMode,
     };
-    await prisma.category.upsert({ where: { id: c.id }, create: { id: c.id, ...data }, update: data });
+    await db.category.upsert({ where: { id: c.id }, create: { id: c.id, ...data }, update: data });
   }
 
   for (const d of orderedDefects) {
     const data = { code: defectCodeById.get(d.id) as string, name: d.name, nameKey: d.nameKey };
-    await prisma.defect.upsert({ where: { id: d.id }, create: { id: d.id, ...data }, update: data });
+    await db.defect.upsert({ where: { id: d.id }, create: { id: d.id, ...data }, update: data });
   }
 
   const profileCategoryIdByKey = new Map<string, string>();
   for (const pc of plan.profileCategories) {
-    const row = await prisma.profileCategory.upsert({
+    const row = await db.profileCategory.upsert({
       where: { profileId_categoryId: { profileId: pc.profileId, categoryId: pc.categoryId } },
       create: pc,
       update: { aqlLevel: pc.aqlLevel, sortOrder: pc.sortOrder },
@@ -477,18 +493,18 @@ export async function applyRegistryPlan(plan: RegistryPlan): Promise<void> {
       profileCategoryIdByKey.get(`${p.profileId}::${p.categoryId}`) as string,
     ]),
   );
-  const staleDefectLinks = (await prisma.profileCategoryDefect.findMany({
+  const staleDefectLinks = (await db.profileCategoryDefect.findMany({
     select: { id: true, profileId: true, defectId: true, profileCategoryId: true },
   })).filter((r) => plannedLink.get(`${r.profileId}::${r.defectId}`) !== r.profileCategoryId);
   if (staleDefectLinks.length) {
-    await prisma.profileCategoryDefect.deleteMany({
+    await db.profileCategoryDefect.deleteMany({
       where: { id: { in: staleDefectLinks.map((r) => r.id) } },
     });
   }
 
   for (const pd of plan.profileDefects) {
     const profileCategoryId = profileCategoryIdByKey.get(`${pd.profileId}::${pd.categoryId}`) as string;
-    await prisma.profileCategoryDefect.upsert({
+    await db.profileCategoryDefect.upsert({
       where: { profileCategoryId_defectId: { profileCategoryId, defectId: pd.defectId } },
       create: { profileCategoryId, defectId: pd.defectId, profileId: pd.profileId, sortOrder: pd.sortOrder },
       update: { sortOrder: pd.sortOrder },
@@ -500,11 +516,11 @@ export async function applyRegistryPlan(plan: RegistryPlan): Promise<void> {
   // deleted here, because a defect dropped from every profile may still be
   // referenced by a frozen gradingSnapshot and must stay resolvable.
   const keepPc = new Set(plan.profileCategories.map((p) => `${p.profileId}::${p.categoryId}`));
-  const stalePc = (await prisma.profileCategory.findMany({
+  const stalePc = (await db.profileCategory.findMany({
     select: { id: true, profileId: true, categoryId: true },
   })).filter((r) => !keepPc.has(`${r.profileId}::${r.categoryId}`));
   if (stalePc.length) {
-    await prisma.profileCategory.deleteMany({ where: { id: { in: stalePc.map((r) => r.id) } } });
+    await db.profileCategory.deleteMany({ where: { id: { in: stalePc.map((r) => r.id) } } });
   }
 }
 
@@ -516,9 +532,12 @@ export async function applyRegistryPlan(plan: RegistryPlan): Promise<void> {
  *   engine would keep grading against the previous rules while the UI shows
  *   the new ones, which is precisely the divergence this exists to prevent.
  */
-export async function syncProfileRegistry(profiles: SourceProfile[]): Promise<RegistryPlan> {
-  const locked = await loadLockState();
+export async function syncProfileRegistry(
+  profiles: SourceProfile[],
+  db: RegistryDb = prisma,
+): Promise<RegistryPlan> {
+  const locked = await loadLockState(db);
   const plan = planRegistry(profiles, locked);
-  await applyRegistryPlan(plan);
+  await applyRegistryPlan(plan, db);
   return plan;
 }

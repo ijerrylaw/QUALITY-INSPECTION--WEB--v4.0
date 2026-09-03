@@ -675,48 +675,71 @@ router.patch('/', requireRole('MANAGER', 'ADMIN'), async (req: Request, res: Res
       updateData['products'] = JSON.stringify(incomingProducts);
     }
 
-    const updatedConfig = await prisma.appConfig.upsert({
-      where: { id: '1' },
-      update: updateData,
-      create: {
-        id: '1',
-        ...updateData,
-      },
-    });
-
-    // ── Keep the grading tables in lock-step (Stage 2) ────────────────────────
-    // The AQL engine now reads categories/defects from the global Master Defect
+    // ── Persist the config + re-project the grading tables ATOMICALLY ─────────
+    // The AQL engine reads categories/defects from the global Master Defect
     // List + Category Inventory (engine/profileRules.ts), while this route still
-    // stores them as inspectionProfiles JSON — the admin UI moves at Stage 3.
-    // Re-project on every write that touches profiles, or the very next edit
-    // would leave the engine grading pre-edit rules while the UI shows the new
-    // ones: silent, unreported, and exactly the divergence AUDIT_REPORT.md #10
-    // was logged for. Same write-hook shape B2 used for AppConfig.products.
+    // stores them as inspectionProfiles JSON — the admin UI moves fully at a
+    // later stage. The two must stay in lock-step, and they must move together
+    // or not at all.
     //
-    // Runs AFTER the AppConfig write so a sync failure can never leave the JSON
-    // unwritten but the tables updated; the JSON remains the authoritative
-    // record until the tables are retired. A failure is surfaced as a 409 (not
-    // swallowed) so the admin knows the two are out of step.
-    if (payload.inspectionProfiles !== undefined) {
-      const profilesForSync = coerceJSON<SourceProfile[]>(payload.inspectionProfiles, []);
-      try {
-        const plan = await syncProfileRegistry(profilesForSync);
-        for (const w of plan.warnings) {
-          console.warn(`[PATCH /api/config] profile registry sync: ${w}`);
-        }
-      } catch (syncError) {
-        if (syncError instanceof ProfileRegistrySyncError) {
-          console.error('[PATCH /api/config] Profile registry sync failed:', syncError.message);
-          res.status(409).json({
-            error:
-              'Your changes were saved, but the grading tables could not be updated to match, so the ' +
-              'engine is still grading against the previous rules. Resolve the conflict below and save again.',
-            details: syncError.message,
+    // Before this was transactional the JSON was written first and the
+    // projection second, so a projection failure — a locked defect dropped from
+    // its last remaining profile (CHANGELOG §45) — left the stored profiles
+    // updated while the grading tables were not: a silent split-brain where the
+    // UI showed one thing and the engine graded another, with nothing forcing
+    // resolution and no audit-log entry that a write had even been attempted.
+    //
+    // Now the AppConfig write and syncProfileRegistry() run inside one
+    // interactive transaction. A ProfileRegistrySyncError thrown by the
+    // projection propagates out of the callback and rolls the JSON write back
+    // with it — a rejected save changes nothing. The generous timeout covers
+    // applyRegistryPlan()'s ~160 sequential upserts against local SQLite.
+    let updatedConfig: AppConfig;
+    try {
+      updatedConfig = await prisma.$transaction(
+        async (tx) => {
+          const written = await tx.appConfig.upsert({
+            where: { id: '1' },
+            update: updateData,
+            create: { id: '1', ...updateData },
           });
-          return;
-        }
-        throw syncError;
+
+          if (payload.inspectionProfiles !== undefined) {
+            const profilesForSync = coerceJSON<SourceProfile[]>(payload.inspectionProfiles, []);
+            const plan = await syncProfileRegistry(profilesForSync, tx);
+            for (const w of plan.warnings) {
+              console.warn(`[PATCH /api/config] profile registry sync: ${w}`);
+            }
+          }
+
+          return written;
+        },
+        { timeout: 20_000, maxWait: 5_000 },
+      );
+    } catch (txError) {
+      if (txError instanceof ProfileRegistrySyncError) {
+        console.error('[PATCH /api/config] Profile registry sync failed — nothing saved:', txError.message);
+        // The JSON write rolled back, so AppConfig.updatedAt does not move — but
+        // a save was demonstrably attempted, and a rejected write that leaves no
+        // trace is itself worth recording. Distinct action from CONFIG_WRITE:
+        // nothing changed.
+        await logAccess(req, {
+          userId: null,
+          role: req.header('X-User-Role') ?? null,
+          userDisplayName: await resolveConfigWriterDisplayName(payload),
+          action: 'CONFIG_WRITE_FAILURE',
+          detail: `${inferConfigWriteDetail(payload)} — rejected: ${txError.message}`,
+        });
+        res.status(409).json({
+          error:
+            'Your changes were NOT saved. The grading tables could not be updated to match, so nothing ' +
+            'was changed — what you see and what the engine grades are still in step. Resolve the ' +
+            'conflict below and save again.',
+          details: txError.message,
+        });
+        return;
       }
+      throw txError;
     }
 
     await logAccess(req, {
