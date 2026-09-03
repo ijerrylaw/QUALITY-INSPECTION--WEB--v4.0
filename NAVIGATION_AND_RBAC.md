@@ -111,7 +111,13 @@ Every mutating backend route is gated by `requireRole(...)`/`requireGroup(...)` 
 | `POST /api/auth/pin-login` | Ungated — this *is* the login step |
 | `POST /api/auth/pin-change` | Ungated — the correct current PIN *is* the identity check (§3.2) |
 | `GET /api/access-log` | Group A only — the one gated `GET` route; see below |
+| `GET/POST /api/registry/categories`, `PATCH /api/registry/categories/:id` | Group A/B |
+| `GET/POST /api/registry/defects`, `PATCH /api/registry/defects/:id` | Group A/B |
 | All other `GET` routes (`/api/health`, `/api/config`, `/api/submissions`) and `POST /api/verdict/preview` | Ungated — non-mutating |
+
+**Registry routes are the second gated `GET` family.** Unlike `/api/config`, the two `GET /api/registry/*` routes are gated (Group A/B) rather than ungated-because-non-mutating. They serve the global Master Defect List and Category Inventory together with per-entry lock state and submission counts — configuration-administration data with no consumer outside Configuration Control, so there is no reason to expose it to a floor session. Group A/B rather than Group A: this is ordinary configuration work, and Group A is reserved for System Admin.
+
+**Locking is enforced server-side, not by the UI.** `PATCH /api/registry/{defects,categories}/:id` re-derives lock state on every request (`loadLockUsage()`, `backend/src/lib/profileRegistrySync.ts` — the same scan the grading engine's backfill and sync hook use) and returns `409` for any entry referenced by a frozen `Submission.gradingSnapshot`, naming the number of submissions involved. The modal's greyed rows and disabled inputs are a courtesy so nobody is invited to attempt a write that will fail; they are not the control, and a direct API call is refused identically.
 
 Missing header → `401`. Header present but not a recognized role string → `401`. Recognized role outside the route's allow-list → `403`.
 

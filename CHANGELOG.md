@@ -66,6 +66,7 @@ or summarized in the split — this is the original content, relocated.
 - [§41](#41-qualitative-na-category-pass-state-snapshot-proof-odour-defect-type-2026-09-02) — Qualitative (N/A) Category — PASS-State Snapshot Proof + `Odour` Defect Type — 2026-09-02
 - [§42](#42-master-defect-list--category-inventory--stage-1-schema--migration--2026-09-03) — Master Defect List + Category Inventory — Stage 1 (Schema + Migration) — 2026-09-03
 - [§43](#43-master-defect-list--category-inventory--stage-2-engine-cutover--2026-09-03) — Master Defect List + Category Inventory — Stage 2 (Engine Cutover) — 2026-09-03
+- [§44](#44-master-defect-list--category-inventory--stage-3-management-surfaces--2026-09-03) — Master Defect List + Category Inventory — Stage 3 (Management Surfaces) — 2026-09-03
 
 ---
 
@@ -5851,3 +5852,118 @@ The old embedded fields are still present and still written —
 definitions, and `aqlCategories`/`defectDefinitions` remain as the empty legacy
 columns they already were. Removal is a later cleanup stage, after the Stage 3
 UI cutover.
+
+---
+
+## 44. Master Defect List + Category Inventory — Stage 3 (Management Surfaces) — 2026-09-03
+
+Admin surfaces for the two global registries: view them, register new entries,
+rename existing ones, and see what is locked. **Management only** — nothing in
+this stage assigns an entry to a profile or a category. The per-category
+"+ ADD" buttons, `handleAddDefect()`, the kanban drag-and-drop and profile
+duplication are all deliberately untouched; they become picker surfaces at
+Stage 4.
+
+### Backend — six Group A/B endpoints
+
+```
+GET   /api/registry/categories      list + lock state + usage counts
+POST  /api/registry/categories      create { name, evaluationMode }
+PATCH /api/registry/categories/:id  rename / re-mode   (409 if locked)
+GET   /api/registry/defects         list + lock state + usage counts
+POST  /api/registry/defects         create { name }
+PATCH /api/registry/defects/:id     rename            (409 if locked)
+```
+
+`requireGroup('A','B')` throughout, matching `/config` and `PATCH /api/config`.
+Not Group A only — that tier is reserved for System Admin, and this is ordinary
+configuration work. The two `GET`s are gated rather than ungated-because-
+non-mutating: they serve configuration-administration data with no consumer
+outside Configuration Control.
+
+**Lock enforcement is server-side.** Every rename re-derives lock state per
+request and returns `409` naming the number of submissions involved. Renaming a
+locked entry is refused because frozen `gradingSnapshot`s carry the name
+captured at submit time; letting the registry name drift would leave two names
+for one id in the audit trail with no way to tell which inspection saw which.
+
+The derivation is not restated anywhere. `lib/profileRegistrySync.ts` gains
+`loadLockUsage()` (counts per id), and the existing `loadLockState()` becomes a
+projection of it — one scan, one definition, so the boolean and the count can
+never disagree about what "locked" means. Counts are per **submission**, not per
+occurrence, so the number reads as "used in N inspections".
+
+Ids and codes follow the established conventions: canonical ids are slugified
+server-side into the existing family (`def_pin_hole`), and display codes
+continue from the current maximum rather than filling gaps — a code is what
+people read off the screen and quote, so it must never move or be reused.
+
+### A Stage 3/4 interaction, guarded
+
+An admin can now register a name in the registry, while `QualityRules.tsx` still
+mints its own slug id for free-text names. The same name arriving down both
+paths collided with `nameKey`'s UNIQUE constraint as a raw Prisma 500.
+`applyRegistryPlan()` now detects it and raises `ProfileRegistrySyncError`,
+which `PATCH /api/config` already converts to a clean 409 explaining that names
+are unique system-wide. The whole interaction disappears at Stage 4.
+
+Newly registered entries survive later config writes: `applyRegistryPlan()`'s
+prune only ever deletes JOIN rows, never global `Defect`/`Category` rows, so an
+entry not yet used by any profile is a legitimate resting state.
+
+### Frontend — one modal, parameterized
+
+`RegistryManagerModal` serves both registries via an `entity` prop. The two
+flows differ in exactly one field (a category carries an evaluation mode, a
+defect does not), so two near-identical components would have drifted the moment
+either gained a column.
+
+Searchable table, "register new", inline rename of unlocked entries. Locked rows
+are greyed with a padlock and show "used in N submissions" plus the reason.
+Display codes are read-only everywhere. A `409` carrying `locked` also triggers
+a reload, so a row that became locked since the list was fetched corrects itself
+rather than sitting there looking editable.
+
+Button wiring, per the locked design:
+
+- **"+ ADD CATEGORY"** keeps its position and prominence in DEFECT CATEGORY
+  SETUP but now opens the Category Inventory instead of creating a category
+  inline.
+- **"+ ADD DEFECT"** is new, on the DEFECT MANAGEMENT KANBAN title row at
+  title-level prominence, opening the Master Defect List.
+
+The old inline-create path is **removed, not bypassed**: `isAddingCategory`,
+`newCategoryForm`, `startAddingCategory()`, `saveAddCategory()` and the inline
+add-category table row are all gone, verified at zero references. A stale
+comment in `handleDuplicateProfile` describing `saveAddCategory`'s id generator
+was rewritten rather than left dangling.
+
+Styling follows `UI_DESIGN_SYSTEM.md`: emerald ghost-outline header buttons
+(§3.5), standard toolbar with search (§4.3), standard reading data table (§4.2),
+value chips for codes and pill state badges for evaluation modes — emerald for
+the two modes that grade, grey for the two that do not (§4.8).
+
+### Verification
+
+Backend tested over real HTTPS against an **isolated instance on port 4109**
+backed by a copy of `dev.db`, so the dev server and its database were untouched:
+
+- **RBAC** on read and write routes: no header `401`, unrecognized role `401`,
+  `OPERATOR` `403`, `SUPERVISOR` `403`, `MANAGER` `200`, `ADMIN` `200`
+- **Create**: valid `201` (`DEF-050` / `CAT-009`, continuing from the max),
+  case+whitespace-variant duplicate `409`, blank name `400`, bad
+  `evaluationMode` `400`
+- **Edit unlocked**: `200`, rename verified **persisted** on re-read
+- **Edit locked**: `def_knocking` `409`, category `AND` `409`, `BARRIER`
+  mode-only `409` — all three verified **unchanged** on re-read, no leak
+- **Edge**: rename onto an existing name `409`, empty body `400`, unknown id
+  `404`
+
+backend `tsc --noEmit` clean, `vitest` 20/20; frontend `tsc -b` clean, `vitest`
+63/63 across 11 files. App confirmed loading with no module errors.
+
+**Note for future sessions:** both dev servers speak **HTTPS**, not HTTP
+(`server.ts` uses `https.createServer`, and `vite.config.ts` sets `https`).
+Earlier sessions recorded the dev server as "unreachable from this environment";
+that was plain HTTP being spoken to a TLS socket. `curl -k https://localhost:4009`
+works fine.

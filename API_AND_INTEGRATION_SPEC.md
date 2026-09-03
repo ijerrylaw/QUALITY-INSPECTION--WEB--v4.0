@@ -159,6 +159,27 @@
   * **Response:** `200` with the updated `PinUser` (no `pinHash`/`pinSalt`) on success. `401 { error: 'Current PIN is incorrect.' }` if `currentPin` matches no active user. `400 { error: 'New PIN must be exactly 6 digits.' }` for a malformed `newPin`. `409 { error: 'This PIN is already in use by an active user.' }` if `newPin` collides with another active user.
   * **Auth:** None — deliberately ungated, same reasoning as `pin-login`: the correct `currentPin` *is* the identity/authorization check. Available to any PIN-logged-in user, not just Group A/B.
 
+### Global Registry (Master Defect List & Category Inventory)
+
+Management surface for the two global registries introduced in Stage 1 (`DATA_SCHEMAS_AND_TYPES.md` §2.2). Read, create, rename. **Nothing here assigns an entry to a profile or a category** — that stays with `PATCH /api/config`'s `inspectionProfiles` write and its re-projection hook until the Stage 4 picker replaces it.
+
+All six routes are **Group A/B** (`requireGroup('A','B')`), including the two `GET`s.
+
+* `GET /api/registry/categories` · `GET /api/registry/defects`
+  * **Response:** `200` with an array of `{ id, code, name, evaluationMode?, locked, submissionCount, profileCount }`. `evaluationMode` is categories-only, and carries the clean enum (`CUMULATIVE` | `GRANULAR` | `QUALITATIVE` | `RECORD_ONLY`), **not** the engine wire format — see the mapping table in `DATA_SCHEMAS_AND_TYPES.md` §2.2.
+  * `locked` / `submissionCount` are **derived per request** from frozen `Submission.gradingSnapshot` rows via `loadLockUsage()`, never stored. `submissionCount` counts submissions, not occurrences. `profileCount` is a separate, non-locking figure: how many profiles currently select the entry.
+
+* `POST /api/registry/categories`
+  * **Payload:** `{ name: string, evaluationMode: 'CUMULATIVE' | 'GRANULAR' | 'QUALITATIVE' | 'RECORD_ONLY' }`
+* `POST /api/registry/defects`
+  * **Payload:** `{ name: string }`
+  * **Response (both):** `201` with the created entry. The canonical id is slugified server-side into the established family (`def_pin_hole` / `cat_<slug>`), disambiguated with a numeric suffix on collision; the display code (`DEF-050`) continues from the current maximum and never fills a gap or moves. `400` for a blank/oversized name or an unrecognized `evaluationMode`; `409` if the name already exists (compared case-insensitively with internal whitespace collapsed, matching `nameKey`).
+
+* `PATCH /api/registry/categories/:id` — **Payload:** `{ name?, evaluationMode? }` (at least one)
+* `PATCH /api/registry/defects/:id` — **Payload:** `{ name }`
+  * **Response:** `200` with the updated entry. `404` if the id is unknown. `400` for a blank name, an unrecognized mode, or an empty body. `409` if the new name collides with another entry — **or if the entry is locked**, in which case the body also carries `{ locked: true, submissionCount }`.
+  * **Locked entries cannot be renamed, and this is enforced here, not in the UI.** Lock state is re-derived on every request. Frozen grading snapshots store the name captured at submit time, so letting the registry name drift would leave two names for one id in the audit trail with no way to tell which inspection saw which. The modal's disabled inputs are a courtesy; a direct API call is refused identically.
+
 ---
 
 ## 2. AUTHENTICATION
