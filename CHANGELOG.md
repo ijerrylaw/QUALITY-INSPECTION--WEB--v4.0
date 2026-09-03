@@ -65,6 +65,7 @@ or summarized in the split — this is the original content, relocated.
 - [§40](#40-inspection-results-panel-actual-column-centering-hierarchy-swap-shipped-2026-08-27) — Inspection Results Panel — ACTUAL Column Centering & Hierarchy Swap — Shipped 2026-08-27
 - [§41](#41-qualitative-na-category-pass-state-snapshot-proof-odour-defect-type-2026-09-02) — Qualitative (N/A) Category — PASS-State Snapshot Proof + `Odour` Defect Type — 2026-09-02
 - [§42](#42-master-defect-list--category-inventory--stage-1-schema--migration--2026-09-03) — Master Defect List + Category Inventory — Stage 1 (Schema + Migration) — 2026-09-03
+- [§43](#43-master-defect-list--category-inventory--stage-2-engine-cutover--2026-09-03) — Master Defect List + Category Inventory — Stage 2 (Engine Cutover) — 2026-09-03
 
 ---
 
@@ -5724,3 +5725,129 @@ Applied with `prisma db push` + `prisma generate` per `AI_RULES.md` §7.
 
 Safety tag `pre-master-defect-list` (annotated, pushed to origin) points at
 `8a7f451`, the commit immediately before this work.
+
+---
+
+## 43. Master Defect List + Category Inventory — Stage 2 (Engine Cutover) — 2026-09-03
+
+The AQL engine now grades from the global Category/Defect tables instead of the
+`AppConfig.inspectionProfiles` JSON blob. Schema unchanged from §42; this is a
+read-source swap plus the write-hook that keeps the two representations in step
+until the admin UI moves at Stage 3.
+
+### What moved, and what deliberately did not
+
+`resolveVerdict()` resolves a profile's categories, per-profile AQL levels, and
+defect membership through the new `backend/src/engine/profileRules.ts`, which
+reads `ProfileCategory` / `ProfileCategoryDefect` / `Category` / `Defect` in two
+queries and returns them in the engine's own shape.
+
+Profile **identity** did NOT move — there is no Profile table, so profiles still
+live in the JSON. `resolveVerdict()` asks the JSON *"does this profile exist and
+what is it called"* and asks `profileRules` *"what are its rules"*. Three
+consequences were preserved deliberately:
+
+- A profile present in the JSON with **no** `ProfileCategory` rows behaves
+  exactly like the old empty-`aqlCategories` case: it falls through to the
+  safety net rather than grading against nothing.
+- The safety net still scans `profilesList` in **AppConfig order**, so "first
+  usable profile" cannot silently become "first in map iteration order".
+- The first-run bootstrap stays **seed-based**, since on a fresh install the new
+  tables are empty too.
+
+### The name-OR-id join is gone
+
+`DefectDefinition.currentClass`, matched against `category.name || category.id`,
+became `categoryId` matched strictly by id — in both `evaluateAQLVerdict()` and
+`buildFrozenCategoryAnalysis()`, which must never disagree about a category's
+membership. `defaultClass` was deleted outright: set on every defect, read by
+nothing.
+
+Verified before removing the name arm that nothing depended on it. Every stored
+defect links by id, and the zero-state seed's category ids are identical to
+their names so both arms agreed. **Only the engine test's fixtures used the name
+path** (`currentClass: 'VISUAL'` against `id: 'cat_visual'`); they now link by id
+like real data. The fallback was a live hazard: the engine would grade a
+name-linked defect that both the wizard and the admin UI — id-only, always —
+rendered as an empty category.
+
+### Write-hook: PATCH /api/config re-projects on every profile write
+
+Stage 2 moved the engine while the admin UI still writes JSON. Without a
+projection on write, the first Quality Rules edit would leave the engine grading
+pre-edit rules while the UI showed the new ones — silently. That is the exact
+failure class §10 was logged for, so `PATCH /api/config` now calls
+`syncProfileRegistry()` whenever the payload touches `inspectionProfiles`. Same
+write-hook shape B2 used for `AppConfig.products`.
+
+New `src/lib/profileRegistrySync.ts` is the single implementation of that
+projection; `scripts/backfill-master-defect-list.ts` was refactored into a thin
+CLI wrapper around it, keeping only its reporting and round-trip proof. Two
+copies of this projection would drift the way the three copies of the profile
+seed did (§10). The refactored script was verified to produce a byte-identical
+plan to the committed §42 run.
+
+A sync failure returns **409 with the specific conflict**, never swallowed — if
+the tables could not be updated, the engine is still on the old rules and the
+admin has to know. The sync runs after the AppConfig write, so a failure can
+never leave the JSON unwritten but the tables updated.
+
+### Bug found by end-to-end testing the hook
+
+Moving a defect between two categories of the same profile violated
+`@@unique([profileId, defectId])`: the planned row carried a new
+`profileCategoryId` while the stale row still held the same
+`(profileId, defectId)` pair, and the prune only ran *after* the upserts. Defect
+links are now pruned **before** inserting — a row is stale if the plan no longer
+contains its `(profileId, defectId)` at all, or contains it under a different
+`profileCategory` — so a move is a clean delete-then-insert. This would also
+have broken a backfill re-run after any defect moved. The §42 denormalized
+unique constraint is what caught it.
+
+Global `Defect`/`Category` rows are never deleted by a prune, only join rows: a
+defect dropped from every profile may still be referenced by a frozen
+`gradingSnapshot` and must stay resolvable.
+
+### Regression proof
+
+New `scripts/regression-grading-snapshot.ts` captures the complete
+`resolveVerdict()` output for every stored case and deep-diffs two runs. Both
+runs were pointed at the same frozen database copy so a concurrent dev-server
+write could not pollute the comparison.
+
+**76 cases: 27 submissions + 27 synthetic MEDLINE + 22 amendment approve-path.**
+
+**Zero** changes to any grading-bearing field across all 76 — verdict,
+per-category `passed`, `threshold` (Ac/Re), `actualAqlAchieved`,
+`failingDefects`, `evaluationMode`, `aqlLevel`, `totalDefectTypes`,
+`dimensionResults`, `evaluationProfileId`/`Name`. Submissions 27/27 and
+amendments 22/22 byte-identical.
+
+One case differed, in `defectItems` only, and it is the §42 alias merge working
+as designed: submission `cmtbaas2l000a58c4fyrbtnd8` recorded `def_wet_glove_1`,
+and MEDLINE's OLD rules looked for its own `def_wet_glove` and **missed it**.
+Now that the two are one canonical defect, MEDLINE finds it — strictly more
+correct. Blast radius zero: MEDLINE has no submissions and no products mapped to
+it, so this combination is reachable only in the synthetic replay. Verdict,
+pass/fail and Ac/Re were unchanged even there.
+
+RECORD ONLY was checked explicitly, as the highest-risk category type: it
+appears in 49 of the 76 cases, always with `passed: null`, `threshold: null`,
+`evaluationMode: ''`, and **zero** `CategoryResult` entries — still fully
+excluded from the verdict, including the two cases where `def_sagging` was
+actually recorded under it (count 5, `failing: false`).
+
+The write-hook was tested end-to-end on a database copy: edit profile JSON →
+tables stale → `syncProfileRegistry()` → the engine immediately grades
+`def_donning` under its new category (OTHERS/`N/A` → VISUALS/`GRANULAR`), and
+restoring the edit restores the original placement.
+
+`tsc --noEmit` clean; `vitest` 20/20.
+
+### Not done in this stage
+
+The old embedded fields are still present and still written —
+`AppConfig.inspectionProfiles` holds both profiles and all 96 embedded defect
+definitions, and `aqlCategories`/`defectDefinitions` remain as the empty legacy
+columns they already were. Removal is a later cleanup stage, after the Stage 3
+UI cutover.

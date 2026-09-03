@@ -232,7 +232,7 @@ export interface AmendmentLog {
 
 ### 2.1 AQL Rules Storage & Engine Normalization
 
-> **Superseding work in flight:** a global Master Defect List and Category Inventory now exist as real Prisma models with real data — see **§2.2**. They are additive and **not yet read by anything**, so everything in this section remains accurate for how grading works today. §2.2 becomes authoritative at the Stage 2 cutover.
+> **⚠ Superseded for grading (Stage 2, 2026-09-03):** the AQL engine no longer reads categories or defects from this section's JSON — it reads them from the global Master Defect List / Category Inventory tables described in **§2.2**. What remains true here: the JSON is still what `PATCH /api/config` stores and what the admin UI writes, it still carries profile **identity** (id / name / isDefault), and `PATCH /api/config` re-projects it into the §2.2 tables on every write so the two cannot drift. The `AQLCategory` / `DefectDefinition` / `InspectionProfile` interfaces below still describe that stored JSON accurately. The one thing that changed shape is the engine-side defect link — see §2.2's "Engine input shape".
 
 > **Important:** `InspectionProfile`, `AQLCategory`, and `DefectDefinition` are **not** Prisma models — those tables were removed after confirming they sat fully unused (0 rows) since real profile data has only ever lived in `AppConfig.inspectionProfiles` JSON (see `AUDIT_REPORT.md` §9.3 Option B / §10 Part 3). `AppConfig.inspectionProfiles` (a JSON-serialized array on the `AppConfig` singleton row) is the single source of truth. The interfaces below describe that JSON shape, plus the internal shape `evaluateAQLVerdict()` (the pure verdict engine) actually operates on — the two differ on one field name, reconciled by normalization at resolve time.
 >
@@ -310,9 +310,15 @@ though every id string changed. The source profile itself is never mutated.
 
 ---
 
-### 2.2 Master Defect List & Category Inventory (Stage 1 — additive, not yet live)
+### 2.2 Master Defect List & Category Inventory (LIVE for grading as of Stage 2)
 
-> **Reading order:** §2.1 above still describes how grading works **today**. The four Prisma models below exist in the database and are populated with real data, but **nothing reads them yet** — `aqlEvaluator.ts`, `resolveVerdict.ts`, `QualityRules.tsx` and the wizard are all untouched, and `AppConfig.inspectionProfiles` JSON remains the live source of truth for every verdict. Stage 2 rewires those call sites; only then does §2.1 become historical.
+> **Status:** these four models are what the AQL engine grades from. `resolveVerdict.ts` loads a profile's categories, AQL levels, and defect membership through `backend/src/engine/profileRules.ts`. Still on the JSON side: profile identity, and the admin UI (`QualityRules.tsx`), which moves at Stage 3 — until then `PATCH /api/config` re-projects the JSON into these tables on every write via `lib/profileRegistrySync.ts`, so a Quality Rules edit cannot leave the engine on stale rules.
+
+#### Engine input shape
+
+`evaluateAQLVerdict()` receives `DefectDefinition { id, name, categoryId }` and resolves a category's members by a **strict id match**, `d.categoryId === category.id`. This replaced a `currentClass` field matched against `category.name || category.id`; see `ISO2859_MATH_ENGINE.md` §2.1 for why that fallback was removed. `defaultClass` is gone entirely — it was set on every defect and read by nothing.
+
+`evaluationMode` reaching the engine is always the wire dialect (`'CUMULATIVE' | 'GRANULAR' | 'N/A' | ''`), translated once from `Category.evaluationMode` in `profileRules.ts` — see the mapping table below.
 
 These models introduce a **global defect/category vocabulary** that profiles select from, replacing the model where each profile invented and independently spelled its own defects. They are the first relational profile-adjacent tables since `InspectionProfile`/`AQLCategory`/`DefectDefinition` were removed (§2.1) — and deliberately not a revival of those: they store the *global vocabulary* (which never existed before) plus the *per-profile selection* of it. Profiles themselves still live in `AppConfig.inspectionProfiles` JSON.
 

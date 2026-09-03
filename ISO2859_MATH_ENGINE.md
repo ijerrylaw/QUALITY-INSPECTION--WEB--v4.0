@@ -35,6 +35,19 @@ The evaluation function determines the final PASS/FAIL verdict by mapping record
 
 * **Empty String `''` Mode:** The engine skips this category entirely — captured defect counts never affect the verdict. This is what a **RECORD ONLY** AQL Level category writes as its `evaluationMode` (Configuration Control > Quality Rules auto-locks it, mirroring the dimension-level Graded/Record-only pattern — see §5). Distinct from N/A mode above: a PASS/FAIL category is still evaluated (qualitative pass/fail per defect); only RECORD ONLY truly opts a category out of verdict computation.
 
+### 2.1 Where a category's defects come from (Stage 2)
+
+Category membership is resolved by a **strict id match**: `defectDefinition.categoryId === category.id`, applied identically in `evaluateAQLVerdict()` and in `buildFrozenCategoryAnalysis()`. The two must never disagree, or the frozen snapshot would describe a different grading than the one that actually ran.
+
+This replaced a `currentClass` field matched against **`category.name || category.id`** — a name-OR-id join inherited from the era when the admin UI used category *names* as the linking key. The name arm was dead in practice (every stored defect linked by id, and the zero-state seed's category ids are identical to their names, so both arms agreed) but it was a live hazard: the engine would happily grade a name-linked defect while both the wizard and the admin UI — which have always matched on id only — rendered that category empty.
+
+The categories, their per-profile AQL levels, and their defect membership are loaded by `backend/src/engine/profileRules.ts` from the global Category Inventory / Master Defect List tables (`Category`, `Defect`, `ProfileCategory`, `ProfileCategoryDefect`), **not** from `AppConfig.inspectionProfiles` JSON. Profile *identity* still comes from that JSON — see `DATA_SCHEMAS_AND_TYPES.md` §2.2.
+
+Two consequences worth knowing when reading the engine:
+
+* **`evaluationMode` reaching the engine is always the wire dialect** (`'CUMULATIVE' | 'GRANULAR' | 'N/A' | ''`), never the `Category` table's clean enum. The translation happens once, in `profileRules.ts`, via `lib/categoryEvaluationMode.ts`. In particular `RECORD_ONLY` becomes `''` there — the empty string documented above is produced by that mapping, and a fallback in it would start grading a record-only category.
+* **Ordering is data, not incident.** Categories come back ordered by `ProfileCategory.sortOrder` and defects flattened as (category `sortOrder`, defect `sortOrder`), reproducing the array order the frozen `gradingSnapshot` — and therefore the Inspection Results panel — depends on.
+
 ---
 
 ## 2A. ACTUAL AQL ACHIEVED (`findActualAqlAchieved`)
