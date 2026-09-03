@@ -31,6 +31,8 @@ import {
   Ruler,
   Eye,
 } from 'lucide-react';
+import RegistryManagerModal from '../../components/config/RegistryManagerModal';
+import type { RegistryEntity } from '../../components/config/RegistryManagerModal';
 import { useConfig } from '../../context/ConfigContext';
 import { useToast } from '../../components/ui/ToastProvider';
 import {
@@ -144,8 +146,10 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   const [editDefectName, setEditDefectName] = useState('');
 
   // ── Category Setup State ─────────────────────────────────────────────────
-  const [isAddingCategory, setIsAddingCategory] = useState(false);
-  const [newCategoryForm, setNewCategoryForm] = useState({ name: '', aql: '1.5', evalMode: 'CUMULATIVE' });
+  // Which global registry modal is open, if any. Replaces the old inline
+  // category-create row: categories are now registered in the global Category
+  // Inventory (Stage 3), not invented ad hoc inside one profile.
+  const [registryModal, setRegistryModal] = useState<RegistryEntity | null>(null);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editCategoryForm, setEditCategoryForm] = useState({ name: '', aql: '1.5', evalMode: 'CUMULATIVE' });
 
@@ -204,11 +208,15 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   const handleDuplicateProfile = () => {
     const newProfileId = `prof_${Date.now()}`;
 
-    // Fresh category ids — same generator family as saveAddCategory
-    // (`cat_${Date.now()}`), with an index suffix: saveAddCategory only ever
-    // mints ONE id per click, but Duplicate mints several in one synchronous
-    // tick, where Date.now() alone could repeat across categories in the
-    // same millisecond. categoryIdMap records old id -> new id so defects
+    // Fresh category ids in the established `cat_${Date.now()}` family, with an
+    // index suffix because Duplicate mints several in one synchronous tick,
+    // where Date.now() alone could repeat across categories in the same
+    // millisecond. (The inline single-category creator this used to mirror was
+    // removed at Stage 3 — categories are now registered in the global Category
+    // Inventory via RegistryManagerModal, which mints slug ids server-side.
+    // This clone path is itself superseded at Stage 4, when profiles select
+    // from that inventory instead of copying ids by value.)
+    // categoryIdMap records old id -> new id so defects
     // can be remapped below; everything else about each category (name,
     // aql, evalMode, any display-only fields) is preserved verbatim.
     const categoryIdMap = new Map<string, string>();
@@ -326,25 +334,6 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
       }
       return next;
     });
-  };
-
-  const startAddingCategory = () => {
-    setIsAddingCategory(true);
-    setNewCategoryForm({ name: '', aql: '1.5', evalMode: 'CUMULATIVE' });
-  };
-
-  const saveAddCategory = () => {
-    if (!newCategoryForm.name.trim()) return;
-    const newCat = {
-      id: `cat_${Date.now()}`,
-      name: newCategoryForm.name.trim().toUpperCase(),
-      aql: newCategoryForm.aql,
-      evalMode: newCategoryForm.evalMode,
-    };
-    const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, aqlCategories: [...activeCategories, newCat] } : p);
-    setProfiles(updatedProfiles);
-    setIsAddingCategory(false);
-    triggerChange(updatedProfiles);
   };
 
   const startEditingCategory = (cat: any) => {
@@ -657,9 +646,9 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
               <p className="text-xs text-muted mt-1 font-normal normal-case">Bind ISO 2859-1 inspection levels to severity categories.</p>
             </div>
             <button
-              onClick={startAddingCategory}
-              disabled={isAddingCategory}
-              className="h-9 px-4 rounded-md bg-canvas border border-emerald-500/50 text-emerald-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0 disabled:opacity-50"
+              onClick={() => setRegistryModal('category')}
+              title="Open the global Category Inventory"
+              className="h-9 px-4 rounded-md bg-canvas border border-emerald-500/50 text-emerald-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0"
             >
               <Plus className="w-4 h-4" strokeWidth={2} />
               <span>ADD CATEGORY</span>
@@ -816,73 +805,6 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                   );
                 })}
                 
-                {/* ── Inline Add Category Row ───────────────────────────────── */}
-                {isAddingCategory && (() => {
-                  const autoLockLabel = getAutoLockLabel(newCategoryForm.aql);
-                  const isAutoLocked = autoLockLabel != null;
-                  return (
-                    <tr className="bg-surface-light border-b border-brand-secondary/30">
-                      <td className="py-3 px-3">
-                        <div className="relative">
-                          <input
-                            type="text"
-                            autoFocus
-                            value={newCategoryForm.name}
-                            onChange={(e) => updateCategoryForm(setNewCategoryForm, 'name', e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') saveAddCategory();
-                              if (e.key === 'Escape') setIsAddingCategory(false);
-                            }}
-                            className="w-full h-9 px-2 rounded-md bg-canvas border border-brand-secondary ring-1 ring-brand-secondary font-mono text-sm font-bold text-primary outline-none transition-all uppercase"
-                            placeholder="Category Name"
-                          />
-                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-brand-secondary font-mono pointer-events-none">Enter ↵</span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-3">
-                        <select
-                          value={newCategoryForm.aql}
-                          onChange={(e) => updateCategoryForm(setNewCategoryForm, 'aql', e.target.value)}
-                          className="w-full h-9 px-2 rounded-md bg-canvas border border-gray-700 font-mono text-sm text-primary focus:border-brand-secondary outline-none cursor-pointer"
-                        >
-                          {ISO_WHITELIST.map(aql => (
-                            <option key={aql} value={aql}>{aql}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="py-3 px-3">
-                        <select
-                          value={newCategoryForm.evalMode}
-                          onChange={(e) => updateCategoryForm(setNewCategoryForm, 'evalMode', e.target.value)}
-                          disabled={isAutoLocked}
-                          className={`w-full h-9 px-2 rounded-md border font-mono text-sm outline-none ${
-                            isAutoLocked
-                              ? 'bg-canvas border-gray-800 text-gray-500 cursor-not-allowed opacity-50'
-                              : 'bg-canvas border-gray-700 text-primary focus:border-brand-secondary cursor-pointer'
-                          }`}
-                        >
-                          {isAutoLocked ? (
-                            <option value={newCategoryForm.evalMode}>{autoLockLabel}</option>
-                          ) : (
-                            EVAL_MODES.map(mode => (
-                              <option key={mode} value={mode}>{mode}</option>
-                            ))
-                          )}
-                        </select>
-                      </td>
-                      <td className="py-3 px-3 text-right">
-                        <div className="flex justify-end gap-1">
-                          <button onClick={saveAddCategory} className="w-8 h-8 rounded flex items-center justify-center text-emerald-400 hover:bg-emerald-500/20 outline-none" title="Confirm">
-                            <Check className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => setIsAddingCategory(false)} className="w-8 h-8 rounded flex items-center justify-center text-rose-400 hover:bg-rose-500/20 outline-none" title="Cancel">
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })()}
               </tbody>
             </table>
           </div>
@@ -993,12 +915,22 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
 
       {/* ── Section: Defect Management Kanban Board ──────────────────────────── */}
       <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm flex flex-col">
-        <div className="p-4 border-b border-gray-800 bg-surface">
-          <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
-            <LayoutGrid className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
-            DEFECT MANAGEMENT KANBAN
-          </h3>
-          <p className="text-xs text-muted mt-1 font-normal normal-case">Drag and drop defects to remap their severity categorization in real-time.</p>
+        <div className="p-4 border-b border-gray-800 bg-surface flex justify-between items-center gap-4">
+          <div>
+            <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
+              <LayoutGrid className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
+              DEFECT MANAGEMENT KANBAN
+            </h3>
+            <p className="text-xs text-muted mt-1 font-normal normal-case">Drag and drop defects to remap their severity categorization in real-time.</p>
+          </div>
+          <button
+            onClick={() => setRegistryModal('defect')}
+            title="Open the global Master Defect List"
+            className="h-9 px-4 rounded-md bg-canvas border border-emerald-500/50 text-emerald-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0"
+          >
+            <Plus className="w-4 h-4" strokeWidth={2} />
+            <span>ADD DEFECT</span>
+          </button>
         </div>
         
         <div className="p-4 overflow-x-auto">
@@ -1186,6 +1118,19 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
           </div>
         );
       })()}
+
+      {/* ── Global registry management (Stage 3) ──────────────────────────────
+          Reached from the two header buttons above. These manage the GLOBAL
+          Master Defect List / Category Inventory — registering and renaming
+          entries system-wide. They deliberately do not assign anything to this
+          profile; the per-category "+ ADD" buttons and the kanban still own
+          that, until the Stage 4 picker replaces them. */}
+      {registryModal && (
+        <RegistryManagerModal
+          entity={registryModal}
+          onClose={() => setRegistryModal(null)}
+        />
+      )}
 
     </div>
   );
