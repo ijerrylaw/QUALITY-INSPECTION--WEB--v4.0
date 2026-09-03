@@ -11,6 +11,8 @@
 
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prismaClient';
+import { ProfileRegistrySyncError, syncProfileRegistry } from '../lib/profileRegistrySync';
+import type { SourceProfile } from '../lib/profileRegistrySync';
 import type { AppConfig } from '../../generated/prisma/client';
 import { requireRole } from '../middleware/auth';
 import { logAccess } from '../lib/accessLog';
@@ -681,6 +683,41 @@ router.patch('/', requireRole('MANAGER', 'ADMIN'), async (req: Request, res: Res
         ...updateData,
       },
     });
+
+    // ── Keep the grading tables in lock-step (Stage 2) ────────────────────────
+    // The AQL engine now reads categories/defects from the global Master Defect
+    // List + Category Inventory (engine/profileRules.ts), while this route still
+    // stores them as inspectionProfiles JSON — the admin UI moves at Stage 3.
+    // Re-project on every write that touches profiles, or the very next edit
+    // would leave the engine grading pre-edit rules while the UI shows the new
+    // ones: silent, unreported, and exactly the divergence AUDIT_REPORT.md #10
+    // was logged for. Same write-hook shape B2 used for AppConfig.products.
+    //
+    // Runs AFTER the AppConfig write so a sync failure can never leave the JSON
+    // unwritten but the tables updated; the JSON remains the authoritative
+    // record until the tables are retired. A failure is surfaced as a 409 (not
+    // swallowed) so the admin knows the two are out of step.
+    if (payload.inspectionProfiles !== undefined) {
+      const profilesForSync = coerceJSON<SourceProfile[]>(payload.inspectionProfiles, []);
+      try {
+        const plan = await syncProfileRegistry(profilesForSync);
+        for (const w of plan.warnings) {
+          console.warn(`[PATCH /api/config] profile registry sync: ${w}`);
+        }
+      } catch (syncError) {
+        if (syncError instanceof ProfileRegistrySyncError) {
+          console.error('[PATCH /api/config] Profile registry sync failed:', syncError.message);
+          res.status(409).json({
+            error:
+              'Your changes were saved, but the grading tables could not be updated to match, so the ' +
+              'engine is still grading against the previous rules. Resolve the conflict below and save again.',
+            details: syncError.message,
+          });
+          return;
+        }
+        throw syncError;
+      }
+    }
 
     await logAccess(req, {
       userId: null,
