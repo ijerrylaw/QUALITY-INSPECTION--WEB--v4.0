@@ -29,13 +29,20 @@ import {
 } from './iso2859-matrix';
 
 /**
- * AQLCategory / DefectDefinition — mirror DATA_SCHEMAS_AND_TYPES.md §2.1's
- * AppConfig-JSON shape. Previously imported from the generated Prisma
- * client, but that relational InspectionProfile/AQLCategory/DefectDefinition
- * table set was removed (AUDIT_REPORT.md §9.3 Option B / §10 Part 3) — real
- * profile/category/defect data has only ever lived in
- * AppConfig.inspectionProfiles JSON, normalized to this shape by
- * resolveVerdict.ts's normalizeForEngine() before reaching this function.
+ * AQLCategory / DefectDefinition — the engine's own input shape.
+ *
+ * As of Stage 2 these are populated from the global Category Inventory and
+ * Master Defect List (Category / Defect / ProfileCategory /
+ * ProfileCategoryDefect) by engine/profileRules.ts's loadProfileRulesMap(),
+ * which resolves a profile's category selection, per-profile AQL levels, and
+ * defect membership. Before Stage 2 they were normalized out of the
+ * AppConfig.inspectionProfiles JSON blob instead — see
+ * DATA_SCHEMAS_AND_TYPES.md §2.2.
+ *
+ * `evaluationMode` here is always the ENGINE dialect ('CUMULATIVE' |
+ * 'GRANULAR' | 'N/A' | ''), never the Category table's clean enum. The
+ * translation happens once, in profileRules.ts, via
+ * lib/categoryEvaluationMode.ts — never re-derive it.
  */
 export interface AQLCategory {
   id: string;
@@ -47,7 +54,20 @@ export interface AQLCategory {
 export interface DefectDefinition {
   id: string;
   name: string;
-  currentClass: string;
+  /**
+   * The id of the AQLCategory this defect is graded under — a strict id link.
+   *
+   * Stage 2 note: this replaced a `currentClass` field that was matched against
+   * `category.name || category.id`, a name-OR-id join inherited from the era
+   * when the admin UI used category NAMES as the linking key. That fallback was
+   * dead in practice (every stored defect linked by id, and the zero-state seed's
+   * category ids are identical to their names, so both arms agreed) but it was
+   * a live hazard: the engine would happily grade a defect linked by name while
+   * both the wizard and the admin UI — which have always matched on id only —
+   * rendered the category empty. Now that categories have real global ids, the
+   * link is unambiguous and the two arms cannot disagree.
+   */
+  categoryId: string;
 }
 
 export type { AQLThreshold, SampleSizeBracket, SupportedAQLLevel, AchievableAQLLevel };
@@ -386,12 +406,9 @@ export function evaluateAQLVerdict(params: EvaluateAQLVerdictParams): VerdictRes
     if (!category.evaluationMode) continue;
 
     // ── Resolve which defect definitions belong to this category ─────────────
-    // DefectDefinition.currentClass stores the category's name string (the admin
-    // UI uses the name as the FK key for display clarity, per schema.prisma comments).
-    // We also accept the category.id (UUID) as a fallback for future-proofing.
-    const categoryDefects = defectDefinitions.filter(
-      (d) => d.currentClass === category.name || d.currentClass === category.id
-    );
+    // Strict id link — see DefectDefinition.categoryId for why the old
+    // name-OR-id match was removed at Stage 2.
+    const categoryDefects = defectDefinitions.filter((d) => d.categoryId === category.id);
 
     // ── Obtain ISO 2859-1 Ac/Re threshold ────────────────────────────────────
     const threshold = getAQLThresholds(sampleSize, category.aqlLevel);

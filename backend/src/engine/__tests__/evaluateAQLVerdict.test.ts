@@ -37,11 +37,11 @@ const VISUAL: AQLCategory = {
   evaluationMode: 'GRANULAR',
 };
 
-/** Three defect types mapped to VISUAL via currentClass === category.name. */
+/** Three defect types mapped to VISUAL by category id (strict id link, Stage 2). */
 const DEFS: DefectDefinition[] = [
-  { id: 'def_a', name: 'Scratch', currentClass: 'VISUAL' },
-  { id: 'def_b', name: 'Pinhole', currentClass: 'VISUAL' },
-  { id: 'def_c', name: 'Discoloration', currentClass: 'VISUAL' },
+  { id: 'def_a', name: 'Scratch', categoryId: 'cat_visual' },
+  { id: 'def_b', name: 'Pinhole', categoryId: 'cat_visual' },
+  { id: 'def_c', name: 'Discoloration', categoryId: 'cat_visual' },
 ];
 
 function run(
@@ -136,7 +136,7 @@ describe('evaluateAQLVerdict — GRANULAR per-defect grading (#33)', () => {
     };
     const defs: DefectDefinition[] = [
       ...DEFS,
-      { id: 'def_f', name: 'Gloss defect', currentClass: 'FINISH' },
+      { id: 'def_f', name: 'Gloss defect', categoryId: 'cat_finish' },
     ];
 
     const { verdict, categoryResults } = run(
@@ -162,7 +162,7 @@ describe('evaluateAQLVerdict — RECORD ONLY is skipped, never treated as GRANUL
     };
     const defs: DefectDefinition[] = [
       ...DEFS,
-      { id: 'def_audit', name: 'Cosmetic note', currentClass: 'AUDIT' },
+      { id: 'def_audit', name: 'Cosmetic note', categoryId: 'cat_audit' },
     ];
 
     // def_audit = 50 would blow past any Ac if it were graded; VISUAL is clean.

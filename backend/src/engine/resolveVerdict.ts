@@ -17,7 +17,9 @@
  */
 
 import { evaluateAQLVerdict } from './aqlEvaluator';
-import type { ActualAqlAchieved, CategoryResult } from './aqlEvaluator';
+import type { ActualAqlAchieved, AQLCategory, CategoryResult, DefectDefinition } from './aqlEvaluator';
+import { hasUsableRules, loadProfileRulesMap } from './profileRules';
+import type { EngineProfileRules } from './profileRules';
 import {
   DEFAULT_AQL_CATEGORY_SEED,
   DEFAULT_DEFECT_DEFINITION_SEED,
@@ -30,16 +32,18 @@ import prisma from '../lib/prismaClient';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HARDCODED GLOBAL STANDARD DEFAULT PROFILE
-// Used when no profile is resolved from AppConfig or an explicit profileId.
+// The true first-run bootstrap only: AppConfig has zero profiles configured,
+// so there is nothing in the Category Inventory to select from either.
 //
-// Category/defect VALUES are no longer restated here — they are derived from
+// Category/defect VALUES are not restated here — they derive from
 // defaultProfileSeed.ts, the single canonical source shared (via a machine-
 // enforced mirror) with ConfigContext.tsx and QualityRules.tsx. See
 // AUDIT_REPORT.md #10: three hand-written copies of this seed had drifted, with
 // BARRIER graded CUMULATIVE server-side while the UI displayed it as 'N/A'.
 //
-// This block now only ADAPTS the neutral seed into the engine's own field
-// dialect (aqlLevel / evaluationMode, currentClass / defaultClass).
+// This block only ADAPTS the neutral seed into the engine's own field dialect.
+// It deliberately stays SEED-BASED rather than reading the new tables: on a
+// fresh install those tables are empty, which is exactly when this path runs.
 //
 // evaluationMode choices (per aqlEvaluator.ts):
 //   CUMULATIVE — sum all defect counts ≤ Ac; correct for zero-tolerance too
@@ -48,21 +52,19 @@ import prisma from '../lib/prismaClient';
 //   ''         — informational-only row; engine skips it
 // ─────────────────────────────────────────────────────────────────────────────
 
-const HARDCODED_DEFAULT_PROFILE = {
-  id:   DEFAULT_PROFILE_ID,
-  name: 'GLOBAL STANDARD (DEFAULT)',
-  aqlCategories: DEFAULT_AQL_CATEGORY_SEED.map((c) => ({
+const HARDCODED_DEFAULT_PROFILE_NAME = 'GLOBAL STANDARD (DEFAULT)';
+
+const HARDCODED_DEFAULT_RULES: EngineProfileRules = {
+  categories: DEFAULT_AQL_CATEGORY_SEED.map((c) => ({
     id:             c.id,
     name:           c.name,
     aqlLevel:       c.aql,
     evaluationMode: c.evalMode,
   })),
-  // Engine matches defect defs to categories via currentClass === category.name || category.id
   defectDefinitions: DEFAULT_DEFECT_DEFINITION_SEED.map((d) => ({
-    id:           d.id,
-    name:         d.name,
-    currentClass: d.categoryId,
-    defaultClass: d.categoryId,
+    id:         d.id,
+    name:       d.name,
+    categoryId: d.categoryId,
   })),
 };
 
@@ -78,51 +80,6 @@ function safeParseJSON<T>(raw: string | undefined | null, fallback: T): T {
   } catch {
     return fallback;
   }
-}
-
-/**
- * AppConfig-stored profiles use { categoryId } on defect definitions,
- * but the evaluateAQLVerdict engine expects { currentClass }.
- *
- * Categories saved via the real admin UI (QualityRules.tsx) use `aql` /
- * `evalMode` field names, not `aqlLevel` / `evaluationMode` — mirrors the
- * dual-read ConfigContext.tsx already does client-side for display (see §5.3).
- */
-function normalizeForEngine(profile: {
-  aqlCategories?: any[];
-  defectDefinitions?: any[];
-}): { categories: any[]; defectDefinitions: any[] } {
-  const categories = (profile.aqlCategories ?? []).map((c: any) => ({
-    id:             String(c.id             ?? ''),
-    name:           String(c.name           ?? ''),
-    aqlLevel:       String(c.aqlLevel       ?? c.aql     ?? ''),
-    evaluationMode: String(c.evaluationMode ?? c.evalMode ?? ''),
-  }));
-
-  const defectDefinitions = (profile.defectDefinitions ?? []).map((d: any) => ({
-    id:           String(d.id   ?? ''),
-    name:         String(d.name ?? ''),
-    // Map either Prisma field or AppConfig JSON field to the engine's expected name
-    currentClass: String(d.currentClass ?? d.categoryId ?? ''),
-    defaultClass: String(d.defaultClass ?? d.categoryId ?? ''),
-  }));
-
-  return { categories, defectDefinitions };
-}
-
-/**
- * A profile is usable for AQL evaluation only if at least one category
- * has both aqlLevel and evaluationMode configured (checking both the
- * `aqlLevel`/`evaluationMode` and `aql`/`evalMode` field-name variants —
- * same dual-read as normalizeForEngine(), see §5.3).
- */
-function hasUsableRules(profile: any): boolean {
-  return (profile?.aqlCategories ?? []).some((c: any) => {
-    const aqlLevel       = c.aqlLevel       ?? c.aql;
-    const evaluationMode = c.evaluationMode ?? c.evalMode;
-    return aqlLevel && String(aqlLevel).trim() !== ''
-        && evaluationMode && String(evaluationMode).trim() !== '';
-  });
 }
 
 /** A single defect recorded within a frozen category — see FrozenCategoryAnalysis. */
@@ -205,8 +162,8 @@ export interface FrozenCategoryAnalysis {
  * on every row expansion.
  */
 function buildFrozenCategoryAnalysis(
-  categories: { id: string; name: string; aqlLevel: string; evaluationMode: string }[],
-  defectDefinitions: { id: string; name: string; currentClass: string }[],
+  categories: AQLCategory[],
+  defectDefinitions: DefectDefinition[],
   defectCounts: Record<string, number>,
   categoryResults: CategoryResult[],
 ): FrozenCategoryAnalysis[] {
@@ -215,9 +172,10 @@ function buildFrozenCategoryAnalysis(
   return categories.map((cat): FrozenCategoryAnalysis => {
     const isQualitative = cat.evaluationMode === 'N/A';
 
-    const catDefs = defectDefinitions.filter(
-      (d) => d.currentClass === cat.name || d.currentClass === cat.id,
-    );
+    // Strict id link, matching evaluateAQLVerdict()'s own filter exactly — the
+    // two must never disagree about a category's membership, or the frozen
+    // snapshot would describe a different grading than the one that ran.
+    const catDefs = defectDefinitions.filter((d) => d.categoryId === cat.id);
 
     // Denominator for the panel's "N of M failed" header — every defect-type
     // definition mapped to this category, captured BEFORE the zero-count filter
@@ -406,15 +364,24 @@ export interface ResolveVerdictResult {
 }
 
 /**
- * Resolution order (unchanged from the logic formerly inlined in
- * POST /api/submissions):
- *   a) Explicit profileId → find in AppConfig.inspectionProfiles → normalize
- *   b) Explicit profileId === 'prof_default' AND not found above → hardcoded default
+ * Resolution order — semantics unchanged by the Stage 2 cutover, only the
+ * SOURCE of a profile's rules changed:
+ *   a) Explicit profileId → confirm it exists in AppConfig.inspectionProfiles,
+ *      then load its rules from the Category/Defect tables
+ *   b) Explicit profileId === 'prof_default' AND AppConfig has zero profiles
+ *      → hardcoded seed default (first-run bootstrap)
  *   c) Unknown profileId (not in list and not 'prof_default') → throws VerdictProfileNotFoundError,
  *      unless onUnresolvedProfile === 'fallback', in which case it's treated as unset.
  *   d) No profileId at all → productProfileMap[productCode] lookup (if productCode supplied), then same chain
  *   e) Safety net: no categories resolved, or resolved profile has no usable rules
  *      → first AppConfig profile with usable rules, else hardcoded default
+ *
+ * Note the split at (a): profile IDENTITY (does it exist, what is it called)
+ * still comes from the AppConfig JSON, because profiles are not a table. Only
+ * the RULES moved. A profile present in the JSON but with no rows in
+ * ProfileCategory therefore behaves exactly like the pre-Stage-2 case of a
+ * profile with an empty aqlCategories array: it falls through to the safety net
+ * at (e) rather than grading against nothing.
  *
  * @throws VerdictProfileNotFoundError if an explicit, unrecognized profileId is supplied
  *         and onUnresolvedProfile is 'throw' (the default).
@@ -441,6 +408,19 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
   // reaching the math are the same ones it received before.
   const registry = resolveProductRegistry(appConfig ?? {});
 
+  // ── Stage 2 grading cutover ─────────────────────────────────────────────
+  // Category/defect rules now come from the global Master Defect List and
+  // Category Inventory (Category / Defect / ProfileCategory /
+  // ProfileCategoryDefect) instead of the AppConfig.inspectionProfiles JSON
+  // blob. Loaded once here for every profile, so the safety-net scan below
+  // costs no additional queries.
+  //
+  // Like B4 before it, this is a DATA-SOURCE swap only: no threshold, mode, or
+  // membership semantics change. PATCH /api/config re-projects the JSON into
+  // these tables on every write (syncProfileRegistry), so the two stay in
+  // lock-step until the JSON is retired in a later cleanup stage.
+  const rulesByProfile = await loadProfileRulesMap();
+
   let profileId = params.profileId || null;
 
   // Unchanged semantics: only consulted when no explicit profileId was
@@ -454,13 +434,13 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
   // Captured before any safety-net substitution — see ResolveVerdictResult.requestedProfileId.
   const requestedProfileId = profileId;
 
-  let categories: any[]        = [];
-  let defectDefinitions: any[] = [];
-  let evaluationProfileId: string | null = null;
-  let evaluationProfileName: string | null = null;
+  let categories: AQLCategory[]              = [];
+  let defectDefinitions: DefectDefinition[]  = [];
+  let evaluationProfileId: string | null     = null;
+  let evaluationProfileName: string | null   = null;
 
   if (profileId) {
-    let profile = profilesList.find((p: any) => p.id === profileId);
+    const profile = profilesList.find((p: any) => p.id === profileId);
 
     // Sentinel for the UI-configured global standard default — only for the
     // true first-run bootstrap case (AppConfig has zero profiles at all).
@@ -468,10 +448,11 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
     // it, fall through to the standard not-found handling below instead of
     // silently grading against the hardcoded profile.
     if (!profile && profileId === DEFAULT_PROFILE_ID && profilesList.length === 0) {
-      profile = HARDCODED_DEFAULT_PROFILE;
-    }
-
-    if (!profile) {
+      categories            = HARDCODED_DEFAULT_RULES.categories;
+      defectDefinitions     = HARDCODED_DEFAULT_RULES.defectDefinitions;
+      evaluationProfileId   = DEFAULT_PROFILE_ID;
+      evaluationProfileName = HARDCODED_DEFAULT_PROFILE_NAME;
+    } else if (!profile) {
       if (onUnresolvedProfile === 'fallback') {
         console.warn(
           `[resolveVerdict] profileId '${profileId}' not found — falling back to safety net (lenient mode).`,
@@ -481,9 +462,14 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
         throw new VerdictProfileNotFoundError(profileId);
       }
     } else {
-      const normalized  = normalizeForEngine(profile);
-      categories        = normalized.categories;
-      defectDefinitions = normalized.defectDefinitions;
+      // The profile exists in AppConfig; its RULES come from the new tables.
+      // A miss here (no ProfileCategory rows) leaves categories empty, which
+      // the safety net below treats exactly like an empty aqlCategories array.
+      const rules = rulesByProfile.get(String(profile.id));
+      if (rules) {
+        categories        = rules.categories;
+        defectDefinitions = rules.defectDefinitions;
+      }
       evaluationProfileId = String(profile.id);
       evaluationProfileName = String(profile.name ?? '');
     }
@@ -491,22 +477,25 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
 
   // Safety net: no profileId was resolved, or the resolved profile has no usable rules.
   // Use the first AppConfig profile that has valid rules, or the hardcoded default.
+  // Scans profilesList (not the rules map) so "first" still means first in
+  // AppConfig order, exactly as before Stage 2 — map iteration order must not
+  // become load-bearing.
   if (categories.length === 0 || !categories.some((c) => c.aqlLevel && c.evaluationMode)) {
-    const usableAppConfigProfile = profilesList.find(hasUsableRules) ?? null;
+    const usableAppConfigProfile =
+      profilesList.find((p: any) => hasUsableRules(rulesByProfile.get(String(p?.id)))) ?? null;
     if (usableAppConfigProfile) {
-      const normalized  = normalizeForEngine(usableAppConfigProfile);
-      categories        = normalized.categories;
-      defectDefinitions = normalized.defectDefinitions;
+      const rules = rulesByProfile.get(String(usableAppConfigProfile.id)) as EngineProfileRules;
+      categories        = rules.categories;
+      defectDefinitions = rules.defectDefinitions;
       evaluationProfileId = String(usableAppConfigProfile.id);
       evaluationProfileName = String(usableAppConfigProfile.name ?? '');
     } else if (profilesList.length === 0) {
       // True first-run bootstrap: AppConfig has no profiles configured yet.
       // Legitimate, intentional fallback — see AUDIT_REPORT.md finding #13.
-      const normalized  = normalizeForEngine(HARDCODED_DEFAULT_PROFILE);
-      categories        = normalized.categories;
-      defectDefinitions = normalized.defectDefinitions;
-      evaluationProfileId = DEFAULT_PROFILE_ID;
-      evaluationProfileName = HARDCODED_DEFAULT_PROFILE.name;
+      categories            = HARDCODED_DEFAULT_RULES.categories;
+      defectDefinitions     = HARDCODED_DEFAULT_RULES.defectDefinitions;
+      evaluationProfileId   = DEFAULT_PROFILE_ID;
+      evaluationProfileName = HARDCODED_DEFAULT_PROFILE_NAME;
     } else {
       // AppConfig has real, admin-authored profiles, but none of them is
       // usable. Not the bootstrap case — fail loudly instead of silently
