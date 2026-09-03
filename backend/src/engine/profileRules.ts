@@ -107,12 +107,16 @@ export async function loadProfileRulesMap(): Promise<Map<string, EngineProfileRu
       rulesByProfile.set(pc.profileId, rules);
     }
 
+    // Read from the JOIN, not the Category. A global Category is a name only;
+    // how it is graded is the adopting profile's decision, exactly like
+    // aqlLevel on the line below — so the same category name may legitimately
+    // carry different modes in different profiles.
     let evaluationMode: string;
     try {
-      evaluationMode = toEngineEvaluationMode(pc.category.evaluationMode);
+      evaluationMode = toEngineEvaluationMode(pc.evaluationMode);
     } catch (err) {
       throw new Error(
-        `[profileRules] Category '${pc.category.id}' (${pc.category.name}) used by profile ` +
+        `[profileRules] Category '${pc.category.id}' (${pc.category.name}) as adopted by profile ` +
         `'${pc.profileId}' has an unusable evaluationMode. ${err instanceof Error ? err.message : String(err)}`,
       );
     }

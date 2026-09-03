@@ -609,39 +609,6 @@ model Category {
   /// Same normalize-and-enforce contract as Defect.nameKey.
   nameKey        String   @unique
 
-  /// How the engine grades this category. CLEAN ENUM FORM — one of:
-  ///   'CUMULATIVE'  — sum all defect counts in the category, FAIL if > Ac
-  ///   'GRANULAR'    — each defect type checked independently against Ac
-  ///   'QUALITATIVE' — pass/fail items; counts are state codes (0/1/2)
-  ///   'RECORD_ONLY' — informational; the engine skips the category entirely
-  ///
-  /// ⚠ THIS IS NOT THE WIRE FORMAT THE ENGINE READS. AppConfig JSON and
-  /// aqlEvaluator.ts use a different dialect, and the mapping is NOT
-  /// lossless-by-coincidence — it must be applied deliberately in both
-  /// directions:
-  ///
-  ///     this field      AppConfig JSON / engine `evaluationMode`
-  ///     ───────────     ────────────────────────────────────────
-  ///     CUMULATIVE  <->  'CUMULATIVE'
-  ///     GRANULAR    <->  'GRANULAR'
-  ///     QUALITATIVE <->  'N/A'
-  ///     RECORD_ONLY <->  ''          ← empty string, NOT null/undefined
-  ///
-  /// The last row is the dangerous one. `''` is a REAL, DELIBERATE value —
-  /// it is the ONLY thing that triggers aqlEvaluator.ts's true-exclusion path
-  /// (`if (!category.evaluationMode) continue;`), and defaultProfileSeed.ts
-  /// documents it as EMPTY_EVAL_MODE_IS_RECORD_ONLY with isEvalModeUnset()
-  /// using `??` rather than `||` precisely so it is never coerced away. A
-  /// Stage 2 mapper that turns RECORD_ONLY back into null, undefined, or
-  /// 'CUMULATIVE' would either be rejected by validateInspectionProfiles()
-  /// or — worse — start grading a record-only category, failing lots on
-  /// defects that were never meant to count. def_sagging already sits in
-  /// FACTORY STANDARD's RECORD ONLY category in a real frozen submission.
-  ///
-  /// The canonical mapping lives in code at
-  /// backend/src/lib/categoryEvaluationMode.ts — use it, never re-derive it.
-  evaluationMode String
-
   profileLinks   ProfileCategory[]
 
   createdAt      DateTime @default(now())
@@ -678,6 +645,52 @@ model ProfileCategory {
   /// different path entirely, and 'RECORD ONLY'/'PASS/FAIL' are display
   /// labels for categories that never reach the ISO matrix at all.
   aqlLevel   String
+
+  /// How the engine grades this category IN THIS PROFILE. CLEAN ENUM FORM —
+  /// one of:
+  ///   'CUMULATIVE'  — sum all defect counts in the category, FAIL if > Ac
+  ///   'GRANULAR'    — each defect type checked independently against Ac
+  ///   'QUALITATIVE' — pass/fail items; counts are state codes (0/1/2)
+  ///   'RECORD_ONLY' — informational; the engine skips the category entirely
+  ///
+  /// Lives HERE, not on Category, for the same reason aqlLevel does: how a
+  /// category is graded is a decision the adopting PROFILE makes, not a
+  /// permanent property of the name. A global Category is a name and nothing
+  /// else — exactly symmetric with Defect — so two profiles may legitimately
+  /// use the same category under different modes. (No profile pair does today:
+  /// AND and BARRIER are shared by FACTORY STANDARD and MEDLINE and both grade
+  /// them CUMULATIVE.)
+  ///
+  /// ⚠ THIS IS NOT THE WIRE FORMAT THE ENGINE READS. AppConfig JSON and
+  /// aqlEvaluator.ts use a different dialect, and the mapping is NOT
+  /// lossless-by-coincidence — it must be applied deliberately in both
+  /// directions:
+  ///
+  ///     this field      AppConfig JSON / engine `evaluationMode`
+  ///     ───────────     ────────────────────────────────────────
+  ///     CUMULATIVE  <->  'CUMULATIVE'
+  ///     GRANULAR    <->  'GRANULAR'
+  ///     QUALITATIVE <->  'N/A'
+  ///     RECORD_ONLY <->  ''          ← empty string, NOT null/undefined
+  ///
+  /// The last row is the dangerous one. `''` is a REAL, DELIBERATE value —
+  /// it is the ONLY thing that triggers aqlEvaluator.ts's true-exclusion path
+  /// (`if (!category.evaluationMode) continue;`), and defaultProfileSeed.ts
+  /// documents it as EMPTY_EVAL_MODE_IS_RECORD_ONLY with isEvalModeUnset()
+  /// using `??` rather than `||` precisely so it is never coerced away. A
+  /// mapper that turns RECORD_ONLY back into null, undefined, or 'CUMULATIVE'
+  /// would either be rejected by validateInspectionProfiles() or — worse —
+  /// start grading a record-only category, failing lots on defects that were
+  /// never meant to count. def_sagging already sits in FACTORY STANDARD's
+  /// RECORD ONLY category in a real frozen submission.
+  ///
+  /// Deliberately NO @default: a silent fallback here is precisely how a
+  /// RECORD_ONLY category would quietly become graded. Every writer must
+  /// state the mode explicitly.
+  ///
+  /// The canonical mapping lives in code at
+  /// backend/src/lib/categoryEvaluationMode.ts — use it, never re-derive it.
+  evaluationMode String
 
   /// Preserves the admin-authored ordering of categories within the profile,
   /// captured from the existing JSON array index. Not decoration — the admin

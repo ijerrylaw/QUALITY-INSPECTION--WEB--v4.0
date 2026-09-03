@@ -96,14 +96,15 @@ function pad3(n: number): string {
 // PLAN
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** A global Category is a NAME only — evaluationMode lives on the join below. */
 export interface PlannedCategory {
-  id: string; name: string; nameKey: string; evaluationMode: string; firstSeenIn: string;
+  id: string; name: string; nameKey: string; firstSeenIn: string;
 }
 export interface PlannedDefect {
   id: string; name: string; nameKey: string; sourceProfile: string; locked: boolean;
 }
 export interface PlannedProfileCategory {
-  profileId: string; categoryId: string; aqlLevel: string; sortOrder: number;
+  profileId: string; categoryId: string; aqlLevel: string; evaluationMode: string; sortOrder: number;
 }
 export interface PlannedProfileDefect {
   profileId: string; categoryId: string; defectId: string; sortOrder: number;
@@ -211,19 +212,14 @@ export function planRegistry(
   const categoryById = new Map<string, PlannedCategory>();
   const categoryByNameKey = new Map<string, string>();
 
+  // A global Category is a NAME and nothing else — exactly symmetric with
+  // Defect. evaluationMode is no longer reconciled here: it is a per-profile
+  // decision recorded on ProfileCategory below, so two profiles adopting the
+  // same category under different modes is legal, not a conflict to warn about.
   for (const profile of profiles) {
     const isDefault = profile.isDefault === true;
     for (const cat of profile.aqlCategories ?? []) {
       const nameKey = normalizeName(cat.name);
-      let evaluationMode: string;
-      try {
-        evaluationMode = fromEngineEvaluationMode(readEvalMode(cat));
-      } catch (err) {
-        throw new ProfileRegistrySyncError(
-          `Category '${cat.name}' in profile '${profile.name}': ` +
-          `${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
       const existing = categoryById.get(cat.id);
 
       if (!existing) {
@@ -234,20 +230,20 @@ export function planRegistry(
             'The global Category Inventory requires unique category names.',
           );
         }
-        categoryById.set(cat.id, { id: cat.id, name: cat.name, nameKey, evaluationMode, firstSeenIn: profile.name });
+        categoryById.set(cat.id, { id: cat.id, name: cat.name, nameKey, firstSeenIn: profile.name });
         categoryByNameKey.set(nameKey, cat.id);
         continue;
       }
 
-      if (existing.name !== cat.name || existing.evaluationMode !== evaluationMode) {
+      if (existing.name !== cat.name) {
         warnings.push(
-          `Category '${cat.id}' differs between profiles (${existing.firstSeenIn}: name='${existing.name}' ` +
-          `mode=${existing.evaluationMode}; ${profile.name}: name='${cat.name}' mode=${evaluationMode}). ` +
-          `Keeping ${isDefault ? profile.name : existing.firstSeenIn}'s values.`,
+          `Category '${cat.id}' has a different name between profiles (${existing.firstSeenIn}: ` +
+          `'${existing.name}'; ${profile.name}: '${cat.name}'). ` +
+          `Keeping ${isDefault ? profile.name : existing.firstSeenIn}'s name.`,
         );
         if (isDefault) {
           categoryByNameKey.delete(existing.nameKey);
-          categoryById.set(cat.id, { ...existing, name: cat.name, nameKey, evaluationMode });
+          categoryById.set(cat.id, { ...existing, name: cat.name, nameKey });
           categoryByNameKey.set(nameKey, cat.id);
         }
       }
@@ -331,8 +327,25 @@ export function planRegistry(
     const selected = new Set<string>();
     (profile.aqlCategories ?? []).forEach((cat, index) => {
       selected.add(cat.id);
+      // evaluationMode is captured PER PROFILE here, from this profile's own
+      // JSON category — the same place aqlLevel comes from. Translated through
+      // categoryEvaluationMode.ts so RECORD ONLY's '' becomes RECORD_ONLY
+      // rather than being coerced away.
+      let evaluationMode: string;
+      try {
+        evaluationMode = fromEngineEvaluationMode(readEvalMode(cat));
+      } catch (err) {
+        throw new ProfileRegistrySyncError(
+          `Category '${cat.name}' in profile '${profile.name}': ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       profileCategories.push({
-        profileId: profile.id, categoryId: cat.id, aqlLevel: readAql(cat), sortOrder: index,
+        profileId: profile.id,
+        categoryId: cat.id,
+        aqlLevel: readAql(cat),
+        evaluationMode,
+        sortOrder: index,
       });
     });
 
@@ -455,7 +468,6 @@ export async function applyRegistryPlan(plan: RegistryPlan, db: RegistryDb = pri
       code: categoryCodeById.get(c.id) as string,
       name: c.name,
       nameKey: c.nameKey,
-      evaluationMode: c.evaluationMode,
     };
     await db.category.upsert({ where: { id: c.id }, create: { id: c.id, ...data }, update: data });
   }
@@ -470,7 +482,7 @@ export async function applyRegistryPlan(plan: RegistryPlan, db: RegistryDb = pri
     const row = await db.profileCategory.upsert({
       where: { profileId_categoryId: { profileId: pc.profileId, categoryId: pc.categoryId } },
       create: pc,
-      update: { aqlLevel: pc.aqlLevel, sortOrder: pc.sortOrder },
+      update: { aqlLevel: pc.aqlLevel, evaluationMode: pc.evaluationMode, sortOrder: pc.sortOrder },
     });
     profileCategoryIdByKey.set(`${pc.profileId}::${pc.categoryId}`, row.id);
   }

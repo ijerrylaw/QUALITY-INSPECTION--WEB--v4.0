@@ -5,6 +5,14 @@
  * (`Category`). Read, create, and rename; nothing here assigns an entry to a
  * profile or a category.
  *
+ * ── A Category is a NAME, nothing else ─────────────────────────────────────
+ * Symmetric with Defect. How a category is GRADED — its evaluation mode, and
+ * its AQL level — is a decision the adopting PROFILE makes, recorded on
+ * ProfileCategory, not a permanent property of the name. So two profiles may
+ * legitimately use the same category under different modes, and nothing in
+ * this file reads or writes an evaluation mode. The Stage 4 picker is where a
+ * profile states the mode, at the moment it adopts a category.
+ *
  * ── Scope boundary (Stage 3) ────────────────────────────────────────────────
  * These endpoints deliberately do NOT touch ProfileCategory or
  * ProfileCategoryDefect. Which defects a profile records under which category
@@ -38,8 +46,8 @@
  *
  * Endpoints:
  *   GET   /api/registry/categories        list + lock state + usage count
- *   POST  /api/registry/categories        create { name, evaluationMode }
- *   PATCH /api/registry/categories/:id    rename / re-mode  (409 if locked)
+ *   POST  /api/registry/categories        create { name }
+ *   PATCH /api/registry/categories/:id    rename            (409 if locked)
  *   GET   /api/registry/defects           list + lock state + usage count
  *   POST  /api/registry/defects           create { name }
  *   PATCH /api/registry/defects/:id       rename            (409 if locked)
@@ -49,7 +57,6 @@ import { Router, Request, Response } from 'express';
 import prisma from '../lib/prismaClient';
 import { requireGroup } from '../middleware/auth';
 import { loadLockUsage, normalizeName } from '../lib/profileRegistrySync';
-import { CATEGORY_EVALUATION_MODES, isCategoryEvaluationMode } from '../lib/categoryEvaluationMode';
 
 export const registryRouter = Router();
 
@@ -134,7 +141,6 @@ registryRouter.get('/categories', requireGroup('A', 'B'), async (_req: Request, 
       id: c.id,
       code: c.code,
       name: c.name,
-      evaluationMode: c.evaluationMode,
       locked: (usage.categories.get(c.id) ?? 0) > 0,
       submissionCount: usage.categories.get(c.id) ?? 0,
       profileCount: profileCountById.get(c.id) ?? 0,
@@ -150,14 +156,6 @@ registryRouter.post('/categories', requireGroup('A', 'B'), async (req: Request, 
     const parsed = validateName((req.body ?? {})['name']);
     if ('error' in parsed) { res.status(400).json({ error: parsed.error }); return; }
 
-    const evaluationMode = (req.body ?? {})['evaluationMode'];
-    if (!isCategoryEvaluationMode(evaluationMode)) {
-      res.status(400).json({
-        error: `Evaluation mode must be one of: ${CATEGORY_EVALUATION_MODES.join(', ')}.`,
-      });
-      return;
-    }
-
     const nameKey = normalizeName(parsed.name);
     const existing = await prisma.category.findMany({ select: { id: true, code: true, nameKey: true, name: true } });
     const clash = existing.find((c) => c.nameKey === nameKey);
@@ -172,7 +170,6 @@ registryRouter.post('/categories', requireGroup('A', 'B'), async (req: Request, 
         code: nextCode('CAT', existing.map((c) => c.code)),
         name: parsed.name,
         nameKey,
-        evaluationMode,
       },
     });
     res.status(201).json({
@@ -204,7 +201,7 @@ registryRouter.patch('/categories/:id', requireGroup('A', 'B'), async (req: Requ
       return;
     }
 
-    const data: { name?: string; nameKey?: string; evaluationMode?: string } = {};
+    const data: { name?: string; nameKey?: string } = {};
 
     if ((req.body ?? {})['name'] !== undefined) {
       const parsed = validateName(req.body['name']);
@@ -219,19 +216,8 @@ registryRouter.patch('/categories/:id', requireGroup('A', 'B'), async (req: Requ
       data.nameKey = nameKey;
     }
 
-    if ((req.body ?? {})['evaluationMode'] !== undefined) {
-      const mode = req.body['evaluationMode'];
-      if (!isCategoryEvaluationMode(mode)) {
-        res.status(400).json({
-          error: `Evaluation mode must be one of: ${CATEGORY_EVALUATION_MODES.join(', ')}.`,
-        });
-        return;
-      }
-      data.evaluationMode = mode;
-    }
-
     if (Object.keys(data).length === 0) {
-      res.status(400).json({ error: 'Nothing to update — supply a name or an evaluation mode.' });
+      res.status(400).json({ error: 'Nothing to update — supply a name.' });
       return;
     }
 
