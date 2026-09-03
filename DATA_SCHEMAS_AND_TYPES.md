@@ -232,6 +232,8 @@ export interface AmendmentLog {
 
 ### 2.1 AQL Rules Storage & Engine Normalization
 
+> **Superseding work in flight:** a global Master Defect List and Category Inventory now exist as real Prisma models with real data — see **§2.2**. They are additive and **not yet read by anything**, so everything in this section remains accurate for how grading works today. §2.2 becomes authoritative at the Stage 2 cutover.
+
 > **Important:** `InspectionProfile`, `AQLCategory`, and `DefectDefinition` are **not** Prisma models — those tables were removed after confirming they sat fully unused (0 rows) since real profile data has only ever lived in `AppConfig.inspectionProfiles` JSON (see `AUDIT_REPORT.md` §9.3 Option B / §10 Part 3). `AppConfig.inspectionProfiles` (a JSON-serialized array on the `AppConfig` singleton row) is the single source of truth. The interfaces below describe that JSON shape, plus the internal shape `evaluateAQLVerdict()` (the pure verdict engine) actually operates on — the two differ on one field name, reconciled by normalization at resolve time.
 >
 > Specifically: defect definitions in the stored JSON use `categoryId` as the linking field, but the engine expects `currentClass`. `resolveVerdict()` normalizes `categoryId → currentClass` (falling back to `categoryId` for `defaultClass` too) before calling the engine — see `backend/src/engine/resolveVerdict.ts`.
@@ -305,6 +307,65 @@ unchanged name can't reproduce the source's exact id. Each defect's
 `categoryId` is remapped through an old-id→new-id map built during the same
 pass, so the copy's category/defect grouping is preserved exactly even
 though every id string changed. The source profile itself is never mutated.
+
+---
+
+### 2.2 Master Defect List & Category Inventory (Stage 1 — additive, not yet live)
+
+> **Reading order:** §2.1 above still describes how grading works **today**. The four Prisma models below exist in the database and are populated with real data, but **nothing reads them yet** — `aqlEvaluator.ts`, `resolveVerdict.ts`, `QualityRules.tsx` and the wizard are all untouched, and `AppConfig.inspectionProfiles` JSON remains the live source of truth for every verdict. Stage 2 rewires those call sites; only then does §2.1 become historical.
+
+These models introduce a **global defect/category vocabulary** that profiles select from, replacing the model where each profile invented and independently spelled its own defects. They are the first relational profile-adjacent tables since `InspectionProfile`/`AQLCategory`/`DefectDefinition` were removed (§2.1) — and deliberately not a revival of those: they store the *global vocabulary* (which never existed before) plus the *per-profile selection* of it. Profiles themselves still live in `AppConfig.inspectionProfiles` JSON.
+
+```
+Defect                 global Master Defect List (one row per canonical defect name)
+Category               global Category Inventory (a SUPERSET, not a forced-identical set)
+ProfileCategory        which categories a profile uses, and at what AQL level
+ProfileCategoryDefect  which defects a profile records under which of its categories
+```
+
+**Canonical ids are the existing `def_*` / category slugs, never newly minted.** This is load-bearing. `Submission.defects` is `Record<defectId, count>` and `Submission.gradingSnapshot`'s `defectItems[].id` both store these exact strings, and `POST /api/amendments/:id/approve` re-grades by feeding those stored keys back through `resolveVerdict()`. Re-IDing a defect would make every lookup miss, silently resolve each count to `0` via `defectCounts[def.id] ?? 0`, and could flip a stored verdict `FAILED → PASSED` while overwriting the original snapshot. The `DEF-001` / `CAT-001` display codes are a **separate, purely cosmetic field** — never a lookup key, in the engine or anywhere else.
+
+**AQL level lives on `ProfileCategory`, not `Category`.** Two profiles may grade the same global category at different AQL levels, so AQL is a per-profile setting by design.
+
+**Categories are a superset.** FACTORY STANDARD's single `VISUALS` bucket (AQL 2.5) and MEDLINE's three-tier `VISUAL — CRITICAL` / `MAJOR` / `MINOR` ladder (1.0 / 2.5 / 4.0) are genuinely different grading regimes and are preserved as **distinct inventory rows**, deliberately not collapsed into one another. Only `AND` and `BARRIER` are shared between the two profiles.
+
+**Name uniqueness is now GLOBAL — inverting §2.1's per-profile rule.** `Defect.nameKey` and `Category.nameKey` store the normalized name (trim → lowercase → collapse internal whitespace, mirroring `QualityRules.tsx`'s `normalizeDefectName()`) under a `@unique` constraint. The normalized column exists because SQLite's `UNIQUE` is case-sensitive, so a bare `name @unique` would admit both `'Wet Glove'` and `'wet glove'`. Two-layer pattern, same as `Submission.batchNumber` / `PinUser.employeeId`.
+
+**`ProfileCategoryDefect.profileId` is denormalized from its parent**, carried solely so `@@unique([profileId, defectId])` is expressible. That constraint enforces a real correctness invariant: a defect must appear under **at most one category per profile**, because both `evaluateAQLVerdict()` and `buildFrozenCategoryAnalysis()` resolve a category's members by filtering the full defect list — a defect in two categories would be counted twice, inflating a CUMULATIVE total. Every writer must set it from `profileCategory.profileId`, never independently.
+
+**`sortOrder`** on both join models preserves the admin-authored ordering the JSON arrays carry implicitly (the ordering `handleMoveDefect()` exists to let admins control), so Stage 2 does not silently reshuffle every profile screen.
+
+#### ⚠ `evaluationMode` is stored in a DIFFERENT dialect than the engine reads
+
+`Category.evaluationMode` uses a clean enum; `AQLCategory.evaluationMode` (§2.1) uses the engine wire format. **Two of the four rows are not identity mappings:**
+
+| `Category.evaluationMode` | engine / AppConfig JSON |
+|---|---|
+| `CUMULATIVE` | `'CUMULATIVE'` |
+| `GRANULAR` | `'GRANULAR'` |
+| `QUALITATIVE` | `'N/A'` |
+| `RECORD_ONLY` | `''` ← **empty string, not null/undefined** |
+
+The last row is the dangerous one. `''` is a **real, deliberate value** — the only trigger for `aqlEvaluator.ts`'s true-exclusion path (`if (!category.evaluationMode) continue;`), pinned down in `defaultProfileSeed.ts` as `EMPTY_EVAL_MODE_IS_RECORD_ONLY`, with `isEvalModeUnset()` using `??` rather than `||` precisely so it survives. Mapping `RECORD_ONLY` back to `null`/`undefined` produces a hard 400 from `validateInspectionProfiles()`; mapping it to `'CUMULATIVE'` is worse — a record-only category would start counting toward the lot verdict, and FACTORY STANDARD's RECORD ONLY category already holds `def_sagging` in a real frozen submission.
+
+**The canonical mapping lives in code at `backend/src/lib/categoryEvaluationMode.ts`** (`toEngineEvaluationMode()` / `fromEngineEvaluationMode()`, both throwing on unrecognised input rather than falling back). Use it — never re-derive the table above.
+
+#### Locking is derived, never stored
+
+A Defect or Category is uneditable/undeletable once it appears in any `Submission.gradingSnapshot`. This is computed on demand by scanning frozen snapshots, **not** kept as a boolean column that could drift out of sync with the snapshots that are the actual authority — same reasoning as `getProductCodeUsage()` in `config.routes.ts`. Note it is an unindexed JSON scan (free at 27 rows; revisit at scale).
+
+#### As-migrated state
+
+Populated by `backend/scripts/backfill-master-defect-list.ts` (one-off, kept as historical record):
+
+| Table | Rows |
+|---|---|
+| `Category` | 8 — FACTORY STANDARD's 5 + MEDLINE's 3 additions (`AND`/`BARRIER` shared) |
+| `Defect` | 49 — 50 distinct ids, 1 merged away as a name conflict |
+| `ProfileCategory` | 10 — 5 per profile |
+| `ProfileCategoryDefect` | 96 — 49 FACTORY STANDARD + 47 MEDLINE |
+
+The one conflict: `'Wet Glove'` existed as `def_wet_glove_1` (FACTORY STANDARD) and `def_wet_glove` (MEDLINE) — an artifact of `handleDuplicateProfile`'s cross-profile id deduplication (§2.1 above). `def_wet_glove_1` won on the **locked** rule (it appears in a real frozen snapshot); `def_wet_glove` does not survive as a global row, and MEDLINE's join now points at `def_wet_glove_1` under `VISUAL — MAJOR` at AQL 2.5 — unchanged grading. The script refuses to alias away any locked id, and aborts rather than guess if both sides of a conflict are locked.
 
 ---
 
