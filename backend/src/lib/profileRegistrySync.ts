@@ -121,12 +121,36 @@ export class ProfileRegistrySyncError extends Error {
  * authority. Same reasoning as getProductCodeUsage() in config.routes.ts.
  */
 export async function loadLockState(): Promise<{ defects: Set<string>; categories: Set<string> }> {
+  const usage = await loadLockUsage();
+  return {
+    defects: new Set(usage.defects.keys()),
+    categories: new Set(usage.categories.keys()),
+  };
+}
+
+/**
+ * Same derivation as loadLockState(), but counting HOW MANY submissions
+ * reference each id rather than only whether any does — so the registry admin
+ * screens can say "used in 5 submissions" instead of a bare padlock.
+ *
+ * Counts SUBMISSIONS, not occurrences: a defect appearing twice inside one
+ * snapshot (impossible today, since a defect sits in at most one category per
+ * profile) would still count once, because the number a person reads as "this
+ * is used in N inspections" has to mean inspections.
+ *
+ * loadLockState() is a projection of this, so the boolean and the count can
+ * never disagree about what "locked" means — one scan, one definition.
+ */
+export async function loadLockUsage(): Promise<{
+  defects: Map<string, number>;
+  categories: Map<string, number>;
+}> {
   const submissions = await prisma.submission.findMany({
     where: { gradingSnapshot: { not: null } },
     select: { gradingSnapshot: true },
   });
-  const defects = new Set<string>();
-  const categories = new Set<string>();
+  const defects = new Map<string, number>();
+  const categories = new Map<string, number>();
   for (const s of submissions) {
     let snapshot: { id?: string; defectItems?: { id?: string }[] }[];
     try {
@@ -134,10 +158,15 @@ export async function loadLockState(): Promise<{ defects: Set<string>; categorie
     } catch {
       continue;
     }
+    // Per-submission sets first, so one submission never counts an id twice.
+    const catIds = new Set<string>();
+    const defIds = new Set<string>();
     for (const cat of snapshot) {
-      if (cat.id) categories.add(cat.id);
-      for (const d of cat.defectItems ?? []) if (d.id) defects.add(d.id);
+      if (cat.id) catIds.add(cat.id);
+      for (const d of cat.defectItems ?? []) if (d.id) defIds.add(d.id);
     }
+    for (const id of catIds) categories.set(id, (categories.get(id) ?? 0) + 1);
+    for (const id of defIds) defects.set(id, (defects.get(id) ?? 0) + 1);
   }
   return { defects, categories };
 }
@@ -366,6 +395,43 @@ export async function applyRegistryPlan(plan: RegistryPlan): Promise<void> {
   let categorySeq = nextNumber(categoryCodeById.values(), 'CAT');
   for (const c of plan.categories) {
     if (!categoryCodeById.has(c.id)) categoryCodeById.set(c.id, `CAT-${pad3(categorySeq++)}`);
+  }
+
+  // ── Guard: a planned name already registered under a DIFFERENT id ────────
+  // Reachable from Stage 3 onward: an admin registers a defect in the Master
+  // Defect List, then someone types the same name into QualityRules.tsx's
+  // still-free-text add box, which mints its own slug id. Without this the
+  // upsert below trips nameKey's UNIQUE constraint and surfaces as a raw
+  // Prisma 500; ProfileRegistrySyncError is converted to a clean 409 by
+  // PATCH /api/config. Goes away at Stage 4, when the picker replaces
+  // free-text naming and ids can only come from the registry.
+  const existingDefectByNameKey = new Map(
+    (await prisma.defect.findMany({ select: { id: true, nameKey: true, name: true } }))
+      .map((d) => [d.nameKey, d]),
+  );
+  for (const d of plan.defects) {
+    const clash = existingDefectByNameKey.get(d.nameKey);
+    if (clash && clash.id !== d.id) {
+      throw new ProfileRegistrySyncError(
+        `The defect name '${d.name}' is already registered in the Master Defect List as '${clash.id}' ` +
+        `(${clash.name}), but this profile refers to it as '${d.id}'. Names are unique across the whole ` +
+        'system — pick the existing entry rather than creating a second one with the same name.',
+      );
+    }
+  }
+  const existingCategoryByNameKey = new Map(
+    (await prisma.category.findMany({ select: { id: true, nameKey: true, name: true } }))
+      .map((c) => [c.nameKey, c]),
+  );
+  for (const c of plan.categories) {
+    const clash = existingCategoryByNameKey.get(c.nameKey);
+    if (clash && clash.id !== c.id) {
+      throw new ProfileRegistrySyncError(
+        `The category name '${c.name}' is already registered in the Category Inventory as '${clash.id}' ` +
+        `(${clash.name}), but this profile refers to it as '${c.id}'. Category names are unique across ` +
+        'the whole system.',
+      );
+    }
   }
 
   for (const c of plan.categories) {
