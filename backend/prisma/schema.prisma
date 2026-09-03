@@ -497,3 +497,247 @@ model AccessLog {
 
   @@index([timestamp])
 }
+
+// ============================================================
+// MASTER DEFECT LIST + CATEGORY INVENTORY  (Stage 1 — additive only)
+//
+// Four models introducing a GLOBAL defect/category vocabulary that
+// profiles select from, replacing the per-profile free-text model where
+// every profile invented (and independently spelled) its own defects.
+//
+// ── Stage 1 is ADDITIVE ONLY ────────────────────────────────────────
+// AppConfig.inspectionProfiles JSON remains the LIVE source of truth for
+// grading. Nothing here is read by aqlEvaluator.ts, resolveVerdict.ts, the
+// admin UI, or the wizard yet — Stage 2 rewires those call sites onto these
+// tables and only then may the embedded JSON be retired. Until that happens
+// the two representations are kept in sync by the backfill script
+// (scripts/backfill-master-defect-list.ts), and the JSON stays authoritative.
+//
+// ── Why these are the FIRST relational profile-adjacent models ──────
+// InspectionProfile/AQLCategory/DefectDefinition were deliberately DELETED
+// (AUDIT_REPORT.md §9.3 Option B) because they sat at 0 rows while all real
+// data lived in AppConfig JSON. These models are not a revival of that set:
+// they store the GLOBAL vocabulary (which did not exist before) plus the
+// per-profile selection of it, which is genuinely relational data that the
+// JSON blob modelled badly. Profiles themselves still live in the JSON —
+// see the `profileId` note below.
+// ============================================================
+
+// ============================================================
+// DEFECT — the global Master Defect List
+//
+// One row per canonical defect name in the whole system. A profile does not
+// own defects any more; it SELECTS them (see ProfileCategoryDefect).
+// ============================================================
+model Defect {
+  /// CANONICAL IDENTITY — deliberately the EXISTING `def_*` slug
+  /// (e.g. 'def_wet_glove_1'), never a newly minted key.
+  ///
+  /// This is load-bearing, not cosmetic. `Submission.defects` is
+  /// Record<defectId, count> and `Submission.gradingSnapshot`'s
+  /// defectItems[].id both store these exact strings on 27 existing rows.
+  /// POST /api/amendments/:id/approve re-grades by feeding those stored
+  /// keys back through resolveVerdict() against the CURRENT definitions —
+  /// so re-IDing a defect would make every lookup miss, silently resolve
+  /// each count to 0 via `defectCounts[def.id] ?? 0`, and could flip a
+  /// stored verdict FAILED -> PASSED while overwriting the original
+  /// gradingSnapshot. Preserving these ids is what makes this migration
+  /// safe. See the Stage 1 discovery report, trap G8-1.
+  id        String   @id
+
+  /// Human-readable display code ('DEF-001'). PURELY COSMETIC — for the
+  /// picker modal and admin screens. NEVER used as a lookup key by the
+  /// engine, by any grading path, or by any stored submission data.
+  /// Assigned once at backfill (alphabetically by name, so the initial
+  /// numbering is deterministic and reproducible) and stable thereafter;
+  /// defects added later take the next free number rather than causing a
+  /// renumber, since a code that moves is worse than a code with a gap.
+  code      String   @unique
+
+  /// Display name, in the casing the admin authored ('Wet Glove').
+  name      String
+
+  /// Normalized form of `name` — trim -> lowercase -> collapse internal
+  /// whitespace. Mirrors normalizeDefectName() in QualityRules.tsx exactly,
+  /// which is the rule the admin UI has always applied when rejecting a
+  /// duplicate. Stored (rather than computed at query time) purely so the
+  /// @unique below can enforce that rule at the DB level: SQLite's UNIQUE is
+  /// case-SENSITIVE, so a bare `name @unique` would happily admit both
+  /// 'Wet Glove' and 'wet glove'. Two-layer pattern, same as
+  /// Submission.batchNumber / PinUser.employeeId — app-level check in front,
+  /// DB constraint as the atomic backstop.
+  ///
+  /// Note this constraint is GLOBAL, inverting the old per-profile rule
+  /// (findDuplicateDefectName() checked only the active profile, with an
+  /// explicit comment that "a name may legitimately repeat across profiles").
+  /// That is the whole point of a master list.
+  nameKey   String   @unique
+
+  profileLinks ProfileCategoryDefect[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================================
+// CATEGORY — the global Category Inventory
+//
+// A SUPERSET, not a forced-identical set. FACTORY STANDARD's single VISUALS
+// bucket and MEDLINE's three-tier VISUAL — CRITICAL/MAJOR/MINOR ladder are
+// genuinely different grading regimes and are preserved as DISTINCT rows;
+// they are deliberately NOT collapsed into each other. Each profile picks
+// its own subset via ProfileCategory.
+// ============================================================
+model Category {
+  /// CANONICAL IDENTITY — the existing category id, preserved verbatim
+  /// ('AND', 'BARRIER', 'cat_1787208360393', 'VISUAL_MAJOR', ...).
+  /// Same preservation rule as Defect.id: gradingSnapshot freezes category
+  /// ids too, and buildFrozenCategoryAnalysis() joins defects to categories
+  /// on them.
+  id             String   @id
+
+  /// Human-readable display code ('CAT-001'). Cosmetic only, same contract
+  /// as Defect.code. Backfill assigns these in first-appearance order across
+  /// profiles (FACTORY STANDARD's set, then MEDLINE's additions), which keeps
+  /// the two universally-shared categories as CAT-001/CAT-002 and each
+  /// profile's own set contiguous — more meaningful for an 8-row structural
+  /// inventory than alphabetical would be.
+  code           String   @unique
+
+  name           String
+
+  /// Same normalize-and-enforce contract as Defect.nameKey.
+  nameKey        String   @unique
+
+  /// How the engine grades this category. CLEAN ENUM FORM — one of:
+  ///   'CUMULATIVE'  — sum all defect counts in the category, FAIL if > Ac
+  ///   'GRANULAR'    — each defect type checked independently against Ac
+  ///   'QUALITATIVE' — pass/fail items; counts are state codes (0/1/2)
+  ///   'RECORD_ONLY' — informational; the engine skips the category entirely
+  ///
+  /// ⚠ THIS IS NOT THE WIRE FORMAT THE ENGINE READS. AppConfig JSON and
+  /// aqlEvaluator.ts use a different dialect, and the mapping is NOT
+  /// lossless-by-coincidence — it must be applied deliberately in both
+  /// directions:
+  ///
+  ///     this field      AppConfig JSON / engine `evaluationMode`
+  ///     ───────────     ────────────────────────────────────────
+  ///     CUMULATIVE  <->  'CUMULATIVE'
+  ///     GRANULAR    <->  'GRANULAR'
+  ///     QUALITATIVE <->  'N/A'
+  ///     RECORD_ONLY <->  ''          ← empty string, NOT null/undefined
+  ///
+  /// The last row is the dangerous one. `''` is a REAL, DELIBERATE value —
+  /// it is the ONLY thing that triggers aqlEvaluator.ts's true-exclusion path
+  /// (`if (!category.evaluationMode) continue;`), and defaultProfileSeed.ts
+  /// documents it as EMPTY_EVAL_MODE_IS_RECORD_ONLY with isEvalModeUnset()
+  /// using `??` rather than `||` precisely so it is never coerced away. A
+  /// Stage 2 mapper that turns RECORD_ONLY back into null, undefined, or
+  /// 'CUMULATIVE' would either be rejected by validateInspectionProfiles()
+  /// or — worse — start grading a record-only category, failing lots on
+  /// defects that were never meant to count. def_sagging already sits in
+  /// FACTORY STANDARD's RECORD ONLY category in a real frozen submission.
+  ///
+  /// The canonical mapping lives in code at
+  /// backend/src/lib/categoryEvaluationMode.ts — use it, never re-derive it.
+  evaluationMode String
+
+  profileLinks   ProfileCategory[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+// ============================================================
+// PROFILE ↔ CATEGORY
+// Which global categories a profile uses, and at what AQL level.
+//
+// AQL is stored HERE, not on Category, because it is a per-profile setting
+// by design: FACTORY STANDARD and MEDLINE both use the global BARRIER
+// category, and two profiles may legitimately grade the same category at
+// different AQL levels (MEDLINE's VISUAL — CRITICAL at 1.0 vs its MINOR at
+// 4.0 is the same shape of decision).
+// ============================================================
+model ProfileCategory {
+  id         String   @id @default(cuid())
+
+  /// Opaque reference to an AppConfig.inspectionProfiles[] entry — NOT a
+  /// foreign key, because profiles are still JSON, not a table. Identical
+  /// convention (and identical caveat) to Submission.profileId: no enforced
+  /// referential integrity, so a deleted profile leaves rows behind here.
+  /// Stage 2 owns the cleanup path; Stage 1 only ever writes ids that exist.
+  profileId  String
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  /// The AQL level string as the engine consumes it — 'AND', '1.0', '2.5',
+  /// '4.0', 'PASS/FAIL', 'RECORD ONLY'. Deliberately a String, not a
+  /// number/enum: getAQLThresholds() takes a string and routes non-numeric
+  /// values ('AND', anything matching the zero-tolerance test) down a
+  /// different path entirely, and 'RECORD ONLY'/'PASS/FAIL' are display
+  /// labels for categories that never reach the ISO matrix at all.
+  aqlLevel   String
+
+  /// Preserves the admin-authored ordering of categories within the profile,
+  /// captured from the existing JSON array index. Not decoration — the admin
+  /// UI renders categories in array order today, so dropping it would
+  /// silently reshuffle every profile screen at Stage 2.
+  sortOrder  Int
+
+  defects    ProfileCategoryDefect[]
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([profileId, categoryId])
+  @@index([profileId])
+}
+
+// ============================================================
+// PROFILE ↔ CATEGORY ↔ DEFECT
+// Which defects a profile records under which of its selected categories.
+//
+// Replaces DefectDefinition.categoryId: instead of each profile holding its
+// own copy of a defect that happens to carry a category pointer, the profile
+// holds a SELECTION linking one global Defect to one of its ProfileCategory
+// rows. The FK to ProfileCategory (not a loose profileId+categoryId pair)
+// makes it structurally impossible to file a defect under a category the
+// profile has not selected.
+// ============================================================
+model ProfileCategoryDefect {
+  id                String          @id @default(cuid())
+
+  profileCategoryId String
+  profileCategory   ProfileCategory @relation(fields: [profileCategoryId], references: [id], onDelete: Cascade)
+
+  defectId          String
+  defect            Defect          @relation(fields: [defectId], references: [id])
+
+  /// DENORMALIZED from profileCategory.profileId — carried here for exactly
+  /// one reason: it makes @@unique([profileId, defectId]) expressible, and
+  /// that constraint enforces a real correctness invariant that cannot be
+  /// stated on the parent. A defect must appear under AT MOST ONE category
+  /// per profile, because both aqlEvaluator.ts and
+  /// buildFrozenCategoryAnalysis() resolve a category's members by filtering
+  /// the full defect list — a defect sitting in two categories would be
+  /// counted twice, inflating a CUMULATIVE total and double-reporting in the
+  /// frozen snapshot.
+  ///
+  /// The cost is a field that can drift from its parent. Every writer MUST
+  /// set it from profileCategory.profileId, never independently.
+  profileId         String
+
+  /// Preserves the admin-authored order of defects within the category —
+  /// the ordering handleMoveDefect() in QualityRules.tsx exists to let
+  /// admins control. Captured from the existing JSON array index.
+  sortOrder         Int
+
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@unique([profileCategoryId, defectId])
+  @@unique([profileId, defectId])
+  @@index([defectId])
+  @@index([profileId])
+}
