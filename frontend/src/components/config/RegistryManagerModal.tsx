@@ -2,9 +2,15 @@
  * @file RegistryManagerModal.tsx
  * @description Management surface for the two GLOBAL registries — the Master
  * Defect List and the Category Inventory. One component parameterized by
- * `entity`, because the two flows differ in exactly one field: a category
- * carries an evaluation mode, a defect does not. Two near-identical components
- * would have drifted the moment either gained a column.
+ * `entity` — the two registries are now structurally IDENTICAL, each entry
+ * being a name plus an auto-assigned display code, so a single component is
+ * the honest representation rather than a convenience.
+ *
+ * A Category deliberately carries no evaluation mode here. How a category is
+ * graded — its evaluation mode AND its AQL level — is a decision the adopting
+ * PROFILE makes, stored on ProfileCategory, so the same category name can be
+ * graded differently in different profiles. The Stage 4 picker is where a
+ * profile states both, at the moment it adopts a category.
  *
  * ── Scope (Stage 3) ─────────────────────────────────────────────────────────
  * View the registry, register new entries, rename existing ones. This modal
@@ -33,34 +39,10 @@ import { useToast } from '../ui/ToastProvider';
 /** Which registry this modal is managing. */
 export type RegistryEntity = 'defect' | 'category';
 
-/** The four Category Inventory evaluation modes (backend: categoryEvaluationMode.ts). */
-const EVALUATION_MODES = ['CUMULATIVE', 'GRANULAR', 'QUALITATIVE', 'RECORD_ONLY'] as const;
-type EvaluationMode = (typeof EVALUATION_MODES)[number];
-
-/** Human wording for each mode — the enum name alone doesn't say what it does. */
-const MODE_HELP: Record<EvaluationMode, string> = {
-  CUMULATIVE:  'All defect counts in the category are summed, and the total is compared to Ac.',
-  GRANULAR:    'Each defect type is checked on its own against Ac.',
-  QUALITATIVE: 'Recorded as pass/fail per item rather than counted.',
-  RECORD_ONLY: 'Captured for the record but excluded from the verdict entirely.',
-};
-
-/**
- * Evaluation-mode badge colour. Emerald for the two modes that actually grade,
- * grey for the two that do not — matching UI_DESIGN_SYSTEM.md §4.8B, where
- * emerald means "evaluation mode active" and grey means inactive/skip.
- */
-function modeBadgeClass(mode: string): string {
-  return mode === 'CUMULATIVE' || mode === 'GRANULAR'
-    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-    : 'bg-gray-500/10 border-gray-500/30 text-gray-400';
-}
-
 interface RegistryEntry {
   id: string;
   code: string;
   name: string;
-  evaluationMode?: string;
   locked: boolean;
   submissionCount: number;
   profileCount: number;
@@ -77,7 +59,7 @@ const ENTITY_CONFIG = {
   },
   category: {
     title: 'CATEGORY INVENTORY',
-    blurb: 'Every severity category the system knows. Each profile picks its own subset and sets its own AQL level.',
+    blurb: 'Every severity category name the system knows. Each profile picks its own subset and sets its own AQL level and evaluation mode.',
     path: 'categories',
     noun: 'category',
     addLabel: 'REGISTER CATEGORY',
@@ -92,7 +74,6 @@ interface Props {
 
 export default function RegistryManagerModal({ entity, onClose }: Props) {
   const cfg = ENTITY_CONFIG[entity];
-  const isCategory = entity === 'category';
   const { user } = useAuth();
   const { addToast } = useToast();
 
@@ -105,12 +86,10 @@ export default function RegistryManagerModal({ entity, onClose }: Props) {
   // Create form
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState('');
-  const [newMode, setNewMode] = useState<EvaluationMode>('CUMULATIVE');
 
   // Inline edit
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
-  const [editMode, setEditMode] = useState<EvaluationMode>('CUMULATIVE');
 
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -163,13 +142,12 @@ export default function RegistryManagerModal({ entity, onClose }: Props) {
       const res = await fetch(`${API_BASE_URL}/api/registry/${cfg.path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeader(user) },
-        body: JSON.stringify(isCategory ? { name, evaluationMode: newMode } : { name }),
+        body: JSON.stringify({ name }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) { addToast('error', body.error ?? `Could not register the ${cfg.noun}.`); return; }
       addToast('success', `${body.code} "${body.name}" registered.`);
       setNewName('');
-      setNewMode('CUMULATIVE');
       setIsCreating(false);
       await load();
     } catch {
@@ -182,13 +160,12 @@ export default function RegistryManagerModal({ entity, onClose }: Props) {
   function startEdit(entry: RegistryEntry) {
     setEditingId(entry.id);
     setEditName(entry.name);
-    setEditMode((entry.evaluationMode as EvaluationMode) ?? 'CUMULATIVE');
   }
 
   async function handleSaveEdit(entry: RegistryEntry) {
     const name = editName.trim();
     if (!name) return;
-    const unchanged = name === entry.name && (!isCategory || editMode === entry.evaluationMode);
+    const unchanged = name === entry.name;
     if (unchanged) { setEditingId(null); return; }
 
     setBusyId(entry.id);
@@ -196,7 +173,7 @@ export default function RegistryManagerModal({ entity, onClose }: Props) {
       const res = await fetch(`${API_BASE_URL}/api/registry/${cfg.path}/${entry.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...authHeader(user) },
-        body: JSON.stringify(isCategory ? { name, evaluationMode: editMode } : { name }),
+        body: JSON.stringify({ name }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -216,7 +193,7 @@ export default function RegistryManagerModal({ entity, onClose }: Props) {
     }
   }
 
-  const colSpan = isCategory ? 5 : 4;
+  const colSpan = 4;
 
   return (
     <div
@@ -277,9 +254,6 @@ export default function RegistryManagerModal({ entity, onClose }: Props) {
               <tr className="border-b border-gray-800">
                 <th className="py-3 px-3 text-xs font-semibold text-muted uppercase tracking-wider w-24">Code</th>
                 <th className="py-3 px-3 text-xs font-semibold text-muted uppercase tracking-wider">Name</th>
-                {isCategory && (
-                  <th className="py-3 px-3 text-xs font-semibold text-muted uppercase tracking-wider w-44">Eval Mode</th>
-                )}
                 <th className="py-3 px-3 text-xs font-semibold text-muted uppercase tracking-wider w-44">Usage</th>
                 <th className="py-3 px-3 text-xs font-semibold text-muted uppercase tracking-wider text-right w-24">Actions</th>
               </tr>
@@ -307,18 +281,6 @@ export default function RegistryManagerModal({ entity, onClose }: Props) {
                       className="w-full h-9 px-2 bg-canvas border border-gray-700 rounded font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none"
                     />
                   </td>
-                  {isCategory && (
-                    <td className="py-3 px-3">
-                      <select
-                        value={newMode}
-                        onChange={(e) => setNewMode(e.target.value as EvaluationMode)}
-                        title={MODE_HELP[newMode]}
-                        className="w-full h-9 px-2 bg-canvas border border-gray-700 rounded font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none"
-                      >
-                        {EVALUATION_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                    </td>
-                  )}
                   <td className="py-3 px-3 text-xs text-muted">Not used yet</td>
                   <td className="py-3 px-3">
                     <div className="flex items-center justify-end gap-1">
@@ -406,27 +368,6 @@ export default function RegistryManagerModal({ entity, onClose }: Props) {
                       )}
                     </td>
 
-                    {isCategory && (
-                      <td className="py-3 px-3">
-                        {isEditing ? (
-                          <select
-                            value={editMode}
-                            onChange={(e) => setEditMode(e.target.value as EvaluationMode)}
-                            title={MODE_HELP[editMode]}
-                            className="w-full h-9 px-2 bg-canvas border border-gray-700 rounded font-mono text-sm text-primary focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none"
-                          >
-                            {EVALUATION_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
-                          </select>
-                        ) : (
-                          <span
-                            title={MODE_HELP[(entry.evaluationMode as EvaluationMode)] ?? ''}
-                            className={`inline-block rounded-full px-2 py-0.5 border font-bold uppercase tracking-wider text-[10px] ${modeBadgeClass(entry.evaluationMode ?? '')}`}
-                          >
-                            {entry.evaluationMode}
-                          </span>
-                        )}
-                      </td>
-                    )}
 
                     <td className="py-3 px-3">
                       {entry.locked ? (
