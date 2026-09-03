@@ -67,6 +67,7 @@ or summarized in the split — this is the original content, relocated.
 - [§42](#42-master-defect-list--category-inventory--stage-1-schema--migration--2026-09-03) — Master Defect List + Category Inventory — Stage 1 (Schema + Migration) — 2026-09-03
 - [§43](#43-master-defect-list--category-inventory--stage-2-engine-cutover--2026-09-03) — Master Defect List + Category Inventory — Stage 2 (Engine Cutover) — 2026-09-03
 - [§44](#44-master-defect-list--category-inventory--stage-3-management-surfaces--2026-09-03) — Master Defect List + Category Inventory — Stage 3 (Management Surfaces) — 2026-09-03
+- [§45](#45-patch-apiconfig-made-atomic--rejected-saves-now-audited--2026-09-03) — PATCH /api/config made atomic + rejected saves now audited — 2026-09-03
 
 ---
 
@@ -5967,3 +5968,79 @@ backend `tsc --noEmit` clean, `vitest` 20/20; frontend `tsc -b` clean, `vitest`
 Earlier sessions recorded the dev server as "unreachable from this environment";
 that was plain HTTP being spoken to a TLS socket. `curl -k https://localhost:4009`
 works fine.
+
+---
+
+## 45. PATCH /api/config made atomic + rejected saves now audited — 2026-09-03
+
+An accidental Kanban edit surfaced two real gaps in the Stage 2 write-sync hook.
+
+**The incident.** `def_odour` is a defect frozen into a real FAILED submission's
+`gradingSnapshot` (lot `A001A6245003`) — it is one of the reasons that lot
+failed. FACTORY STANDARD's OTHERS category was its only home in any profile.
+Deleting it there and saving asked the registry projection to drop a locked
+defect from the Master Defect List, which `planRegistry()` correctly refuses.
+The save returned `409` — but the way it did so was wrong twice.
+
+### Gap 1 — the write was not atomic
+
+`PATCH /api/config` wrote the `AppConfig` JSON first, then ran
+`syncProfileRegistry()`. On a projection failure the JSON was already
+committed, so the stored profiles said "def_odour gone" while the grading
+tables (what `engine/profileRules.ts` actually reads) still had it. A silent
+split-brain: the Kanban showed one thing, the engine graded another, and
+nothing forced resolution. The 409 body literally said *"your changes were
+saved, but…"*.
+
+**Fix:** the `AppConfig` upsert and `syncProfileRegistry()` now run inside one
+`prisma.$transaction(async (tx) => …)`. A `ProfileRegistrySyncError` thrown by
+the projection propagates out of the callback and rolls the JSON write back
+with it. A rejected save changes nothing, and the 409 says so.
+
+`profileRegistrySync.ts`'s `loadLockState` / `loadLockUsage` /
+`applyRegistryPlan` / `syncProfileRegistry` each gained an optional `db`
+parameter (`RegistryDb = Prisma.TransactionClient`) defaulting to the module
+singleton — so the one-off backfill script and the registry routes call them
+unchanged, and only `PATCH /api/config` threads the `tx` client through. 20s
+transaction timeout covers `applyRegistryPlan()`'s ~160 sequential upserts
+against local SQLite.
+
+This is the **first interactive (callback-form) `$transaction`** in the
+codebase — every prior use is the array/batch form. Confirmed working with
+`@prisma/adapter-libsql`.
+
+### Gap 2 — no audit trail on a rejected save
+
+`logAccess()` ran only after a successful sync, so the failed attempt left no
+`AccessLog` row at all — despite (pre-fix-1) a write having partially landed.
+`AppConfig.updatedAt` had moved with nothing to explain it.
+
+**Fix:** new `AccessLogAction` value `'CONFIG_WRITE_FAILURE'`, written on the
+rejection path with the specific conflict in `detail`. Distinct from
+`CONFIG_WRITE` because nothing was persisted. The `_FAILURE` suffix matches the
+existing `M365_LOGIN_FAILURE` / `PIN_LOGIN_FAILURE` naming, so
+`AccessLogPanel.tsx` renders it red with no frontend change.
+
+### Verification
+
+Over real HTTPS against an isolated instance on port 4119 backed by a copy of
+`dev.db` (dev server untouched):
+
+| Case | Result |
+| --- | --- |
+| Delete locked `def_odour`, save | `409`; `AppConfig.updatedAt` **unchanged** (JSON rolled back); `def_odour` untouched in the tables; `CONFIG_WRITE_FAILURE` logged with the reason |
+| Non-profile save (`companyName`) | `200`; transaction commits; `CONFIG_WRITE` logged |
+| Profile save re-adding `def_odour` to OTHERS | `200`; sync succeeds **inside** the transaction; JSON and tables both end at `['def_donning','def_odour']`; `CONFIG_WRITE` logged |
+
+backend `tsc --noEmit` clean, `vitest` 20/20; frontend `tsc -b` clean.
+
+### Not fixed by this change
+
+The **live `dev.db` is still split-brained** from the original incident —
+FACTORY STANDARD's JSON has 48 defect definitions, the tables have 49
+(`def_odour` present in the tables, absent from the JSON). The fix prevents
+recurrence; it does not heal the existing divergence. That is resolved by
+re-adding `def_odour` to OTHERS through the Kanban, which — with this change —
+now runs through the transaction and commits cleanly (third test row above).
+Until then, **every** Quality Rules save 409s, because no projectable plan can
+omit a locked defect. That is the intended forcing function.
