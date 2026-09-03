@@ -318,20 +318,22 @@ though every id string changed. The source profile itself is never mutated.
 
 `evaluateAQLVerdict()` receives `DefectDefinition { id, name, categoryId }` and resolves a category's members by a **strict id match**, `d.categoryId === category.id`. This replaced a `currentClass` field matched against `category.name || category.id`; see `ISO2859_MATH_ENGINE.md` §2.1 for why that fallback was removed. `defaultClass` is gone entirely — it was set on every defect and read by nothing.
 
-`evaluationMode` reaching the engine is always the wire dialect (`'CUMULATIVE' | 'GRANULAR' | 'N/A' | ''`), translated once from `Category.evaluationMode` in `profileRules.ts` — see the mapping table below.
+`evaluationMode` reaching the engine is always the wire dialect (`'CUMULATIVE' | 'GRANULAR' | 'N/A' | ''`), translated once from `ProfileCategory.evaluationMode` in `profileRules.ts` — see the mapping table below.
 
 These models introduce a **global defect/category vocabulary** that profiles select from, replacing the model where each profile invented and independently spelled its own defects. They are the first relational profile-adjacent tables since `InspectionProfile`/`AQLCategory`/`DefectDefinition` were removed (§2.1) — and deliberately not a revival of those: they store the *global vocabulary* (which never existed before) plus the *per-profile selection* of it. Profiles themselves still live in `AppConfig.inspectionProfiles` JSON.
 
 ```
 Defect                 global Master Defect List (one row per canonical defect name)
 Category               global Category Inventory (a SUPERSET, not a forced-identical set)
-ProfileCategory        which categories a profile uses, and at what AQL level
+ProfileCategory        which categories a profile uses, at what AQL level, in what evaluation mode
 ProfileCategoryDefect  which defects a profile records under which of its categories
 ```
 
+**A `Category` is a NAME and nothing else — exactly symmetric with `Defect`.** Both are `{ id, code, name, nameKey }`. No grading behaviour lives on either: how a category is graded — **both** its AQL level and its evaluation mode — is a decision the adopting *profile* makes, recorded on `ProfileCategory`. So the same category name may legitimately be graded `GRANULAR` in one profile and `CUMULATIVE` in another. (Corrected 2026-09-03: `evaluationMode` was briefly a global property of `Category`, which made a name's grading behaviour permanent and system-wide. No profile pair diverges today — `AND` and `BARRIER` are shared by FACTORY STANDARD and MEDLINE and both grade them `CUMULATIVE` — so the move was lossless.)
+
 **Canonical ids are the existing `def_*` / category slugs, never newly minted.** This is load-bearing. `Submission.defects` is `Record<defectId, count>` and `Submission.gradingSnapshot`'s `defectItems[].id` both store these exact strings, and `POST /api/amendments/:id/approve` re-grades by feeding those stored keys back through `resolveVerdict()`. Re-IDing a defect would make every lookup miss, silently resolve each count to `0` via `defectCounts[def.id] ?? 0`, and could flip a stored verdict `FAILED → PASSED` while overwriting the original snapshot. The `DEF-001` / `CAT-001` display codes are a **separate, purely cosmetic field** — never a lookup key, in the engine or anywhere else.
 
-**AQL level lives on `ProfileCategory`, not `Category`.** Two profiles may grade the same global category at different AQL levels, so AQL is a per-profile setting by design.
+**AQL level and evaluation mode both live on `ProfileCategory`, not `Category`.** Two profiles may grade the same global category at a different AQL level *and* under a different evaluation mode, so both are per-profile settings by design. `ProfileCategory.evaluationMode` deliberately has **no `@default`** — a silent fallback is precisely how a `RECORD_ONLY` category would quietly become graded, so every writer must state the mode explicitly.
 
 **Categories are a superset.** FACTORY STANDARD's single `VISUALS` bucket (AQL 2.5) and MEDLINE's three-tier `VISUAL — CRITICAL` / `MAJOR` / `MINOR` ladder (1.0 / 2.5 / 4.0) are genuinely different grading regimes and are preserved as **distinct inventory rows**, deliberately not collapsed into one another. Only `AND` and `BARRIER` are shared between the two profiles.
 
@@ -343,9 +345,9 @@ ProfileCategoryDefect  which defects a profile records under which of its catego
 
 #### ⚠ `evaluationMode` is stored in a DIFFERENT dialect than the engine reads
 
-`Category.evaluationMode` uses a clean enum; `AQLCategory.evaluationMode` (§2.1) uses the engine wire format. **Two of the four rows are not identity mappings:**
+`ProfileCategory.evaluationMode` uses a clean enum; `AQLCategory.evaluationMode` (§2.1) uses the engine wire format. **Two of the four rows are not identity mappings:**
 
-| `Category.evaluationMode` | engine / AppConfig JSON |
+| `ProfileCategory.evaluationMode` | engine / AppConfig JSON |
 |---|---|
 | `CUMULATIVE` | `'CUMULATIVE'` |
 | `GRANULAR` | `'GRANULAR'` |

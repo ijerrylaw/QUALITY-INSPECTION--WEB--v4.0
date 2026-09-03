@@ -41,11 +41,13 @@ Category membership is resolved by a **strict id match**: `defectDefinition.cate
 
 This replaced a `currentClass` field matched against **`category.name || category.id`** — a name-OR-id join inherited from the era when the admin UI used category *names* as the linking key. The name arm was dead in practice (every stored defect linked by id, and the zero-state seed's category ids are identical to their names, so both arms agreed) but it was a live hazard: the engine would happily grade a name-linked defect while both the wizard and the admin UI — which have always matched on id only — rendered that category empty.
 
-The categories, their per-profile AQL levels, and their defect membership are loaded by `backend/src/engine/profileRules.ts` from the global Category Inventory / Master Defect List tables (`Category`, `Defect`, `ProfileCategory`, `ProfileCategoryDefect`), **not** from `AppConfig.inspectionProfiles` JSON. Profile *identity* still comes from that JSON — see `DATA_SCHEMAS_AND_TYPES.md` §2.2.
+The categories, their per-profile AQL levels **and evaluation modes**, and their defect membership are loaded by `backend/src/engine/profileRules.ts` from the global Category Inventory / Master Defect List tables (`Category`, `Defect`, `ProfileCategory`, `ProfileCategoryDefect`), **not** from `AppConfig.inspectionProfiles` JSON. Profile *identity* still comes from that JSON — see `DATA_SCHEMAS_AND_TYPES.md` §2.2.
+
+**Both grading parameters are per-profile.** A global `Category` is a name only; its AQL level *and* its evaluation mode both live on the `ProfileCategory` join, so the same category name can be graded `GRANULAR` in one profile and `CUMULATIVE` in another. The engine never reads a mode from `Category` — there isn't one.
 
 Two consequences worth knowing when reading the engine:
 
-* **`evaluationMode` reaching the engine is always the wire dialect** (`'CUMULATIVE' | 'GRANULAR' | 'N/A' | ''`), never the `Category` table's clean enum. The translation happens once, in `profileRules.ts`, via `lib/categoryEvaluationMode.ts`. In particular `RECORD_ONLY` becomes `''` there — the empty string documented above is produced by that mapping, and a fallback in it would start grading a record-only category.
+* **`evaluationMode` reaching the engine is always the wire dialect** (`'CUMULATIVE' | 'GRANULAR' | 'N/A' | ''`), never the `ProfileCategory` table's clean enum. The translation happens once, in `profileRules.ts`, via `lib/categoryEvaluationMode.ts`. In particular `RECORD_ONLY` becomes `''` there — the empty string documented above is produced by that mapping, and a fallback in it would start grading a record-only category. `ProfileCategory.evaluationMode` has no database default for exactly that reason.
 * **Ordering is data, not incident.** Categories come back ordered by `ProfileCategory.sortOrder` and defects flattened as (category `sortOrder`, defect `sortOrder`), reproducing the array order the frozen `gradingSnapshot` — and therefore the Inspection Results panel — depends on.
 
 ---

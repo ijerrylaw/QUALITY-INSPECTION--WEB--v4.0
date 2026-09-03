@@ -68,6 +68,7 @@ or summarized in the split — this is the original content, relocated.
 - [§43](#43-master-defect-list--category-inventory--stage-2-engine-cutover--2026-09-03) — Master Defect List + Category Inventory — Stage 2 (Engine Cutover) — 2026-09-03
 - [§44](#44-master-defect-list--category-inventory--stage-3-management-surfaces--2026-09-03) — Master Defect List + Category Inventory — Stage 3 (Management Surfaces) — 2026-09-03
 - [§45](#45-patch-apiconfig-made-atomic--rejected-saves-now-audited--2026-09-03) — PATCH /api/config made atomic + rejected saves now audited — 2026-09-03
+- [§46](#46-category-becomes-name-only--evaluationmode-moves-to-profilecategory--2026-09-03) — Category becomes name-only; evaluationMode moves to ProfileCategory — 2026-09-03
 
 ---
 
@@ -6044,3 +6045,104 @@ re-adding `def_odour` to OTHERS through the Kanban, which — with this change �
 now runs through the transaction and commits cleanly (third test row above).
 Until then, **every** Quality Rules save 409s, because no projectable plan can
 omit a locked defect. That is the intended forcing function.
+
+---
+
+## 46. Category becomes name-only; evaluationMode moves to ProfileCategory — 2026-09-03
+
+Design correction to Stages 1–3, not new functionality.
+
+### The problem
+
+`Category.evaluationMode` made a category's grading behaviour a **permanent,
+global property of its name**. "AND" meant `CUMULATIVE` everywhere, forever,
+for every profile that adopted it. That was wrong on its own terms: AQL level
+was already per-profile (on `ProfileCategory`), so the model was internally
+inconsistent — one grading parameter was profile-owned and the other was not.
+It also had no way to express a legitimate case: two profiles adopting the same
+category name under different evaluation modes.
+
+### The correction
+
+`Category` is now a **name and nothing else**, exactly symmetric with `Defect`
+— both are `{ id, code, name, nameKey }`. `evaluationMode` joins `aqlLevel` on
+`ProfileCategory`, so **all** grading behaviour is decided by the adopting
+profile.
+
+```
+Category         id, code, name, nameKey            (name-only)
+ProfileCategory  + evaluationMode, beside aqlLevel  (per-profile)
+```
+
+`ProfileCategory.evaluationMode` deliberately carries **no `@default`**: a
+silent fallback is precisely how a `RECORD_ONLY` category would quietly become
+graded, so every writer must state the mode explicitly.
+
+### Migration
+
+Two `db push` steps rather than one, to avoid destroying rows. SQLite cannot add
+a required column to a populated table, and `--force-reset` would have dropped
+all 29 submissions.
+
+1. **Phase A** — add the column under a temporary `@default("CUMULATIVE")` and
+   drop `Category.evaluationMode`. That drop was the only data loss (8 values)
+   and required explicit user consent, since Prisma blocks AI agents from
+   `--accept-data-loss` by design.
+2. **Backfill** — re-run `scripts/backfill-master-defect-list.ts`. The migration
+   *is* the existing projection: `planRegistry()` now captures `evaluationMode`
+   per profile-category from that profile's own JSON (through
+   `categoryEvaluationMode.ts`, so RECORD ONLY's `''` becomes `RECORD_ONLY`),
+   and `applyRegistryPlan()` writes it on the join. Round-tripped clean for both
+   profiles.
+3. **Phase B** — remove the temporary default.
+
+**Precondition verified in live data before backfilling, not assumed:** `AND`
+and `BARRIER` — the only categories shared by FACTORY STANDARD and MEDLINE —
+carry `CUMULATIVE` in both, so the move was lossless and no profile pair
+conflicts.
+
+### Code
+
+- `profileRules.ts` reads `pc.evaluationMode` instead of
+  `pc.category.evaluationMode`.
+- `planRegistry()` no longer warns on cross-profile mode differences — that is
+  now **legal**, not a conflict. Only a differing *name* for one id still warns.
+- `registry.routes.ts` category endpoints are name-only: `POST`/`PATCH` no
+  longer accept or validate `evaluationMode`, `GET` no longer returns it.
+- `RegistryManagerModal.tsx` drops the EVAL MODE column, the mode selector on
+  register and rename, and the now-dead `isCategory` branch — the two registries
+  are structurally identical, so the shared component is now the honest
+  representation rather than a convenience.
+- `categoryEvaluationMode.ts` is **unchanged**. The `RECORD_ONLY <-> ''`
+  contract stays exactly as it was; only *where* the raw value is read from
+  moved.
+
+Untouched deliberately: the USAGE column, lock state, and padlock treatment.
+Locking is about the name/identity — the thing frozen snapshots reference — and
+never was about `evaluationMode`.
+
+The DEFECT CATEGORY SETUP table needed no change and got none: it renders from
+`config.inspectionProfiles`, where each category already carries its own
+per-profile `aql` and `evalMode`. Verified against the live `GET /api/config`.
+
+### Verification
+
+The 80-case grading regression (29 submissions + 29 synthetic MEDLINE + 22
+amendment approve-path) was run **twice against the same database contents**:
+once with the PRE-rework code in a temporary `git worktree` at `HEAD` against a
+pre-rework database copy, then with the post-rework code.
+
+**ALL 80 CASES BYTE-IDENTICAL.** Row counts unchanged — Category 8, Defect 49,
+ProfileCategory 10, ProfileCategoryDefect 96, Submission 29, AmendmentLog 22.
+
+backend `tsc --noEmit` clean, `vitest` 20/20; frontend `tsc -b` clean, `vitest`
+63/63.
+
+### Consequence for Stage 4
+
+The picker must ask for **evaluationMode at adoption time** — when a profile
+takes a category out of the inventory — alongside the AQL level. It is no
+longer supplied at category registration, because a registered category has no
+mode. `CAT-009` is a permanently skipped display code (a `ZZ Rework Probe`
+category created while verifying the live API was deleted; codes are never
+reused).
