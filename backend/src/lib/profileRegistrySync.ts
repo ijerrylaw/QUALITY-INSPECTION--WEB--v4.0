@@ -434,10 +434,9 @@ export async function applyRegistryPlan(plan: RegistryPlan, db: RegistryDb = pri
   // Prisma 500; ProfileRegistrySyncError is converted to a clean 409 by
   // PATCH /api/config. Goes away at Stage 4, when the picker replaces
   // free-text naming and ids can only come from the registry.
-  const existingDefectByNameKey = new Map(
-    (await db.defect.findMany({ select: { id: true, nameKey: true, name: true } }))
-      .map((d) => [d.nameKey, d]),
-  );
+  const existingDefectRows = await db.defect.findMany({ select: { id: true, nameKey: true, name: true } });
+  const existingDefectByNameKey = new Map(existingDefectRows.map((d) => [d.nameKey, d]));
+  const existingDefectById = new Map(existingDefectRows.map((d) => [d.id, d]));
   for (const d of plan.defects) {
     const clash = existingDefectByNameKey.get(d.nameKey);
     if (clash && clash.id !== d.id) {
@@ -445,6 +444,32 @@ export async function applyRegistryPlan(plan: RegistryPlan, db: RegistryDb = pri
         `The defect name '${d.name}' is already registered in the Master Defect List as '${clash.id}' ` +
         `(${clash.name}), but this profile refers to it as '${d.id}'. Names are unique across the whole ` +
         'system — pick the existing entry rather than creating a second one with the same name.',
+      );
+    }
+  }
+
+  // ── Guard: a locked defect's name is frozen ─────────────────────────────
+  // A defect referenced by any frozen Submission.gradingSnapshot carries the
+  // name captured at submit time. PATCH /api/registry/defects/:id refuses to
+  // rename it (registry.routes.ts, 409); the identical rule has to hold when
+  // the rename arrives through a Quality Rules save, or the two write paths
+  // disagree about what "locked" protects and the audit trail ends up with two
+  // names for one id.
+  //
+  // This checks the NAME only. Moving a locked defect to a different category
+  // is explicitly still allowed (Stage 4a decision (d)) — that changes only the
+  // ProfileCategoryDefect join, handled further down by the prune-before-insert
+  // block, and never reaches this loop. So a rename ('plan.defects[].name'
+  // differs from the stored Defect row) and a move (join changes, name does
+  // not) are distinguished purely by which half of the plan carries the delta.
+  for (const d of plan.defects) {
+    if (!plan.lockedDefectIds.has(d.id)) continue;
+    const existing = existingDefectById.get(d.id);
+    if (existing && existing.name !== d.name) {
+      throw new ProfileRegistrySyncError(
+        `"${existing.name}" is used in a frozen inspection record, so its name can no longer be changed. ` +
+        `This save would rename it to "${d.name}". Revert the name and save again — a locked defect can ` +
+        'only be renamed by first removing it from every inspection record, which is not possible.',
       );
     }
   }

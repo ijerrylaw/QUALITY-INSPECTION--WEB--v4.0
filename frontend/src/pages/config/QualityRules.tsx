@@ -12,7 +12,7 @@
  * Math logic: ISO2859_MATH_ENGINE.md
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ShieldCheck,
   Copy,
@@ -30,10 +30,13 @@ import {
   AlertTriangle,
   Ruler,
   Eye,
+  Lock,
 } from 'lucide-react';
 import RegistryManagerModal from '../../components/config/RegistryManagerModal';
 import type { RegistryEntity } from '../../components/config/RegistryManagerModal';
-import { useConfig } from '../../context/ConfigContext';
+import DefectPickerModal from '../../components/config/DefectPickerModal';
+import { useConfig, API_BASE_URL } from '../../context/ConfigContext';
+import { authHeader, useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/ui/ToastProvider';
 import {
   DEFAULT_AQL_CATEGORY_SEED,
@@ -92,6 +95,7 @@ function formatEvalMode(aql: string, evalMode: string): string {
 
 export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   const { config } = useConfig();
+  const { user } = useAuth();
   const { addToast } = useToast();
 
   // ── Local State ─────────────────────────────────────────────────────────
@@ -140,10 +144,40 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
 
   // ── Kanban State ─────────────────────────────────────────────────────────
   const [draggedDefectId, setDraggedDefectId] = useState<string | null>(null);
-  const [addingToCategory, setAddingToCategory] = useState<string | null>(null);
-  const [newDefectName, setNewDefectName] = useState('');
-  const [editingDefectId, setEditingDefectId] = useState<string | null>(null);
-  const [editDefectName, setEditDefectName] = useState('');
+  // Which Kanban column's "+ ADD" opened the picker, if any. Replaces the old
+  // inline free-text add row (addingToCategory / newDefectName) — defects are
+  // now chosen from the global Master Defect List, never typed here (Stage 4a).
+  const [pickerCategoryId, setPickerCategoryId] = useState<string | null>(null);
+
+  // ── Master Defect List — lock state ──────────────────────────────────────
+  // The Kanban itself never wrote to the registry, but it now needs to KNOW
+  // which defects are locked by a frozen gradingSnapshot, so a locked card's
+  // Delete is disabled here the same way RegistryManagerModal disables Rename.
+  // (A locked defect may still be dragged to another category — Stage 4a
+  // decision (d) — so drag is never gated on this.) One GET, refreshed whenever
+  // the RegistryManagerModal closes (it may have registered or renamed one).
+  const [lockedDefectIds, setLockedDefectIds] = useState<Set<string>>(new Set());
+  const [registryRefreshKey, setRegistryRefreshKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/registry/defects`, {
+          headers: { ...authHeader(user) },
+        });
+        if (!res.ok) return;
+        const rows: { id: string; locked: boolean }[] = await res.json();
+        if (!cancelled) {
+          setLockedDefectIds(new Set(rows.filter((r) => r.locked).map((r) => r.id)));
+        }
+      } catch {
+        // Non-fatal — worst case a locked card's Delete looks enabled, and the
+        // server still rejects the save with 409 + CONFIG_WRITE_FAILURE.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user, registryRefreshKey]);
 
   // ── Category Setup State ─────────────────────────────────────────────────
   // Which global registry modal is open, if any. Replaces the old inline
@@ -443,65 +477,45 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
 
   // CRUD Defects
 
-  // Case-insensitive, whitespace-normalized name comparison key — "Wet Glove",
-  // "wet glove", and "Wet  Glove" (extra internal spaces) all collapse to the
-  // same key. Deliberately separate from the id-slug generator below: the
-  // slug strips ALL punctuation (not just whitespace) for id-safety reasons,
-  // which is too aggressive a notion of "same name" — "Wet-Glove" and
-  // "Wet.Glove" are different names that happen to slug identically, so
-  // reusing that generator here would create false-positive rejections.
-  const normalizeDefectName = (name: string): string =>
-    name.trim().toLowerCase().replace(/\s+/g, ' ');
-
   /**
-   * Finds an existing defect in the CURRENT profile only (never checks other
-   * profiles — a name may legitimately repeat across profiles) whose
-   * normalized name collides with `name`. `excludeId` lets a rename check
-   * against every OTHER defect without the defect being renamed always
-   * "colliding with itself" when its name is unchanged.
+   * Files a defect chosen from the global Master Defect List under `categoryId`
+   * in the active profile. Replaces the old free-text handleAddDefect: the id
+   * and name are the registry's canonical values (never slugified here), and
+   * the local-state shape appended to defectDefinitions — { id, name,
+   * categoryId } — is byte-identical to what the free-text path produced, so
+   * triggerChange / PATCH /api/config / syncProfileRegistry are all unchanged.
    *
-   * Reads only from the live `activeDefects` array — a name freed by a
-   * delete-then-save is simply absent from that array, so nothing needs to
-   * track "previously used" names separately.
+   * A defect sits under at most one category per profile
+   * (@@unique([profileId, defectId])), so an id already anywhere in this
+   * profile is rejected — the picker also greys that row out, but this is the
+   * backstop. To relocate an existing defect the admin drags its card.
+   *
+   * Does NOT close the picker — it stays open for multi-add, with each picked
+   * row flipping to "already in this profile" in place (the modal re-reads the
+   * updated defect id list from the prop below). Closed via CLOSE / Esc /
+   * backdrop, or "REGISTER NEW DEFECT".
    */
-  const findDuplicateDefectName = (name: string, excludeId?: string) => {
-    const target = normalizeDefectName(name);
-    return activeDefects.find((d: any) => d.id !== excludeId && normalizeDefectName(d.name) === target);
-  };
-
-  const handleAddDefect = (categoryId: string) => {
-    if (newDefectName.trim()) {
-      const conflict = findDuplicateDefectName(newDefectName);
-      if (conflict) {
-        addToast('error', `A defect named "${conflict.name}" already exists in this profile.`);
-        return;
-      }
-
-      // Smart Slug Generator: "Pin Hole" -> "def_pin_hole" (renders as ID: DEF_PIN_HOLE)
-      const rawSlug = newDefectName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-      const baseId = rawSlug ? `def_${rawSlug}` : `def_${Date.now()}`;
-
-      // Guarantee ID uniqueness within this profile's defects — the duplicate-
-      // NAME check above already rejects same-name adds, so this loop now
-      // only ever fires for genuinely different names that happen to slug to
-      // the same id (e.g. "Wet Glove!" vs "Wet Glove?").
-      let newId = baseId;
-      let counter = 1;
-      while (activeDefects.some((d: any) => d.id === newId)) {
-        newId = `${baseId}_${counter}`;
-        counter++;
-      }
-
-      const updatedDefs = [...activeDefects, { id: newId, name: newDefectName.trim(), categoryId }];
-      const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, defectDefinitions: updatedDefs } : p);
-      setProfiles(updatedProfiles);
-      setNewDefectName('');
-      setAddingToCategory(null);
-      triggerChange(updatedProfiles);
+  const handlePickDefect = (entry: { id: string; name: string }, categoryId: string) => {
+    if (activeDefects.some((d: any) => d.id === entry.id)) {
+      addToast('error', `"${entry.name}" is already in this profile — drag its card to move it.`);
+      return;
     }
+    const updatedDefs = [...activeDefects, { id: entry.id, name: entry.name, categoryId }];
+    const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, defectDefinitions: updatedDefs } : p);
+    setProfiles(updatedProfiles);
+    triggerChange(updatedProfiles);
   };
 
   const handleDeleteDefect = (defectId: string) => {
+    // Locked defects may not be deleted (Stage 4a decision (d)) — the same rule
+    // RegistryManagerModal / PATCH /api/registry enforce for rename. The server
+    // also refuses it (planRegistry throws if a locked id is dropped from its
+    // last profile), but stopping it here keeps the failure out of the save.
+    if (lockedDefectIds.has(defectId)) {
+      const locked = activeDefects.find((d: any) => d.id === defectId);
+      addToast('error', `"${locked?.name ?? defectId}" is used in inspection records and cannot be deleted.`);
+      return;
+    }
     const updatedDefs = activeDefects.filter((d: any) => d.id !== defectId);
     const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, defectDefinitions: updatedDefs } : p);
     setProfiles(updatedProfiles);
@@ -531,29 +545,10 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
     }
   };
 
-  const startEditingDefect = (defect: { id: string, name: string }) => {
-    setEditingDefectId(defect.id);
-    setEditDefectName(defect.name);
-  };
-
-  const saveEditDefect = (id: string) => {
-    if (editDefectName.trim()) {
-      // excludeId=id so renaming a defect to its OWN current name (a no-op
-      // edit, or just re-saving unchanged) is never flagged as a conflict
-      // with itself — only a collision with a DIFFERENT defect rejects.
-      const conflict = findDuplicateDefectName(editDefectName, id);
-      if (conflict) {
-        addToast('error', `A defect named "${conflict.name}" already exists in this profile.`);
-        return; // leave the inline editor open so the user can fix the name
-      }
-
-      const updatedDefs = activeDefects.map((d: any) => d.id === id ? { ...d, name: editDefectName.trim() } : d);
-      const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, defectDefinitions: updatedDefs } : p);
-      setProfiles(updatedProfiles);
-      triggerChange(updatedProfiles);
-    }
-    setEditingDefectId(null);
-  };
+  // Defect RENAME was removed at Stage 4a: a defect's name is a property of the
+  // global Master Defect List now, not of a profile's copy of it. Renaming
+  // happens only in RegistryManagerModal (which refuses it for locked entries,
+  // server-enforced). The Kanban card no longer carries an inline name editor.
 
   return (
     <div className="space-y-4 animate-in fade-in duration-300 w-full">
@@ -968,105 +963,62 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
 
                   {/* Column Body */}
                   <div className="p-3 flex-1 overflow-y-auto max-h-[400px] space-y-2">
-                    {catDefects.map((defect: any, idx: number) => (
-                      <div 
-                        key={defect.id}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, defect.id)}
-                        className="bg-canvas border border-gray-700 rounded-lg p-2.5 flex items-center justify-between group cursor-grab active:cursor-grabbing hover:bg-surface-light shadow-sm transition-all"
-                      >
-                        {editingDefectId === defect.id ? (
-                          <div className="flex items-center gap-1 w-full">
-                            <div className="relative flex-1 min-w-0">
-                              <input 
-                                autoFocus
-                                type="text" 
-                                value={editDefectName}
-                                onChange={(e) => setEditDefectName(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') saveEditDefect(defect.id);
-                                  if (e.key === 'Escape') setEditingDefectId(null);
-                                }}
-                                className="w-full h-9 px-2 pr-14 rounded bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none"
+                    {catDefects.map((defect: any, idx: number) => {
+                      const isLocked = lockedDefectIds.has(defect.id);
+                      return (
+                        <div
+                          key={defect.id}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, defect.id)}
+                          className="bg-canvas border border-gray-700 rounded-lg p-2.5 flex items-center justify-between group cursor-grab active:cursor-grabbing hover:bg-surface-light shadow-sm transition-all"
+                        >
+                          <span className="font-mono text-sm font-bold text-primary select-none inline-flex items-center gap-1.5 min-w-0">
+                            {isLocked && (
+                              <Lock
+                                className="w-3 h-3 text-muted shrink-0"
+                                strokeWidth={2}
+                                aria-label="Used in inspection records — name is locked, cannot be deleted"
                               />
-                              <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted font-mono pointer-events-none">Enter ↵</span>
-                            </div>
-                            <div className="flex items-center gap-0.5 shrink-0">
-                              <button onClick={() => saveEditDefect(defect.id)} className="p-1 rounded text-emerald-400 hover:bg-emerald-500/20 outline-none" title="Save">
-                                <Check className="w-3.5 h-3.5" />
-                              </button>
-                              <button onClick={() => setEditingDefectId(null)} className="p-1 rounded text-rose-400 hover:bg-rose-500/20 outline-none" title="Cancel (Esc)">
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
+                            )}
+                            <span className="truncate">{defect.name}</span>
+                          </span>
+                          <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-0.5 shrink-0">
+                            <button
+                              onClick={() => handleMoveDefect(defect.id, 'up')}
+                              disabled={idx === 0}
+                              className="p-1 rounded text-muted hover:text-white disabled:opacity-20 outline-none"
+                              title="Move Up"
+                            >
+                              <ArrowUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleMoveDefect(defect.id, 'down')}
+                              disabled={idx === catDefects.length - 1}
+                              className="p-1 rounded text-muted hover:text-white disabled:opacity-20 outline-none"
+                              title="Move Down"
+                            >
+                              <ArrowDown className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteDefect(defect.id)}
+                              disabled={isLocked}
+                              className="p-1 rounded hover:bg-rose-500/20 text-muted hover:text-rose-400 outline-none disabled:opacity-20 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted"
+                              title={isLocked ? 'Used in inspection records — cannot be deleted' : 'Remove from this profile'}
+                            >
+                              <Trash className="w-3.5 h-3.5" />
+                            </button>
                           </div>
-                        ) : (
-                          <>
-                            <span className="font-mono text-sm font-bold text-primary select-none">{defect.name}</span>
-                            <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-0.5">
-                              <button 
-                                onClick={() => handleMoveDefect(defect.id, 'up')}
-                                disabled={idx === 0}
-                                className="p-1 rounded text-muted hover:text-white disabled:opacity-20 outline-none"
-                                title="Move Up"
-                              >
-                                <ArrowUp className="w-3.5 h-3.5" />
-                              </button>
-                              <button 
-                                onClick={() => handleMoveDefect(defect.id, 'down')}
-                                disabled={idx === catDefects.length - 1}
-                                className="p-1 rounded text-muted hover:text-white disabled:opacity-20 outline-none"
-                                title="Move Down"
-                              >
-                                <ArrowDown className="w-3.5 h-3.5" />
-                              </button>
-                              <button onClick={() => startEditingDefect(defect)} className="p-1 rounded hover:bg-gray-700 text-muted hover:text-white outline-none" title="Edit">
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                              <button onClick={() => handleDeleteDefect(defect.id)} className="p-1 rounded hover:bg-rose-500/20 text-muted hover:text-rose-400 outline-none" title="Remove">
-                                <Trash className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    ))}
-                    
-                    {/* Inline Add Form */}
-                    {addingToCategory === cat.id ? (
-                      <div className="bg-canvas border border-gray-700 rounded-lg p-2 shadow-inner flex items-center gap-1">
-                        <div className="relative flex-1 min-w-0">
-                          <input 
-                            autoFocus
-                            type="text"
-                            value={newDefectName}
-                            onChange={(e) => setNewDefectName(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleAddDefect(cat.id);
-                              if (e.key === 'Escape') setAddingToCategory(null);
-                            }}
-                            placeholder="Defect Name..."
-                            className="w-full h-9 px-2 pr-14 rounded bg-canvas border border-gray-700 text-primary font-mono text-sm focus:border-brand-secondary focus:ring-1 focus:ring-brand-secondary outline-none"
-                          />
-                          <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] text-muted font-mono pointer-events-none">Enter ↵</span>
                         </div>
-                        <div className="flex items-center gap-0.5 shrink-0">
-                          <button onClick={() => handleAddDefect(cat.id)} className="p-1.5 rounded text-emerald-400 hover:bg-emerald-500/20 outline-none" title="Save">
-                            <Check className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => setAddingToCategory(null)} className="p-1.5 rounded text-rose-400 hover:bg-rose-500/20 outline-none" title="Cancel (Esc)">
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <button 
-                        onClick={() => setAddingToCategory(cat.id)}
-                        className="w-full h-10 rounded border border-dashed border-gray-700 bg-transparent text-muted hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 flex items-center justify-center gap-2 font-semibold text-[11px] uppercase tracking-wider transition-all outline-none"
-                      >
-                        <Plus className="w-4 h-4" /> ADD
-                      </button>
-                    )}
+                      );
+                    })}
+
+                    {/* Add from the global Master Defect List (Stage 4a picker) */}
+                    <button
+                      onClick={() => setPickerCategoryId(cat.id)}
+                      className="w-full h-10 rounded border border-dashed border-gray-700 bg-transparent text-muted hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 flex items-center justify-center gap-2 font-semibold text-[11px] uppercase tracking-wider transition-all outline-none"
+                    >
+                      <Plus className="w-4 h-4" /> ADD
+                    </button>
                   </div>
                 </div>
               );
@@ -1119,18 +1071,35 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
         );
       })()}
 
-      {/* ── Global registry management (Stage 3) ──────────────────────────────
-          Reached from the two header buttons above. These manage the GLOBAL
-          Master Defect List / Category Inventory — registering and renaming
-          entries system-wide. They deliberately do not assign anything to this
-          profile; the per-category "+ ADD" buttons and the kanban still own
-          that, until the Stage 4 picker replaces them. */}
+      {/* ── Global registry management ───────────────────────────────────────
+          Reached from the two section header buttons, and from the defect
+          picker's "REGISTER NEW DEFECT". Manages the GLOBAL Master Defect List /
+          Category Inventory — registering and renaming entries system-wide. It
+          does not assign anything to a profile; the Kanban "+ ADD" picker and
+          drag-and-drop own that. Closing it bumps registryRefreshKey so the
+          Kanban's lock state (and the picker's list, next time it opens) pick
+          up a just-registered or just-renamed entry. */}
       {registryModal && (
         <RegistryManagerModal
           entity={registryModal}
-          onClose={() => setRegistryModal(null)}
+          onClose={() => { setRegistryModal(null); setRegistryRefreshKey((k) => k + 1); }}
         />
       )}
+
+      {/* ── Defect picker (Stage 4a) — the per-category "+ ADD" button ───────── */}
+      {pickerCategoryId && (() => {
+        const pickerCategory = activeCategories.find((c: any) => c.id === pickerCategoryId);
+        if (!pickerCategory) return null;
+        return (
+          <DefectPickerModal
+            categoryName={pickerCategory.name}
+            existingDefectIds={activeDefects.map((d: any) => d.id)}
+            onPick={(entry) => handlePickDefect(entry, pickerCategoryId)}
+            onClose={() => setPickerCategoryId(null)}
+            onRegisterNew={() => { setPickerCategoryId(null); setRegistryModal('defect'); }}
+          />
+        );
+      })()}
 
     </div>
   );
