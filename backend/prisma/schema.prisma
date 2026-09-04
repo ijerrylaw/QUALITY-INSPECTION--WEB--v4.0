@@ -754,3 +754,64 @@ model ProfileCategoryDefect {
   @@index([defectId])
   @@index([profileId])
 }
+
+// ============================================================
+// PROFILE — inspection profile IDENTITY  (Stage A0 — additive)
+//
+// The first relational home for a profile's IDENTITY: its id↔name mapping,
+// the isDefault flag, and display ordering. Grading RULES (category
+// selection, per-profile AQL levels + evaluation modes, defect membership)
+// were already moved to Category / Defect / ProfileCategory /
+// ProfileCategoryDefect at Stage 2 — this model only carries what those
+// tables deliberately do NOT: the profile as a named, ordered thing.
+//
+// ── Why this exists ────────────────────────────────────────────────
+// Post-Stage-2, AppConfig.inspectionProfiles JSON was redundant for RULES
+// but was still the ONLY source of profile identity — the profileId→name
+// lookup in resolveVerdict.ts, the "zero profiles exist" bootstrap signal,
+// the submit-time isKnownProfileId() sanity check, and the reconstructed
+// nested array in GET /api/config's formatAppConfig(). Stage A0 moves those
+// four read paths onto this table so the JSON write can be retired at the
+// next stage. The JSON column is still written for now.
+//
+// ── No FK from ProfileCategory.profileId ───────────────────────────
+// Deliberately left loose in this stage — same opaque-string convention as
+// Submission.profileId (see that field's note). Tightening it into a real
+// relation is out of scope here.
+//
+// ── Kept in sync ──────────────────────────────────────────────────
+// Populated once by scripts/backfill-profile-identity.ts from the current
+// JSON blob, then maintained by syncProfileRegistry() (lib/profileRegistrySync.ts)
+// on every PATCH /api/config profile write — the same hook, and the same
+// payload.inspectionProfiles source, that already projects the RULES tables.
+// Rows for profiles no longer in the payload are pruned, mirroring the
+// full-array-replace semantics of the JSON blob.
+// ============================================================
+model Profile {
+  /// CANONICAL IDENTITY — the existing profileId string, preserved verbatim
+  /// ('prof_default', 'prof_1787197871523', ...). Never minted fresh: these
+  /// exact strings are stored on Submission.profileId and referenced by
+  /// ProfileCategory.profileId / ProfileCategoryDefect.profileId.
+  id        String   @id
+
+  /// Display name ('FACTORY STANDARD', 'MEDLINE'), in the admin's casing.
+  name      String
+
+  /// The single profile the resolution chain falls back to when no explicit
+  /// profileId is supplied and productProfileMap has no entry. Not enforced
+  /// unique — the JSON blob never enforced "exactly one default" either, and
+  /// the resolution order (explicit id → productProfileMap → first usable →
+  /// hardcoded seed) does not actually depend on this flag today. Carried so
+  /// the reconstructed GET response stays shape-identical.
+  isDefault Boolean
+
+  /// Admin-authored profile order, captured from the JSON array index. The
+  /// admin UI (QualityRules.tsx) and the wizard dropdowns render profiles in
+  /// this order, and resolveVerdict.ts's safety net scans "first profile in
+  /// AppConfig order that has usable rules" — so this must reproduce the JSON
+  /// array order exactly.
+  sortOrder Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

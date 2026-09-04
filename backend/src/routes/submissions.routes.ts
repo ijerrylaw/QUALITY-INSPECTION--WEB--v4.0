@@ -185,16 +185,15 @@ function parseJSONObjectField<T = unknown>(raw: unknown): Record<string, T> {
 }
 
 /**
- * Sanity-checks a profileId against AppConfig.inspectionProfiles JSON —
- * the actual source of truth for real profiles now that the relational
- * InspectionProfile table has been removed (AUDIT_REPORT.md §9.3 Option B /
- * §10 Part 3: it sat at 0 rows always, real profiles only ever lived in
- * this JSON blob). Not a foreign key — there's nothing left to enforce —
- * just a same-request check so an obviously-wrong id (typo, stale
- * reference, deleted profile) degrades to null with a log line instead of
- * being stored as if it were valid. `'prof_default'` is accepted even when
- * absent from the array, matching resolveVerdict.ts's own hardcoded-default
- * sentinel handling.
+ * Sanity-checks a profileId against the Profile table — the source of profile
+ * IDENTITY as of Stage A0 (previously read out of AppConfig.inspectionProfiles
+ * JSON; the relational InspectionProfile table before that had been removed as
+ * always-empty, AUDIT_REPORT.md §9.3 Option B / §10 Part 3). Still not a
+ * foreign key on Submission — just a same-request check so an obviously-wrong
+ * id (typo, stale reference, deleted profile) degrades to null with a log line
+ * instead of being stored as if it were valid. `'prof_default'` is accepted
+ * even when absent from the table, matching resolveVerdict.ts's own
+ * hardcoded-default sentinel handling.
  */
 /**
  * True if `err` is a Prisma unique-constraint violation (code P2002) on the
@@ -213,13 +212,8 @@ function isUniqueConstraintViolation(err: unknown, field: string): boolean {
 
 async function isKnownProfileId(profileId: string): Promise<boolean> {
   if (profileId === 'prof_default') return true;
-  const appConfig = await prisma.appConfig.findUnique({ where: { id: '1' }, select: { inspectionProfiles: true } });
-  try {
-    const profiles = JSON.parse(appConfig?.inspectionProfiles ?? '[]') as Array<{ id?: string }>;
-    return profiles.some((p) => p.id === profileId);
-  } catch {
-    return false;
-  }
+  const profile = await prisma.profile.findUnique({ where: { id: profileId }, select: { id: true } });
+  return profile !== null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

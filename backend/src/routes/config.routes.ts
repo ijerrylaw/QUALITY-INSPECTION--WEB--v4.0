@@ -13,6 +13,7 @@ import { Router, Request, Response } from 'express';
 import prisma from '../lib/prismaClient';
 import { ProfileRegistrySyncError, syncProfileRegistry } from '../lib/profileRegistrySync';
 import type { SourceProfile } from '../lib/profileRegistrySync';
+import { loadProfileRulesMap } from '../engine/profileRules';
 import type { AppConfig } from '../../generated/prisma/client';
 import { requireRole } from '../middleware/auth';
 import { logAccess } from '../lib/accessLog';
@@ -258,7 +259,59 @@ function validateInspectionProfiles(profiles: unknown): UnsetEvalModeCategory[] 
  * deliberately supersedes Session A's "GET must not expose products"
  * constraint, which existed only because nothing read it yet.
  */
-export function formatAppConfig(config: AppConfig) {
+/**
+ * Rebuilds the nested `inspectionProfiles` array for the GET/PATCH /api/config
+ * response from the Profile table (identity: id, name, isDefault, order) plus
+ * the registry tables (rules: category selection, per-profile AQL + evaluation
+ * mode, defect membership) — instead of echoing the AppConfig.inspectionProfiles
+ * JSON blob verbatim. Stage A0: the blob is still WRITTEN for now, but is no
+ * longer the read source here, so the next stage can retire that write.
+ *
+ * The emitted shape is deliberately identical to what the blob produced:
+ *   { id, name, isDefault,
+ *     aqlCategories:     [{ id, name, aql, evalMode }],
+ *     defectDefinitions: [{ id, name, categoryId }] }
+ * `aql` / `evalMode` carry the same engine/admin dialect the blob stored
+ * ('CUMULATIVE' | 'GRANULAR' | 'N/A' | '' for evalMode) — loadProfileRulesMap()
+ * already returns exactly those values. A profile with no ProfileCategory rows
+ * comes back with empty arrays, matching an empty-aqlCategories blob entry.
+ *
+ * Two known, signed-off departures from a byte-for-byte echo of the current
+ * blob, both corrections rather than regressions (Stage A0 discovery):
+ *   - FACTORY STANDARD: two VISUALS defects that had been appended to the tail
+ *     of the flat defectDefinitions array (out of their category's run) now
+ *     sort back into their category. Within-category order is unchanged.
+ *   - MEDLINE: the orphaned legacy id `def_wet_glove` is emitted as the
+ *     canonical `def_wet_glove_1` the grading engine already uses everywhere;
+ *     zero stored submissions/amendments reference the old id.
+ */
+async function reconstructInspectionProfiles(): Promise<any[]> {
+  const [profiles, rulesByProfile] = await Promise.all([
+    prisma.profile.findMany({ orderBy: { sortOrder: 'asc' } }),
+    loadProfileRulesMap(),
+  ]);
+  return profiles.map((p) => {
+    const rules = rulesByProfile.get(p.id);
+    return {
+      id: p.id,
+      name: p.name,
+      isDefault: p.isDefault,
+      aqlCategories: (rules?.categories ?? []).map((c) => ({
+        id: c.id,
+        name: c.name,
+        aql: c.aqlLevel,
+        evalMode: c.evaluationMode,
+      })),
+      defectDefinitions: (rules?.defectDefinitions ?? []).map((d) => ({
+        id: d.id,
+        name: d.name,
+        categoryId: d.categoryId,
+      })),
+    };
+  });
+}
+
+export async function formatAppConfig(config: AppConfig) {
   const registry = resolveProductRegistry(config);
   return {
     id: config.id,
@@ -284,7 +337,7 @@ export function formatAppConfig(config: AppConfig) {
     productMatrixConfig: registry.productMatrixConfig,
     aqlCategories: safeParseJSON<any[]>(config.aqlCategories, []),
     defectDefinitions: safeParseJSON<any[]>(config.defectDefinitions, []),
-    inspectionProfiles: safeParseJSON<any[]>(config.inspectionProfiles, []),
+    inspectionProfiles: await reconstructInspectionProfiles(),
     /**
      * The consolidated per-product-code structure — now the read source of
      * truth for the admin/config surface (ProductEngine.tsx). Exposed as of
@@ -336,7 +389,7 @@ router.get('/', async (_req: Request, res: Response) => {
     }
 
     res.json({
-      ...formatAppConfig(config),
+      ...(await formatAppConfig(config)),
       productCodeUsage: await getProductCodeUsage(),
     });
   } catch (error) {
@@ -751,7 +804,7 @@ router.patch('/', requireRole('MANAGER', 'ADMIN'), async (req: Request, res: Res
     });
 
     res.json({
-      ...formatAppConfig(updatedConfig),
+      ...(await formatAppConfig(updatedConfig)),
       productCodeUsage: await getProductCodeUsage(),
     });
   } catch (error) {

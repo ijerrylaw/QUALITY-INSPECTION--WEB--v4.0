@@ -391,9 +391,16 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
   const onUnresolvedProfile = params.onUnresolvedProfile ?? 'throw';
 
   const appConfig = await prisma.appConfig.findUnique({ where: { id: '1' } });
-  const profilesList: any[] = appConfig?.inspectionProfiles
-    ? safeParseJSON<any[]>(appConfig.inspectionProfiles, [])
-    : [];
+
+  // ── Stage A0 identity cutover ──────────────────────────────────────────
+  // Profile IDENTITY (id↔name, admin-authored order, and "are any profiles
+  // configured at all") now comes from the Profile table, not the
+  // AppConfig.inspectionProfiles JSON blob. RULES already come from the
+  // registry tables (loadProfileRulesMap below, Stage 2). Semantics unchanged:
+  // `profilesList` is still the set of real admin-authored profiles in
+  // admin-authored order (Profile.sortOrder captured from the same JSON array
+  // index), and an empty list still means the true first-run bootstrap.
+  const profilesList = await prisma.profile.findMany({ orderBy: { sortOrder: 'asc' } });
 
   // ── B4 grading cutover ──────────────────────────────────────────────────
   // The product registry (per-code matrix + profile link) is now read from
@@ -440,10 +447,10 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
   let evaluationProfileName: string | null   = null;
 
   if (profileId) {
-    const profile = profilesList.find((p: any) => p.id === profileId);
+    const profile = profilesList.find((p) => p.id === profileId);
 
     // Sentinel for the UI-configured global standard default — only for the
-    // true first-run bootstrap case (AppConfig has zero profiles at all).
+    // true first-run bootstrap case (the Profile table has zero rows at all).
     // If profilesList is non-empty but 'prof_default' specifically isn't in
     // it, fall through to the standard not-found handling below instead of
     // silently grading against the hardcoded profile.
@@ -462,9 +469,10 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
         throw new VerdictProfileNotFoundError(profileId);
       }
     } else {
-      // The profile exists in AppConfig; its RULES come from the new tables.
-      // A miss here (no ProfileCategory rows) leaves categories empty, which
-      // the safety net below treats exactly like an empty aqlCategories array.
+      // The profile identity exists (Profile row); its RULES come from the
+      // registry tables. A miss here (no ProfileCategory rows) leaves
+      // categories empty, which the safety net below treats exactly like an
+      // empty aqlCategories array.
       const rules = rulesByProfile.get(String(profile.id));
       if (rules) {
         categories        = rules.categories;
@@ -476,13 +484,13 @@ export async function resolveVerdict(params: ResolveVerdictParams): Promise<Reso
   }
 
   // Safety net: no profileId was resolved, or the resolved profile has no usable rules.
-  // Use the first AppConfig profile that has valid rules, or the hardcoded default.
-  // Scans profilesList (not the rules map) so "first" still means first in
-  // AppConfig order, exactly as before Stage 2 — map iteration order must not
-  // become load-bearing.
+  // Use the first configured profile that has valid rules, or the hardcoded default.
+  // Scans profilesList (Profile rows ordered by sortOrder, not the rules map) so
+  // "first" still means first in admin-authored profile order, exactly as before
+  // Stage 2 — map iteration order must not become load-bearing.
   if (categories.length === 0 || !categories.some((c) => c.aqlLevel && c.evaluationMode)) {
     const usableAppConfigProfile =
-      profilesList.find((p: any) => hasUsableRules(rulesByProfile.get(String(p?.id)))) ?? null;
+      profilesList.find((p) => hasUsableRules(rulesByProfile.get(p.id))) ?? null;
     if (usableAppConfigProfile) {
       const rules = rulesByProfile.get(String(usableAppConfigProfile.id)) as EngineProfileRules;
       categories        = rules.categories;

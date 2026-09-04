@@ -562,6 +562,41 @@ export async function applyRegistryPlan(plan: RegistryPlan, db: RegistryDb = pri
 }
 
 /**
+ * Upserts profile IDENTITY (id, name, isDefault, sortOrder) into the Profile
+ * table from the same payload.inspectionProfiles array the RULES projection
+ * above consumes. Stage A0: post-Stage-2 the registry tables own a profile's
+ * grading rules but NOT its identity — that was still read out of the JSON blob
+ * by resolveVerdict.ts, isKnownProfileId(), and formatAppConfig(). This keeps
+ * Profile in lock-step with the blob on every write so those reads can move off
+ * the JSON.
+ *
+ * sortOrder is the array index, exactly as ProfileCategory.sortOrder captures
+ * category order — the admin UI and the wizard render profiles in this order,
+ * and resolveVerdict.ts's safety net scans "first profile in AppConfig order".
+ *
+ * Rows for profiles absent from the payload are pruned: PATCH /api/config
+ * always sends the FULL inspectionProfiles array (QualityRules.tsx replaces it
+ * wholesale), so a dropped profile must disappear from Profile too, the same
+ * way applyRegistryPlan() already prunes its ProfileCategory rows.
+ */
+async function syncProfileIdentities(profiles: SourceProfile[], db: RegistryDb): Promise<void> {
+  const keepIds: string[] = [];
+  for (let index = 0; index < profiles.length; index++) {
+    const p = profiles[index];
+    keepIds.push(p.id);
+    const data = { name: p.name, isDefault: p.isDefault === true, sortOrder: index };
+    await db.profile.upsert({
+      where: { id: p.id },
+      create: { id: p.id, ...data },
+      update: data,
+    });
+  }
+  await db.profile.deleteMany({
+    where: keepIds.length > 0 ? { id: { notIn: keepIds } } : {},
+  });
+}
+
+/**
  * Project + apply in one call — what PATCH /api/config uses.
  *
  * @throws ProfileRegistrySyncError if the profiles cannot be projected. The
@@ -576,5 +611,6 @@ export async function syncProfileRegistry(
   const locked = await loadLockState(db);
   const plan = planRegistry(profiles, locked);
   await applyRegistryPlan(plan, db);
+  await syncProfileIdentities(profiles, db);
   return plan;
 }
