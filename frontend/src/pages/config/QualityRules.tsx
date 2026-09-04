@@ -35,6 +35,7 @@ import {
 import RegistryManagerModal from '../../components/config/RegistryManagerModal';
 import type { RegistryEntity } from '../../components/config/RegistryManagerModal';
 import DefectPickerModal from '../../components/config/DefectPickerModal';
+import CategoryPickerModal from '../../components/config/CategoryPickerModal';
 import { useConfig, API_BASE_URL } from '../../context/ConfigContext';
 import { authHeader, useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/ui/ToastProvider';
@@ -44,44 +45,15 @@ import {
   DEFAULT_PROFILE_ID,
   isEvalModeUnset,
 } from '../../lib/defaultProfileSeed';
+// AQL-level / eval-mode option lists + auto-lock rules — extracted verbatim to
+// lib/ so CategoryPickerModal (Stage 4b) reuses the exact same selectors. The
+// inline category editor below (updateCategoryForm / saveEditCategory / the
+// edit-row JSX) is unchanged — only where these constants live moved.
+import { ISO_WHITELIST, EVAL_MODES, getAutoLockLabel, getAutoLockValue } from '../../lib/aqlCategoryOptions';
 
 interface QualityRulesProps {
   onDirty: () => void;
   onChange: (data: any) => void;
-}
-
-// ISO 2859-1 AQL whitelist — ISO2859_MATH_ENGINE.md §1
-const ISO_WHITELIST = ['AND', '0.65', '1.0', '1.5', '2.5', '4.0', '6.5', 'PASS/FAIL', 'RECORD ONLY'];
-// Evaluation Modes — DATA_SCHEMAS_AND_TYPES.md §2
-const EVAL_MODES: string[] = ['CUMULATIVE', 'GRANULAR'];
-
-/**
- * Eval Mode auto-lock label for AQL Levels that force a non-editable Eval
- * Mode — null means the category's Eval Mode is freely editable. Mirrors
- * the dimension-level Graded/Record-only icon convention (Ruler/Eye,
- * ProductConfigAccordion.tsx) in its wording, kept visually distinct from
- * genuine 'N/A (Auto-Locked)' so a RECORD ONLY category never reads as a
- * qualitative one at a glance.
- */
-function getAutoLockLabel(aql: string): string | null {
-  if (aql === 'PASS/FAIL') return 'N/A (Auto-Locked)';
-  if (aql === 'RECORD ONLY') return 'RECORD ONLY (Locked)';
-  return null;
-}
-
-/**
- * The actual evaluationMode value auto-lock writes for a given AQL Level —
- * mirrors updateCategoryForm()'s write-side logic. RECORD ONLY writes ''
- * (empty string), NOT 'N/A' — aqlEvaluator.ts's true-exclusion skip path
- * (`if (!category.evaluationMode) continue;`) only triggers on '', so this
- * is what actually excludes the category from verdict computation.
- * PASS/FAIL still writes 'N/A', which is evaluated (qualitative pass/fail),
- * not skipped. Returns null when the AQL Level doesn't auto-lock.
- */
-function getAutoLockValue(aql: string): string | null {
-  if (aql === 'PASS/FAIL') return 'N/A';
-  if (aql === 'RECORD ONLY') return '';
-  return null;
 }
 
 /** Read-only Eval Mode display text — a saved RECORD ONLY category's evalMode is '', which would otherwise render as a blank cell. */
@@ -186,6 +158,11 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   const [registryModal, setRegistryModal] = useState<RegistryEntity | null>(null);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editCategoryForm, setEditCategoryForm] = useState({ name: '', aql: '1.5', evalMode: 'CUMULATIVE' });
+  // Stage 4b: the bottom-of-table "+ ADD" opens the Category Inventory picker
+  // to ADOPT a global category into this profile (choosing its AQL + eval mode
+  // in the same flow). Distinct from the header "ADD CATEGORY" button, which
+  // opens RegistryManagerModal to manage the global inventory itself.
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
 
   // ── Generic Change Trigger ────────────────────────────────────────────────
   const triggerChange = (newProfiles: any[], newSampleSizes?: number[]) => {
@@ -217,90 +194,38 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   };
 
   /**
-   * Duplicating a profile must give the COPY its own fresh category/defect
-   * ids — a plain shallow spread previously left the copy's aqlCategories/
-   * defectDefinitions pointing at the exact same id strings as the source
-   * (confirmed live: GLOBAL STANDARD and BACKUP share identical category ids
-   * AND/BARRIER and 47 defect ids). Currently harmless (every lookup site in
-   * the codebase scopes to one resolved profile before matching by id), but
-   * a latent risk for any future id-only lookup, and increasingly relevant
-   * heading toward multi-tenant use.
+   * Duplicates the active profile.
    *
-   * Two things must both hold, not just "ids differ":
-   *   1. Every regenerated id must be genuinely fresh — never reused from
-   *      the SOURCE, and never colliding with another id minted in this same
-   *      batch.
-   *   2. The copy's internal wiring must be preserved exactly — a defect
-   *      that belonged to the source's "AND" category must belong to the
-   *      COPY's own new AND-equivalent category, not silently point at
-   *      nothing. QualityRules.tsx's own kanban board groups defects with a
-   *      strict `d.categoryId === cat.id` (no name fallback, unlike the
-   *      grading engine's currentClass===name-or-id leniency), so skipping
-   *      the remap would render every category in the copy empty even
-   *      though the defect data is technically still present.
+   * Categories and defects are references into the GLOBAL Category Inventory /
+   * Master Defect List now (Stage 1+), not profile-owned rows — so the copy
+   * ADOPTS the same category ids and defect ids as the source, at the same AQL
+   * levels / evaluation modes, with each defect kept under the same category id.
+   * Nothing is minted and nothing is re-derived from a name.
+   *
+   * This is the same shape the Stage 4 pickers produce, and the same thing two
+   * live profiles already do: FACTORY STANDARD and MEDLINE both reference the
+   * global `AND` and `BARRIER` category ids. `syncProfileRegistry` (PATCH
+   * /api/config) projects each shared id into its OWN ProfileCategory /
+   * ProfileCategoryDefect join row per profile, so the copy grades identically
+   * to the source with no id collision.
+   *
+   * Objects/arrays are shallow-copied per element so the copy never aliases the
+   * source's `aqlCategories` / `defectDefinitions` (a plain spread of
+   * `activeProfile` would share those array references and any later edit to one
+   * profile would silently mutate the other). Every other profile field is
+   * carried over verbatim by the spread; only id / name / isDefault are
+   * overridden. Sample sizes are top-level config, not per-profile, so they are
+   * untouched here.
    */
   const handleDuplicateProfile = () => {
     const newProfileId = `prof_${Date.now()}`;
-
-    // Fresh category ids in the established `cat_${Date.now()}` family, with an
-    // index suffix because Duplicate mints several in one synchronous tick,
-    // where Date.now() alone could repeat across categories in the same
-    // millisecond. (The inline single-category creator this used to mirror was
-    // removed at Stage 3 — categories are now registered in the global Category
-    // Inventory via RegistryManagerModal, which mints slug ids server-side.
-    // This clone path is itself superseded at Stage 4, when profiles select
-    // from that inventory instead of copying ids by value.)
-    // categoryIdMap records old id -> new id so defects
-    // can be remapped below; everything else about each category (name,
-    // aql, evalMode, any display-only fields) is preserved verbatim.
-    const categoryIdMap = new Map<string, string>();
-    const newCategories = (activeProfile.aqlCategories || []).map((cat: any, i: number) => {
-      const newCatId = `cat_${Date.now()}_${i}`;
-      categoryIdMap.set(cat.id, newCatId);
-      return { ...cat, id: newCatId };
-    });
-
-    // Fresh defect ids — same slug-then-disambiguate shape as
-    // handleAddDefect, but the uniqueness check is deliberately wider than
-    // that function's own (which only checks the ACTIVE profile's defects):
-    // a duplicated defect's NAME is unchanged, so slugifying it again would
-    // reproduce the exact SAME id the source defect already has unless the
-    // check is forced to see that id too. Checking every profile's ids
-    // (not just the source's) costs nothing extra and leaves every minted
-    // id globally unique, not merely "different from the source." Each
-    // defect's categoryId is remapped through categoryIdMap so the copy's
-    // grouping matches the source exactly; a categoryId with no mapping
-    // (shouldn't happen — every defect's category exists in its own
-    // profile) falls back to the original value rather than silently
-    // becoming undefined, so an already-dangling reference stays exactly as
-    // dangling as it was, not newly broken by this change.
-    const allExistingDefectIds = new Set<string>(
-      profiles.flatMap((p: any) => (p.defectDefinitions || []).map((d: any) => d.id)),
-    );
-    const newDefects = (activeProfile.defectDefinitions || []).map((def: any) => {
-      const rawSlug = String(def.name ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-      const baseId = rawSlug ? `def_${rawSlug}` : `def_${Date.now()}`;
-      let newDefId = baseId;
-      let counter = 1;
-      while (allExistingDefectIds.has(newDefId)) {
-        newDefId = `${baseId}_${counter}`;
-        counter++;
-      }
-      allExistingDefectIds.add(newDefId);
-      return {
-        ...def,
-        id: newDefId,
-        categoryId: categoryIdMap.get(def.categoryId) ?? def.categoryId,
-      };
-    });
-
     const newProfile = {
       ...activeProfile,
       id: newProfileId,
       name: `${activeProfile.name} (COPY)`,
       isDefault: false,
-      aqlCategories: newCategories,
-      defectDefinitions: newDefects,
+      aqlCategories: (activeProfile.aqlCategories || []).map((cat: any) => ({ ...cat })),
+      defectDefinitions: (activeProfile.defectDefinitions || []).map((def: any) => ({ ...def })),
     };
     const updated = [...profiles, newProfile];
     setProfiles(updated);
@@ -392,11 +317,41 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   const handleMoveCategory = (index: number, direction: 'up' | 'down') => {
     if (direction === 'up' && index === 0) return;
     if (direction === 'down' && index === activeCategories.length - 1) return;
-    
+
     const updatedCats = [...activeCategories];
     const newIndex = direction === 'up' ? index - 1 : index + 1;
     [updatedCats[index], updatedCats[newIndex]] = [updatedCats[newIndex], updatedCats[index]];
 
+    const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, aqlCategories: updatedCats } : p);
+    setProfiles(updatedProfiles);
+    triggerChange(updatedProfiles);
+  };
+
+  /**
+   * Adopts a category chosen from the global Category Inventory (Stage 4b
+   * picker) into the active profile, at the AQL level + evaluation mode picked
+   * inline. The appended entry — { id, name, aql, evalMode } — is the exact
+   * shape saveEditCategory writes, so triggerChange / PATCH /api/config /
+   * syncProfileRegistry all handle it unchanged (a new category id in a
+   * profile's aqlCategories JSON already projects to a fresh ProfileCategory
+   * join row).
+   *
+   * `name` is stored verbatim from the registry — NOT upper-cased like
+   * saveEditCategory does — so applyRegistryPlan's category upsert stays a
+   * genuine no-op and never rewrites the global Category's stored name.
+   *
+   * A profile selects a category at most once (@@unique([profileId, categoryId])
+   * on ProfileCategory); the picker greys an already-selected row, this is the
+   * backstop. Does NOT close the picker — it stays open for multi-add.
+   */
+  const handleAdoptCategory = (entry: { id: string; name: string; aql: string; evalMode: string }) => {
+    if (activeCategories.some((c: any) => c.id === entry.id)) {
+      addToast('error', `"${entry.name}" is already in this profile.`);
+      return;
+    }
+    const updatedCats = [...activeCategories, {
+      id: entry.id, name: entry.name, aql: entry.aql, evalMode: entry.evalMode,
+    }];
     const updatedProfiles = profiles.map(p => p.id === activeProfileId ? { ...p, aqlCategories: updatedCats } : p);
     setProfiles(updatedProfiles);
     triggerChange(updatedProfiles);
@@ -799,7 +754,18 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                     </tr>
                   );
                 })}
-                
+
+                {/* Adopt a category from the global Category Inventory (Stage 4b picker) */}
+                <tr>
+                  <td colSpan={4} className="py-2 px-3">
+                    <button
+                      onClick={() => setShowCategoryPicker(true)}
+                      className="w-full h-10 rounded border border-dashed border-gray-700 bg-transparent text-muted hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 flex items-center justify-center gap-2 font-semibold text-[11px] uppercase tracking-wider transition-all outline-none"
+                    >
+                      <Plus className="w-4 h-4" /> ADD
+                    </button>
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -1100,6 +1066,17 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
           />
         );
       })()}
+
+      {/* ── Category picker (Stage 4b) — the bottom-of-table "+ ADD" ─────────── */}
+      {showCategoryPicker && (
+        <CategoryPickerModal
+          profileName={activeProfile.name}
+          existingCategoryIds={activeCategories.map((c: any) => c.id)}
+          onPick={handleAdoptCategory}
+          onClose={() => setShowCategoryPicker(false)}
+          onRegisterNew={() => { setShowCategoryPicker(false); setRegistryModal('category'); }}
+        />
+      )}
 
     </div>
   );
