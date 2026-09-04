@@ -39,6 +39,17 @@ const router = Router();
  * The API contract is unchanged: PATCH still ACCEPTS those three field names in
  * the request body, and GET still RETURNS them (projected out of `products`).
  * Only where they land in storage has changed.
+ *
+ * Stage A — `inspectionProfiles` is now ABSENT for the same reason. Since
+ * Stage 2 the grading engine reads categories/defects from the registry
+ * tables (Category / Defect / ProfileCategory / ProfileCategoryDefect), and
+ * Stage A0 moved profile IDENTITY onto the Profile table; the PATCH handler
+ * projects the incoming payload into both via syncProfileRegistry(). Nothing
+ * reads the AppConfig.inspectionProfiles column any more, so it is left in
+ * place and frozen at its last-written value (schema-column drop is Stage B).
+ * PATCH still ACCEPTS the `inspectionProfiles` key in the request body — it is
+ * the sync input — and GET still RETURNS `inspectionProfiles`, reconstructed
+ * from Profile + the registry tables by reconstructInspectionProfiles().
  */
 const JSON_FIELDS = [
   'lines',
@@ -56,7 +67,6 @@ const JSON_FIELDS = [
   'targetWeight',
   'aqlCategories',
   'defectDefinitions',
-  'inspectionProfiles',
 ] as const;
 
 type JsonFieldName = (typeof JSON_FIELDS)[number];
@@ -728,25 +738,27 @@ router.patch('/', requireRole('MANAGER', 'ADMIN'), async (req: Request, res: Res
       updateData['products'] = JSON.stringify(incomingProducts);
     }
 
-    // ── Persist the config + re-project the grading tables ATOMICALLY ─────────
+    // ── Persist the config + project the grading tables ATOMICALLY ───────────
     // The AQL engine reads categories/defects from the global Master Defect
-    // List + Category Inventory (engine/profileRules.ts), while this route still
-    // stores them as inspectionProfiles JSON — the admin UI moves fully at a
-    // later stage. The two must stay in lock-step, and they must move together
-    // or not at all.
+    // List + Category Inventory (engine/profileRules.ts) and profile identity
+    // from the Profile table (Stage A0). As of Stage A this route NO LONGER
+    // writes the inspectionProfiles JSON column (it is absent from JSON_FIELDS
+    // above) — syncProfileRegistry() projecting the payload into the registry
+    // tables + Profile is the sole write path. The AppConfig write below still
+    // runs for the other fields a Quality Rules save can carry (e.g.
+    // sampleSizes) and for any other section's PATCH.
     //
-    // Before this was transactional the JSON was written first and the
-    // projection second, so a projection failure — a locked defect dropped from
-    // its last remaining profile (CHANGELOG §45) — left the stored profiles
-    // updated while the grading tables were not: a silent split-brain where the
-    // UI showed one thing and the engine graded another, with nothing forcing
-    // resolution and no audit-log entry that a write had even been attempted.
-    //
-    // Now the AppConfig write and syncProfileRegistry() run inside one
-    // interactive transaction. A ProfileRegistrySyncError thrown by the
-    // projection propagates out of the callback and rolls the JSON write back
-    // with it — a rejected save changes nothing. The generous timeout covers
-    // applyRegistryPlan()'s ~160 sequential upserts against local SQLite.
+    // Both halves run inside one interactive transaction so they still move
+    // together or not at all. Before this was transactional the JSON was
+    // written first and the projection second, so a projection failure — a
+    // locked defect dropped from its last remaining profile (CHANGELOG §45) —
+    // left storage updated while the grading tables were not: a silent
+    // split-brain where the UI showed one thing and the engine graded another,
+    // with nothing forcing resolution and no audit-log entry that a write had
+    // even been attempted. Now a ProfileRegistrySyncError thrown by the
+    // projection propagates out of the callback and rolls the whole transaction
+    // back with it — a rejected save changes nothing. The generous timeout
+    // covers applyRegistryPlan()'s ~160 sequential upserts against local SQLite.
     let updatedConfig: AppConfig;
     try {
       updatedConfig = await prisma.$transaction(
@@ -772,10 +784,10 @@ router.patch('/', requireRole('MANAGER', 'ADMIN'), async (req: Request, res: Res
     } catch (txError) {
       if (txError instanceof ProfileRegistrySyncError) {
         console.error('[PATCH /api/config] Profile registry sync failed — nothing saved:', txError.message);
-        // The JSON write rolled back, so AppConfig.updatedAt does not move — but
-        // a save was demonstrably attempted, and a rejected write that leaves no
-        // trace is itself worth recording. Distinct action from CONFIG_WRITE:
-        // nothing changed.
+        // The whole transaction rolled back — the AppConfig write for any other
+        // fields in this payload is undone too — but a save was demonstrably
+        // attempted, and a rejected write that leaves no trace is itself worth
+        // recording. Distinct action from CONFIG_WRITE: nothing changed.
         await logAccess(req, {
           userId: null,
           role: req.header('X-User-Role') ?? null,

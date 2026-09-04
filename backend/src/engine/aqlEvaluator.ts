@@ -31,13 +31,13 @@ import {
 /**
  * AQLCategory / DefectDefinition — the engine's own input shape.
  *
- * As of Stage 2 these are populated from the global Category Inventory and
- * Master Defect List (Category / Defect / ProfileCategory /
- * ProfileCategoryDefect) by engine/profileRules.ts's loadProfileRulesMap(),
- * which resolves a profile's category selection, per-profile AQL levels, and
- * defect membership. Before Stage 2 they were normalized out of the
- * AppConfig.inspectionProfiles JSON blob instead — see
- * DATA_SCHEMAS_AND_TYPES.md §2.2.
+ * These are populated from the global Category Inventory and Master Defect
+ * List (Category / Defect / ProfileCategory / ProfileCategoryDefect) by
+ * engine/profileRules.ts's loadProfileRulesMap(), which resolves a profile's
+ * category selection, per-profile AQL levels, and defect membership. Before
+ * Stage 2 they were normalized out of the AppConfig.inspectionProfiles JSON
+ * blob instead (via a since-removed resolveVerdict.ts helper); that column is
+ * no longer read by anything as of Stage A. See DATA_SCHEMAS_AND_TYPES.md §2.2.
  *
  * `evaluationMode` here is always the ENGINE dialect ('CUMULATIVE' |
  * 'GRANULAR' | 'N/A' | ''), never the Category table's clean enum. The
@@ -337,8 +337,8 @@ export interface VerdictResult {
 
 /**
  * Input parameters for evaluateAQLVerdict.
- * Uses the local AQLCategory/DefectDefinition types above (normalized
- * AppConfig-JSON shape) so the engine stays in lock-step with
+ * Uses the local AQLCategory/DefectDefinition types above (the engine's own
+ * input shape) so the engine stays in lock-step with
  * DATA_SCHEMAS_AND_TYPES.md §2.1 without a hand-rolled DTO layer.
  */
 export interface EvaluateAQLVerdictParams {
@@ -346,14 +346,14 @@ export interface EvaluateAQLVerdictParams {
   sampleSize: number;
   /**
    * All AQL categories from the active profile.
-   * Source: resolveVerdict.ts's normalizeForEngine(), reading
-   * AppConfig.inspectionProfiles JSON.
+   * Source: engine/profileRules.ts's loadProfileRulesMap(), reading the
+   * Category / ProfileCategory registry tables (resolved in resolveVerdict.ts).
    */
   categories: AQLCategory[];
   /**
    * All defect definitions from the active profile.
-   * Source: resolveVerdict.ts's normalizeForEngine(), reading
-   * AppConfig.inspectionProfiles JSON.
+   * Source: engine/profileRules.ts's loadProfileRulesMap(), reading the
+   * Defect / ProfileCategoryDefect registry tables (resolved in resolveVerdict.ts).
    */
   defectDefinitions: DefectDefinition[];
   /**

@@ -19,12 +19,12 @@
  * pruned — the same full-array-replace semantics syncProfileRegistry() applies
  * on every PATCH /api/config from Stage A0 onward.
  *
- * ── Lifetime ────────────────────────────────────────────────────────────────
- * Once syncProfileRegistry() is maintaining Profile on every write (Stage A0),
- * this script is only needed for the initial population. Kept in the repo as a
- * historical record, same convention as backfill-master-defect-list.ts beside
- * it. It stays correct to re-run for as long as the JSON blob is still written;
- * once the JSON write is retired (Stage A) it becomes WRONG to run.
+ * ── Lifetime — SPENT ────────────────────────────────────────────────────────
+ * This has already run once (initial population), and syncProfileRegistry()
+ * has maintained Profile on every PATCH /api/config since Stage A0. As of
+ * Stage A the AppConfig.inspectionProfiles column is no longer written, so
+ * this script would now read a STALE/frozen blob — it is WRONG to run. Kept
+ * in the repo only as a historical record of how Profile was first seeded.
  *
  * Usage (from backend/):
  *   npx tsx scripts/backfill-profile-identity.ts --dry-run   # plan only, no writes
