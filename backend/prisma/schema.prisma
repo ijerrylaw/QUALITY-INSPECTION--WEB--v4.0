@@ -101,12 +101,14 @@ model Submission {
   gloveWeight         Float?
 
   // --- Profile Reference ---
-  /// Opaque historical reference to whichever AppConfig.inspectionProfiles[]
-  /// entry was in effect at submit time. No enforced referential integrity —
-  /// real profiles live in AppConfig's JSON blob, not a relational table
-  /// (see AUDIT_REPORT.md §8.4/§9.3). The FK relation to a dedicated
-  /// InspectionProfile table was removed deliberately — see §9.3 Option B /
-  /// §10 Part 3.
+  /// Opaque historical reference to whichever profile was in effect at submit
+  /// time. Points at Profile.id as of Stage A0 (before that, at an entry in the
+  /// since-dropped AppConfig.inspectionProfiles JSON array — the id strings are
+  /// the same either way, which is why no data migration was needed). Still NO
+  /// enforced referential integrity: the FK relation to a dedicated
+  /// InspectionProfile table was removed deliberately (AUDIT_REPORT.md §8.4/
+  /// §9.3 Option B / §10 Part 3), and Stage A0 did not reinstate one — a
+  /// historical submission must survive its profile being deleted.
   profileId           String?
 
   /// Full per-category AQL analysis frozen at submit time (or refrozen at
@@ -429,7 +431,17 @@ model AppConfig {
   productMatrixConfig String   @default("{}")
   aqlCategories       String   @default("[]")
   defectDefinitions   String   @default("[]")
-  inspectionProfiles  String   @default("[]")
+  // `inspectionProfiles String @default("[]")` was DROPPED here at Stage B.
+  // Profile IDENTITY now lives in the Profile model; grading RULES live in
+  // Category / Defect / ProfileCategory / ProfileCategoryDefect. Nothing had
+  // read the column since Stage A0 and nothing had written it since Stage A,
+  // so it was dropped rather than left frozen.
+  //
+  // The API contract did NOT move: PATCH /api/config still ACCEPTS an
+  // `inspectionProfiles` key (it is syncProfileRegistry()'s input) and GET
+  // /api/config still RETURNS one, rebuilt from the tables above by
+  // reconstructInspectionProfiles() in routes/config.routes.ts. Only the
+  // storage column is gone.
 
   // --- Consolidated Product Record (additive, Session A — see Product Engine
   // discovery report §2/§5 and the productProfileMap corrupted-key incident
@@ -505,13 +517,18 @@ model AccessLog {
 // profiles select from, replacing the per-profile free-text model where
 // every profile invented (and independently spelled) its own defects.
 //
-// ── Stage 1 is ADDITIVE ONLY ────────────────────────────────────────
-// AppConfig.inspectionProfiles JSON remains the LIVE source of truth for
-// grading. Nothing here is read by aqlEvaluator.ts, resolveVerdict.ts, the
-// admin UI, or the wizard yet — Stage 2 rewires those call sites onto these
-// tables and only then may the embedded JSON be retired. Until that happens
-// the two representations are kept in sync by the backfill script
-// (scripts/backfill-master-defect-list.ts), and the JSON stays authoritative.
+// ── These are now the LIVE grading tables (Stage 1 → 2 → A0 → A → B) ─
+// Introduced ADDITIVE-ONLY at Stage 1, alongside an AppConfig.inspectionProfiles
+// JSON blob that was then still authoritative. That is no longer the case:
+//   Stage 2  — aqlEvaluator.ts / resolveVerdict.ts rewired onto these tables
+//              (via engine/profileRules.ts); they became the grading authority.
+//   Stage A0 — profile IDENTITY moved to the Profile model below.
+//   Stage A  — PATCH /api/config stopped writing the JSON column.
+//   Stage B  — the AppConfig.inspectionProfiles column was dropped outright.
+// These tables are the sole source of truth for grading, maintained by
+// syncProfileRegistry() (lib/profileRegistrySync.ts) on every profile write.
+// The one-off Stage 1 backfill script that originally seeded them has been
+// deleted; it was spent, and post-Stage-A could only have read a stale blob.
 //
 // ── Why these are the FIRST relational profile-adjacent models ──────
 // InspectionProfile/AQLCategory/DefectDefinition were deliberately DELETED
@@ -628,11 +645,13 @@ model Category {
 model ProfileCategory {
   id         String   @id @default(cuid())
 
-  /// Opaque reference to an AppConfig.inspectionProfiles[] entry — NOT a
-  /// foreign key, because profiles are still JSON, not a table. Identical
-  /// convention (and identical caveat) to Submission.profileId: no enforced
-  /// referential integrity, so a deleted profile leaves rows behind here.
-  /// Stage 2 owns the cleanup path; Stage 1 only ever writes ids that exist.
+  /// Opaque reference to a Profile.id — still NOT a declared foreign key.
+  /// Originally loose because profiles were JSON rather than a table; since
+  /// Stage A0 gave them one, the looseness is a deliberate carry-over of the
+  /// same convention as Submission.profileId rather than a limitation (see
+  /// the Profile model's "No FK from ProfileCategory.profileId" note). No
+  /// enforced referential integrity, so a deleted profile would leave rows
+  /// behind here — syncProfileRegistry() prunes them instead.
   profileId  String
 
   categoryId String
@@ -770,9 +789,10 @@ model ProfileCategoryDefect {
 // but was still the ONLY source of profile identity — the profileId→name
 // lookup in resolveVerdict.ts, the "zero profiles exist" bootstrap signal,
 // the submit-time isKnownProfileId() sanity check, and the reconstructed
-// nested array in GET /api/config's formatAppConfig(). Stage A0 moves those
-// four read paths onto this table so the JSON write can be retired at the
-// next stage. The JSON column is still written for now.
+// nested array in GET /api/config's formatAppConfig(). Stage A0 moved those
+// four read paths onto this table; Stage A then retired the JSON write, and
+// Stage B dropped the column. This table is now the only home for a profile's
+// identity.
 //
 // ── No FK from ProfileCategory.profileId ───────────────────────────
 // Deliberately left loose in this stage — same opaque-string convention as
@@ -780,12 +800,13 @@ model ProfileCategoryDefect {
 // relation is out of scope here.
 //
 // ── Kept in sync ──────────────────────────────────────────────────
-// Populated once by scripts/backfill-profile-identity.ts from the current
-// JSON blob, then maintained by syncProfileRegistry() (lib/profileRegistrySync.ts)
-// on every PATCH /api/config profile write — the same hook, and the same
-// payload.inspectionProfiles source, that already projects the RULES tables.
-// Rows for profiles no longer in the payload are pruned, mirroring the
-// full-array-replace semantics of the JSON blob.
+// Seeded once at Stage A0 by a one-off backfill script that read the identities
+// out of the then-live JSON blob (script since deleted at Stage B, along with
+// the column it read). Maintained ever since by syncProfileRegistry()
+// (lib/profileRegistrySync.ts) on every PATCH /api/config profile write — the
+// same hook, and the same payload.inspectionProfiles request-body key, that
+// already projects the RULES tables. Rows for profiles no longer in the payload
+// are pruned, mirroring the full-array-replace semantics the JSON blob had.
 // ============================================================
 model Profile {
   /// CANONICAL IDENTITY — the existing profileId string, preserved verbatim

@@ -364,7 +364,19 @@ A Defect or Category is uneditable/undeletable once it appears in any `Submissio
 
 #### As-migrated state
 
-Populated by `backend/scripts/backfill-master-defect-list.ts` (one-off, kept as historical record):
+These tables were originally seeded by two one-off backfill scripts —
+`backfill-master-defect-list.ts` (Stage 1, the four registry tables below) and
+`backfill-profile-identity.ts` (Stage A0, the `Profile` table). **Both have since been
+deleted** — the first at Stage A, the second at Stage B. Each was spent after its single
+run, and once `PATCH /api/config` stopped writing `AppConfig.inspectionProfiles` (Stage A)
+they could only have read a frozen, stale blob; that column no longer exists at all
+(dropped at Stage B). Neither script should be resurrected — see the tagged commits
+`pre-inspectionprofiles-write-removal` and `pre-inspectionprofiles-column-drop` if the
+historical text is ever needed.
+
+Creation and maintenance now happens in exactly one place: `syncProfileRegistry()`
+(`backend/src/lib/profileRegistrySync.ts`), invoked by `PATCH /api/config` on every
+profile write. Row counts as migrated:
 
 | Table | Rows |
 |---|---|
