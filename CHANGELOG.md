@@ -69,6 +69,7 @@ or summarized in the split — this is the original content, relocated.
 - [§44](#44-master-defect-list--category-inventory--stage-3-management-surfaces--2026-09-03) — Master Defect List + Category Inventory — Stage 3 (Management Surfaces) — 2026-09-03
 - [§45](#45-patch-apiconfig-made-atomic--rejected-saves-now-audited--2026-09-03) — PATCH /api/config made atomic + rejected saves now audited — 2026-09-03
 - [§46](#46-category-becomes-name-only--evaluationmode-moves-to-profilecategory--2026-09-03) — Category becomes name-only; evaluationMode moves to ProfileCategory — 2026-09-03
+- [§47](#47-38-docs-audit-flagged-items-closed-ai_rulesmd-33-navigation_and_rbacmd-31-api_and_integration_specmd-1--2026-09-05) — #38 docs-audit flagged items closed: AI_RULES.md §3/§4, NAVIGATION_AND_RBAC.md §3.1, API_AND_INTEGRATION_SPEC.md §1 — 2026-09-05
 
 ---
 
@@ -6146,3 +6147,108 @@ longer supplied at category registration, because a registered category has no
 mode. `CAT-009` is a permanently skipped display code (a `ZZ Rework Probe`
 category created while verifying the live API was deleted; codes are never
 reused).
+
+## 47. #38 docs-audit flagged items closed: AI_RULES.md §3/§4, NAVIGATION_AND_RBAC.md §3.1, API_AND_INTEGRATION_SPEC.md §1 — 2026-09-05
+
+The #38 docs-audit pass (six-core-MD sweep triggered by the `AppConfig`
+legacy-JSON cleanup) surfaced three items it deliberately left unresolved
+rather than correcting unilaterally — two genuine judgment calls for Jerry,
+one gap needing checkable external facts. All three were closed in one
+session once Jerry supplied the missing decisions/facts.
+
+### AUDIT_REPORT.md #41 — endpoint documentation coverage gap
+
+Nine real, live backend endpoints existed in code but were never written up
+in `API_AND_INTEGRATION_SPEC.md`'s REST API ENDPOINTS section, and eight of
+them were also missing from `NAVIGATION_AND_RBAC.md` §5.1's session-gate
+table (`GET /api/access-log` was already correctly listed there — the
+original #41 flag was itself slightly wrong on that one point, corrected in
+the closing note rather than repeated).
+
+Added three new `API_AND_INTEGRATION_SPEC.md` §1 subsections, matching the
+existing Role/Payload/Response/Auth bullet structure, full shapes verified
+against the actual route handlers (not assumed):
+- **Access Log (Group A Route):** `GET /api/access-log`.
+- **Microsoft 365 User Administration (Group A Routes):** all six
+  `/api/m365-users*` routes (`GET`, `POST /invite`, `PATCH /:id`,
+  `PATCH /:id/deactivate`, `PATCH /:id/reactivate`, `DELETE /:id`) plus
+  `POST /api/auth/m365-login` and `POST /api/auth/claim-bootstrap-admin`.
+- **Dev Tools (Development Only):** `DELETE /api/dev/submissions/all` —
+  confirmed via `devTools.routes.ts` to be the *only* route under
+  `/api/dev/*`, so nothing else was missed.
+
+`NAVIGATION_AND_RBAC.md` §5.1 gained 8 new table rows for the same
+endpoints (minus `GET /api/access-log`, already present).
+
+Commit `8e59dba` (`AUDIT_REPORT.md` cites `006e676` — see the
+self-referencing-hash note below).
+
+### AUDIT_REPORT.md #39 — AI_RULES.md §3/§4 process-rule staleness
+
+Jerry decided both sub-issues previously flagged as ambiguous:
+
+- **§3 (WORKSPACE EXECUTION MODES):** removed the "retained for historical
+  context only" / Antigravity-retirement blockquote it incorrectly shared
+  with §2 — Plan Mode is real, current Claude Code behavior (the very Plan
+  Mode used to close out #41 minutes earlier in the same session), not a
+  retired Antigravity artifact. Rewrote the Plan/Execute Mode bullets to
+  describe the actual `EnterPlanMode`/`ExitPlanMode` tool mechanics: task-
+  shape-triggered entry (not a typed `/plan` command), read-only except for
+  the plan file while active, `ExitPlanMode` to request approval. §2's
+  identical blockquote was left untouched — correct there, since §2's
+  model-tier table did include real Antigravity-era choices. Also fixed a
+  now-stale cross-reference in the file header (line 5), which pointed to
+  "historical notes in §2 and §3" — corrected to just §2.
+- **§4 (renamed EXECUTION PROTOCOL, was "INCREMENTAL EXECUTION PROTOCOL /
+  Micro-Step Rule"):** replaced "One Complete File per Turn" plus
+  approve-before-every-next-file with the rule actually practiced across
+  recent sessions — batched multi-file turns are normal, and approval
+  gates are reserved for genuinely irreversible steps (schema drops,
+  `--accept-data-loss`, force-push), cross-referencing §5's Git Safety
+  rules instead of duplicating them. §5 already described this philosophy
+  correctly; §4 was the section that had drifted from it. "No Incomplete
+  Code Snippets" was kept unchanged — still accurate.
+
+Commit `2436a2a` (`AUDIT_REPORT.md` cites `f646211`).
+
+### AUDIT_REPORT.md #40 — Entra redirect URI protocol mismatch
+
+`NAVIGATION_AND_RBAC.md` §3.1 documented the dev redirect URI as
+`http://localhost:4001`; the dev server serves HTTPS only, but Entra's
+`http://localhost` exemption meant the doc *might* still have been
+technically correct — an external fact the codebase alone couldn't settle.
+Jerry checked the actual Azure Portal App Registration (Authentication →
+Single-page application): the real registered value is `https://
+localhost:4001` — the doc was genuinely wrong, not exempted.
+
+Corrected the line, and added a second registered redirect URI Jerry
+flagged from a prior IT correspondence — `https://10.10.110.31:4001` (LAN
+access, this laptop's reserved/static IP) — which was not stale but simply
+absent from all six core MDs, confirmed by a full grep before adding it.
+Both values were independently cross-checked against already-live code that
+already treated them as authoritative: `EnvironmentInfoPanel.tsx`'s
+`EXPECTED_REDIRECT_URIS` array and `vite.config.ts`'s mkcert
+HTTPS-for-both-hosts setup, both predating this fix and both agreeing with
+the Portal.
+
+Commit `5435266` (`AUDIT_REPORT.md` cites `af104d5`).
+
+### The self-referencing commit hash — an accepted, unavoidable quirk
+
+Each of these three close-outs cites its own commit's hash inside
+`AUDIT_REPORT.md`, in the same file that commit changes — a chicken-and-egg
+problem with no exact solution: editing the citation to match a hash always
+produces a *new* hash, confirmed empirically (one case cycled through four
+different hashes before the citation was accepted as one generation stale).
+The pattern settled on and reused for all three: write the entry, commit,
+read the real hash back, do **exactly one** amend to insert it, and stop —
+never loop chasing exact convergence. Each entry's cited hash is therefore
+one amend-generation behind the real final commit; this is expected, not a
+bug, should it ever be noticed later.
+
+### Verification
+
+Documentation-only across all three — no code, schema, or behavior
+changes. Backend `tsc --noEmit` clean, 24/24 tests; frontend `tsc -b`
+clean, `oxlint` 0 errors, 88/88 tests — run once at session close to
+confirm the doc-only diffs hadn't touched anything else.
