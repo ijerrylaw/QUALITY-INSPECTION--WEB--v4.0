@@ -39,6 +39,23 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
     by the single-tenant-per-deployment correction. No fix scheduled.
     → `CHANGELOG.md` §5.4, §9.2.
 
+43. **"ADD CATEGORY"/"ADD DEFECT" label reused for three distinct actions —
+    low priority, no fix scheduled.** The same label string now appears in
+    three separate UI locations with three different meanings: (1) the
+    DEFECT CATEGORY SETUP / DEFECT MANAGEMENT KANBAN header buttons, which
+    open the global Category Inventory / Master Defect List registry
+    (`QualityRules.tsx`, §3.5); (2) the per-profile dashed "+ ADD" buttons,
+    which adopt an existing global entry into the active profile
+    (`QualityRules.tsx`, §3.6); and (3) `CategoryPickerModal.tsx` /
+    `DefectPickerModal.tsx`'s own modal `<h3>` titles, which are the picker
+    UI opened by (2) but restate the same "ADD CATEGORY"/"ADD DEFECT"
+    wording rather than something scoped to "adopt". No functional bug —
+    each location's behavior is internally consistent and documented — but
+    the label collision could confuse an admin reading the UI cold. Not
+    scheduled for a fix; would need a decision on replacement wording for
+    at least one of the three uses.
+    → `CHANGELOG.md` §44 (Master Defect List + Category Inventory — Stage 3).
+
 24. **Pre-launch checklist item — dev-tools wipe, not an active fix.** A
     dev-only "Delete All Submissions" tool (`DELETE
     /api/dev/submissions/all`, `/dev-tools`) exists for test-data cleanup.
