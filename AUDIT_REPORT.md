@@ -50,24 +50,6 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
     keep-gated.
     → `CHANGELOG.md` §24.
 
-39. **Flagged, not resolved — AI_RULES.md §3/§4 process-rule ambiguity.**
-    Surfaced during the #38 docs-audit pass; deliberately not corrected
-    unilaterally since it's a judgment call about how work should proceed,
-    not a factual staleness.
-    - §3 ("WORKSPACE EXECUTION MODES") sits under a blockquote framing the
-      whole section as historical/Antigravity-only ("retained for historical
-      context only"), but its content ("Plan Mode... Claude will outline the
-      strategy and request approval") describes a mode Claude Code also has —
-      unclear whether §3 means to describe Claude Code's actual current Plan
-      Mode or is purely a historical Antigravity artifact.
-    - §4's "One Complete File per Turn" and "explicitly request user approval
-      before proceeding to the next turn or file" do not match observed
-      practice across this and recent sessions (multi-file batched edits per
-      turn, approval gates only at genuinely irreversible steps like a schema
-      drop, not after every file). Needs Jerry's call on whether §4 should be
-      updated to match actual practice or whether practice should tighten to
-      match §4.
-
 40. **Flagged, not resolved — Entra redirect URI protocol mismatch.**
     `NAVIGATION_AND_RBAC.md` §3.1 documents the dev Redirect URI as
     `http://localhost:4001`, but `frontend/vite.config.ts` serves the dev
@@ -161,6 +143,30 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
     content was flagged rather than resolved unilaterally — see #39
     (AI_RULES.md process-rule ambiguity), #40 (Entra redirect URI protocol
     question), #41 (endpoint documentation coverage gap).
+
+39. **RESOLVED 2026-09-05** (`f646211`). Jerry decided both
+    sub-issues flagged during the #38 docs-audit pass; rewrote
+    `AI_RULES.md` §3/§4 to match.
+    - **§3 (WORKSPACE EXECUTION MODES):** removed the "retained for
+      historical context only" / Antigravity-retirement blockquote —
+      wrong for this section specifically. Plan Mode is real, current
+      Claude Code behavior (the same Plan Mode this session used to
+      close out #41 just before this item), not a retired Antigravity
+      artifact. Rewrote the Plan/Execute Mode bullets to describe actual
+      current mechanics: Plan Mode entered via the `EnterPlanMode` tool
+      (task-shape-triggered, not a typed `/plan` command), read-only
+      except for the plan file, exited via `ExitPlanMode` for approval.
+      §2's identical blockquote is untouched — it's correct there (a
+      model-tier table that did include real Antigravity-era choices).
+    - **§4 (renamed EXECUTION PROTOCOL, was "INCREMENTAL EXECUTION
+      PROTOCOL / Micro-Step Rule"):** replaced "One Complete File per
+      Turn" + approve-before-every-next-file with the actually-practiced
+      rule: batched multi-file turns are normal, and approval gates are
+      reserved for genuinely irreversible steps (schema drops,
+      `--accept-data-loss`, force-push) — cross-referencing §5's Git
+      Safety rules rather than duplicating them. §5 already described
+      this philosophy correctly; §4 was the section that had drifted.
+      "No Incomplete Code Snippets" retained unchanged — still accurate.
 
 41. **RESOLVED 2026-09-05** (`006e676`). Wrote up the nine real, live
     endpoints flagged by the #38 docs-audit pass as absent from

@@ -2,7 +2,7 @@
 
 **Project:** QUALITY INSPECTION (WEB) v4.0  
 **Purpose:** Defines the strict behavioral constraints, model selection rules, and execution protocols for AI agents operating within this workspace.  
-**Platform Scope:** All development happens in Claude Code. (Antigravity was used during early prototyping — see the historical notes in §2 and §3.)
+**Platform Scope:** All development happens in Claude Code. (Antigravity was used during early prototyping — see the historical note in §2.)
 
 ---
 
@@ -35,18 +35,16 @@ Model selection is controlled at the **Claude Code app level** (model picker in 
 
 ## 3. WORKSPACE EXECUTION MODES
 
-> Antigravity was used during early prototyping but is no longer part of this project's workflow as of August 9, 2026. All development now happens in Claude Code. This section is retained for historical context only.
-
-* **Plan Mode:** Invoke with `/plan` or ask Claude to "think through the approach" before any file is touched. Claude will outline the strategy and request approval. No files are modified until the user explicitly says to proceed.
-* **Execute Mode:** The default mode. Claude uses Edit, Write, and Bash tools directly. For architectural changes, always enter Plan Mode first.
+* **Plan Mode:** Entered via the `EnterPlanMode` tool — triggered by task shape (a new feature, a multi-file change, an architectural decision, or anything with more than one reasonable approach) rather than typed by the user every time, though the user can also ask Claude to "think through the approach first." While in Plan Mode, only the plan file itself may be written; all other tools are read-only. Claude explores, drafts a concrete plan, and calls `ExitPlanMode` to present it for approval — no other files are touched until the user approves.
+* **Execute Mode:** The default mode once a plan is approved (or for tasks that didn't need one). Claude uses Edit, Write, and Bash tools directly, batching as many files as the task needs in one turn (§4).
 
 ---
 
-## 4. INCREMENTAL EXECUTION PROTOCOL (Micro-Step Rule)
+## 4. EXECUTION PROTOCOL
 
-* **One Complete File per Turn:** Edit or write strictly **one complete file per execution turn**.
+* **Batched multi-file turns are normal.** Edit or write as many files as a single coherent task needs within one execution turn — do not artificially split a change into one-file-per-turn steps. A turn ends when the task (or a sensible checkpoint within it) is actually done, not after each file.
 * **No Incomplete Code Snippets:** Deliver fully functional, standalone file modules. Do not output truncated code blocks or placeholders (e.g., `// ... rest of code`).
-* **Mandatory Build Verification & User Approval:** After completing each file edit, the AI MUST run a build or typecheck validation (`npm run build` or `tsc`), present a concise summary of changes and verification results, and explicitly request user approval before proceeding to the next turn or file.
+* **Approval gates are reserved for genuinely irreversible steps** — a schema drop, a `--accept-data-loss` operation, a force-push, or similarly hard-to-reverse action — not after every file or every turn. See §5's Git Safety rules for the specific gated actions. Routine multi-file edits, verified with a build/typecheck pass, do not require a stop-and-approve step before continuing.
 
 ---
 
