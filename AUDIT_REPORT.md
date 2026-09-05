@@ -176,6 +176,60 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
     (AI_RULES.md process-rule ambiguity), #40 (Entra redirect URI protocol
     question), #41 (endpoint documentation coverage gap).
 
+42. **RESOLVED 2026-09-05** (`127267f`, `7952b4b`, `14ff794`). Investigated
+    2026-09-05 against the real pending amendment on lot `A001A6247003`
+    (FACTORY STANDARD → MEDLINE) and found the diff view genuinely broken,
+    not merely confusing: it compared only raw `{defectId: count}` with zero
+    concept of AQL category membership, so a profile switch could silently
+    move `def_sagging` from an excluded RECORD ONLY category into MEDLINE's
+    BARRIER category — flipping BARRIER from PASS to FAIL — and orphan
+    `def_donning`/`def_odour` entirely (MEDLINE has no OTHERS-equivalent),
+    with **none of it visible anywhere in the diff**, even fully expanded,
+    because none of those three defects' recorded *counts* changed. Fixed in
+    three parts, verified against the same real amendment (read-only
+    throughout — never approved/rejected/mutated):
+    - **Part 1** (`127267f`) — `amendmentDiffLabels.ts`'s
+      `resolveCrossProfileDefectContext()` now resolves BOTH the before and
+      after profile's defect→category maps (the old function resolved only
+      one, always the proposed side); `detectDefectCategoryChange()` flags
+      three distinct, separately-badged cases in `AmendmentDiffView.tsx` —
+      `'moved'`/`'evalModeChanged'` (Cyan, informational) and `'orphaned'`
+      (Amber, Action Required) — and a defect-level row now stays visible
+      whenever EITHER its count OR its category assignment changed, not
+      count alone. Caught mid-build: `GET /api/config` actually emits the
+      legacy `aql`/`evalMode` field names, not the canonical
+      `aqlLevel`/`evaluationMode` — `buildDefectCategoryMap()` checks both
+      spellings now. New `RecomputedVerdictSummary.tsx` surfaces
+      `AmendmentLog.recomputedVerdict`/`recomputedCategoryResults` — already
+      computed correctly at draft time, never rendered anywhere before this.
+    - **Part 2** (`7952b4b`) — `evaluateAQLVerdict()` now warns when a
+      recorded defect count matches no category in the active profile at
+      all, built from every category regardless of evaluationMode
+      (specifically NOT just the categories that reach a grading branch —
+      the naive version misfired on every normal RECORD ONLY category before
+      this distinction was caught and fixed pre-ship). Grading behavior
+      unchanged; visibility only.
+    - **Part 3** (`14ff794`) — test coverage for both parts, fixtures
+      modeled on the real category/defect ids above, not invented data.
+    Verification: 88/88 regression cases byte-identical (frozen dev.db copy,
+    proves Part 2 is a pure no-op for grading); backend 24/24 tests, frontend
+    88/88 tests, both tsc clean, oxlint 0 errors. The Part 2 warning also
+    fired live and correctly during the regression replay itself — 12 times,
+    every one for `def_donning`/`def_odour` specifically, zero false
+    positives for any RECORD ONLY-category defect across the full real
+    dataset. Final check: pulled the REAL `GET /api/config` response and the
+    real amendment's before/after values (read-only) and ran them through
+    the actual shipped `resolveCrossProfileDefectContext()`/
+    `detectDefectCategoryChange()` (not reconstructed fixtures) — confirmed
+    byte-for-byte: `def_sagging` → `'moved'` (RECORD ONLY → BARRIER),
+    `def_donning`/`def_odour` → `'orphaned'`, both resolving to real names
+    rather than raw ids. Full live-UI click-through in ApprovalsQueue was not
+    performed — Group A/B routes require M365 SSO, which cannot be completed
+    in this session's sandboxed browser; open if Jerry wants a visual
+    confirmation on top of the data-level verification above. The real
+    `A001A6247003` amendment itself was never mutated — still
+    `PENDING_APPROVAL`, exactly as found.
+
 20. **RESOLVED 2026-09-02 — live-verified by Jerry** (`75b93fd`). Root
     cause was not a missing feature: `PAGE_SIZE = 50` exceeded the actual
     row count (21 pending amendments), so the server correctly returned
