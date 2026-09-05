@@ -54,6 +54,38 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
 
 ## Resolved (summary — full detail in CHANGELOG.md)
 
+37. **RESOLVED 2026-09-05** (`dd27e5d`, `ac5a44a` + two `chore(dev.db)`
+    checkpoints). Discovery found two independent dead/dying groups of
+    `AppConfig` JSON columns: `aqlCategories`/`defectDefinitions` (written
+    every PATCH, never meaningfully read — every real reader consumes the
+    per-profile nested field reconstructed from the Master Defect List
+    registry instead) and `productCodes`/`productMatrixConfig`/
+    `productProfileMap` (writes already frozen at B6; read only by
+    `resolveProductRegistry()`'s unmigrated-database fallback). Fixed in two
+    parts, same shape as the `inspectionProfiles` Stage A/B arc:
+    - **Part 1** — dropped `aqlCategories`/`defectDefinitions` from
+      `config.routes.ts`'s `JSON_FIELDS`. Columns left in place, frozen (both
+      already `"[]"`); their schema-column drop stays a separately-scoped
+      future stage. Live PATCH proof against an isolated `dev.db` copy: a
+      poisoned payload for both fields left the stored columns byte-identical
+      while the real per-profile reconstruction (registry-backed) was
+      unaffected.
+    - **Part 2** — confirmed the unmigrated-database fallback in
+      `resolveProductRegistry()` (`productEntry.ts`) was no longer needed
+      (every live deployment had migrated onto `AppConfig.products`),
+      removed it, and dropped all three legacy columns via `prisma db push
+      --accept-data-loss` (27 → 24 surviving `AppConfig` columns). Rollback
+      tag `pre-appconfig-legacy-cleanup` pushed beforehand.
+    API contract unchanged throughout — `PATCH`/`GET /api/config` still
+    accept/return all five field names; only storage moved. Verification:
+    88/88 regression cases byte-identical (proven twice for Part 2 — frozen
+    pre-drop copy and live post-drop `dev.db`); backend tsc + 20/20 tests,
+    frontend tsc + 74/74 tests, oxlint 0 errors; `PRAGMA integrity_check`/
+    `foreign_key_check` clean; zero remaining references to the three dropped
+    fields in the regenerated Prisma client. Doc corrections: `schema.prisma`
+    tombstone comments for both groups, `DATA_SCHEMAS_AND_TYPES.md` §3.1's
+    now-false fallback claim corrected.
+
 20. **RESOLVED 2026-09-02 — live-verified by Jerry** (`75b93fd`). Root
     cause was not a missing feature: `PAGE_SIZE = 50` exceeded the actual
     row count (21 pending amendments), so the server correctly returned
