@@ -53,16 +53,19 @@ const router = Router();
  *
  * `aqlCategories` / `defectDefinitions` are now ABSENT for the same reason as
  * `inspectionProfiles` above — same shape of cleanup, one stage at a time.
- * These are the root-level legacy columns (AUDIT_REPORT.md #37): every real
- * reader consumes the per-profile nested `profile.aqlCategories` /
+ * These were the root-level legacy columns (AUDIT_REPORT.md #37 Part 1): every
+ * real reader consumes the per-profile nested `profile.aqlCategories` /
  * `.defectDefinitions`, reconstructed from the Category/Defect/ProfileCategory
- * registry by reconstructInspectionProfiles() above — nothing has read the
+ * registry by reconstructInspectionProfiles() above — nothing had read the
  * root-level columns since the Master Defect List Stage 2 engine cutover.
- * Left in place and frozen at their last-written value (both already `[]`);
- * schema-column drop is a separately-scoped future stage. PATCH still ACCEPTS
- * both key names in the request body (silently ignored, matching how any
- * unrecognized payload key behaves) and GET still RETURNS them, unchanged,
- * straight off the frozen columns (`config.routes.ts`'s `formatAppConfig()`).
+ * The columns themselves were later DROPPED from the schema entirely
+ * (AUDIT_REPORT.md #37 Part 2 / Stage B) once this write-path removal had run
+ * for a full cycle with no regression. PATCH still ACCEPTS both key names in
+ * the request body (silently ignored, matching how any unrecognized payload
+ * key behaves) and GET still RETURNS them, unchanged, hardcoded to `[]` in
+ * `formatAppConfig()` below — every observation of these columns before the
+ * drop found them at `"[]"`, so the hardcoded value matches what a read would
+ * have returned regardless.
  */
 const JSON_FIELDS = [
   'lines',
@@ -356,8 +359,12 @@ export async function formatAppConfig(config: AppConfig) {
     dimensions: safeParseJSON<any[]>(config.dimensions, []),
     targetWeight: safeParseJSON<{ target: number; tolerance: number }>(config.targetWeight, { target: 0, tolerance: 0 }),
     productMatrixConfig: registry.productMatrixConfig,
-    aqlCategories: safeParseJSON<any[]>(config.aqlCategories, []),
-    defectDefinitions: safeParseJSON<any[]>(config.defectDefinitions, []),
+    // Hardcoded — see the JSON_FIELDS docblock above. The columns these once
+    // read are dropped (AUDIT_REPORT.md #37 Part 2); nothing has ever read
+    // this response key, and every observation of the columns before the drop
+    // found them empty, so `[]` is not a behavior change for any caller.
+    aqlCategories: [] as any[],
+    defectDefinitions: [] as any[],
     inspectionProfiles: await reconstructInspectionProfiles(),
     /**
      * The consolidated per-product-code structure — now the read source of

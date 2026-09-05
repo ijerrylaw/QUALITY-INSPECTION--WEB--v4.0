@@ -425,12 +425,20 @@ model AppConfig {
   // --- Dynamic Configuration Data ---
   dimensions          String   @default("[]")
   targetWeight        String   @default("{\"target\":0,\"tolerance\":0}")
-  // `aqlCategories`/`defectDefinitions` write path retired (AUDIT_REPORT.md
-  // #37 Part 1) — both frozen at "[]". Columns intentionally left in place;
-  // their drop is a separately-scoped future stage, unlike the three product
-  // columns below (dropped now, Part 2 of the same audit item).
-  aqlCategories       String   @default("[]")
-  defectDefinitions   String   @default("[]")
+  // `aqlCategories String @default("[]")` and `defectDefinitions String
+  // @default("[]")` were DROPPED here (AUDIT_REPORT.md #37 Stage B). Every
+  // real reader had consumed the per-profile nested `profile.aqlCategories`/
+  // `.defectDefinitions` since the Master Defect List Stage 2 engine cutover
+  // — reconstructed from the Category/Defect/ProfileCategory registry by
+  // reconstructInspectionProfiles() in routes/config.routes.ts — and nothing
+  // had written these two root-level columns since #37 Part 1 removed them
+  // from JSON_FIELDS. Both were observed at "[]" for their entire recorded
+  // history, so dropping them changed nothing any caller could observe.
+  //
+  // The API contract did NOT move: PATCH /api/config still ACCEPTS both key
+  // names in the request body (silently ignored) and GET /api/config still
+  // RETURNS both, hardcoded to `[]` in formatAppConfig() — the same value a
+  // column read always produced. Only the storage columns are gone.
   // `inspectionProfiles String @default("[]")` was DROPPED here at Stage B.
   // Profile IDENTITY now lives in the Profile model; grading RULES live in
   // Category / Defect / ProfileCategory / ProfileCategoryDefect. Nothing had
