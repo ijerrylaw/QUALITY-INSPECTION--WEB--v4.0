@@ -401,6 +401,18 @@ export function evaluateAQLVerdict(params: EvaluateAQLVerdictParams): VerdictRes
   const categoryResults: CategoryResult[] = [];
   let overallPassed = true;
 
+  // Defects covered by ANY category in this profile, regardless of that
+  // category's evaluationMode — a RECORD_ONLY category (evalMode '') still
+  // legitimately claims its defects on purpose (see the `continue` below);
+  // "orphaned" below means no category claims this defect at all, not "the
+  // category that claims it happens to skip grading". Built from the full
+  // category list up front so the per-category loop's `continue` can't
+  // affect what counts as covered (AUDIT_REPORT.md #42).
+  const categoryIds = new Set(categories.map((c) => c.id));
+  const coveredDefectIds = new Set(
+    defectDefinitions.filter((d) => categoryIds.has(d.categoryId)).map((d) => d.id),
+  );
+
   for (const category of categories) {
     // Skip informational-only rows (empty evaluationMode)
     if (!category.evaluationMode) continue;
@@ -506,6 +518,22 @@ export function evaluateAQLVerdict(params: EvaluateAQLVerdictParams): VerdictRes
         failingDefects,
         actualAqlAchieved: findActualAqlAchieved(sampleSize, maxCount),
       });
+    }
+  }
+
+  // Warn on any recorded defect count this profile's categories never
+  // referenced — e.g. a cross-profile amendment whose target profile has no
+  // category for a defect the original profile did (AUDIT_REPORT.md #42).
+  // Grading behavior is unchanged: the count was already silently excluded
+  // by construction (no category's filter above ever matched it) — this
+  // only adds visibility, consistent with how an unresolved profileId
+  // already logs (VerdictProfileNotFoundError's caller).
+  for (const defectId of Object.keys(defectCounts)) {
+    if (!coveredDefectIds.has(defectId)) {
+      console.warn(
+        `[evaluateAQLVerdict] Defect '${defectId}' (count=${defectCounts[defectId]}) has no matching ` +
+        'category in the active profile — excluded from grading entirely, not just this category.',
+      );
     }
   }
 
