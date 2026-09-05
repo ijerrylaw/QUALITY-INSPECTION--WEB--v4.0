@@ -30,6 +30,7 @@ Raw hex codes are strictly prohibited. Utilize the Tailwind CSS v4 variables def
   - **Tier 1 (Outer Cards):** `bg-canvas border border-gray-800`
   - **Tier 2 (Inner Sections):** `bg-surface border border-gray-700/50`
   - **Tier 3 (Deeply Nested Items / Rows):** `bg-canvas border border-gray-700`
+  - **Tier 3 — Dimmed/Embedded Variant:** `bg-canvas/40 border border-gray-700` — same Tier 3 border, with the canvas background dropped to 40% opacity for a Tier 3 block embedded inside an already-dark context (e.g. `RecomputedVerdictSummary.tsx`'s panel inside the Approvals Queue amendment modal), so it reads as recessed rather than competing with the modal's own background.
 
 ### 1.3 Typography & Strict Font Protocol
 * **The Golden Rule:**

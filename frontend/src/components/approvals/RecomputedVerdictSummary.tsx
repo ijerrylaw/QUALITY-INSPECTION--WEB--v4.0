@@ -54,7 +54,7 @@ function parseCategoryResults(raw: string | null): RecomputedCategoryResult[] {
 export function RecomputedVerdictSummary({ log }: { log: RecomputedVerdictLog }) {
   if (!log.recomputedVerdict) {
     return (
-      <div className="p-4 border border-amber-500/30 bg-amber-500/5 rounded-lg flex items-start gap-3">
+      <div className="p-3 rounded-lg border border-l-4 bg-amber-500/5 border-amber-500/30 border-l-amber-500 text-amber-400 flex gap-3">
         <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" strokeWidth={2} />
         <p className="text-xs text-amber-400/90">
           The server could not compute a recomputed-verdict preview for this amendment at draft time
