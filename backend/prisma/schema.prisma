@@ -374,8 +374,9 @@ model AppConfig {
   id                  String   @id @default("1")
 
   // --- Simple string/number array lists (stored as JSON) ---
-  /// JSON: string[] — e.g., ['N035SKB-OC-24FT', 'N100FNB-EC-9.5IN']
-  productCodes        String   @default("[]")
+  // `productCodes String @default("[]")` was DROPPED here at AUDIT_REPORT.md
+  // #37 Part 2, alongside productMatrixConfig and productProfileMap below —
+  // see the tombstone comment above the `products` field for the full ladder.
 
   /// JSON: { id: string; name: string }[]
   lines               String   @default("[]")
@@ -391,10 +392,6 @@ model AppConfig {
 
   /// JSON: number[] — valid AQL sample sizes, e.g. [13, 20, 32, 50, 80, 125, 200]
   sampleSizes         String   @default("[]")
-
-  // --- Product to Profile Mapping ---
-  /// JSON: Record<productCode, profileId>
-  productProfileMap   String   @default("{}")
 
   // --- Branding (Blueprint Section 8: Dynamic White-Label) ---
   /// Company display name, e.g., 'GLOVE CORP'
@@ -428,7 +425,10 @@ model AppConfig {
   // --- Dynamic Configuration Data ---
   dimensions          String   @default("[]")
   targetWeight        String   @default("{\"target\":0,\"tolerance\":0}")
-  productMatrixConfig String   @default("{}")
+  // `aqlCategories`/`defectDefinitions` write path retired (AUDIT_REPORT.md
+  // #37 Part 1) — both frozen at "[]". Columns intentionally left in place;
+  // their drop is a separately-scoped future stage, unlike the three product
+  // columns below (dropped now, Part 2 of the same audit item).
   aqlCategories       String   @default("[]")
   defectDefinitions   String   @default("[]")
   // `inspectionProfiles String @default("[]")` was DROPPED here at Stage B.
@@ -443,15 +443,28 @@ model AppConfig {
   // reconstructInspectionProfiles() in routes/config.routes.ts. Only the
   // storage column is gone.
 
-  // --- Consolidated Product Record (additive, Session A — see Product Engine
-  // discovery report §2/§5 and the productProfileMap corrupted-key incident
-  // in CHANGELOG.md). Migrates the three independently-keyed structures
-  // above (productCodes / productMatrixConfig / productProfileMap) plus the
-  // six SKU dictionary attributes (previously discarded after composing the
-  // code string) into ONE per-code record, eliminating the three-way drift
-  // risk. Additive only: nothing reads from this field yet — the three
-  // structures above remain the live source of truth until a later session
-  // rewires call sites onto this one and removes them. ---
+  // --- Consolidated Product Record — see Product Engine discovery report
+  // §2/§5 and the productProfileMap corrupted-key incident in CHANGELOG.md.
+  // Consolidates the three independently-keyed structures productCodes /
+  // productMatrixConfig / productProfileMap, plus the six SKU dictionary
+  // attributes (previously discarded after composing the code string), into
+  // ONE per-code record, eliminating the three-way drift risk those separate
+  // keys carried.
+  //
+  // The cutover ran in stages: additive (Session A) → admin/config surface's
+  // reads moved onto it (B3) → the grading engine's reads moved onto it too,
+  // through the shared resolveProductRegistry() (B4) → it became the only
+  // column WRITTEN, with the three legacy columns frozen at their B6-era
+  // values and read only by resolveProductRegistry()'s unmigrated-database
+  // fallback (B6) → that fallback was confirmed no longer needed (every real
+  // deployment had migrated onto `products`) and removed, and the three
+  // legacy columns (productCodes, productProfileMap, productMatrixConfig)
+  // were DROPPED here (AUDIT_REPORT.md #37 Part 2).
+  //
+  // The API contract did NOT move: PATCH /api/config still ACCEPTS the three
+  // legacy field names in the request body, and GET /api/config still RETURNS
+  // them, projected out of `products` by deriveLegacyStructures() in
+  // lib/productEntry.ts. Only where they land in storage has changed.
   /// JSON: Record<productCode, ProductEntry> — see DATA_SCHEMAS_AND_TYPES.md §3.
   products            String   @default("{}")
 

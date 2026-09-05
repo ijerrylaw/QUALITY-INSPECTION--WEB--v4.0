@@ -598,12 +598,17 @@ superseded Session-A state:
   `lib/productEntry.ts`), so the admin UI and the verdict engine can never
   disagree about what a code's matrix says.
 * **B6** — `products` became the only column written. The three legacy columns
-  are frozen at their B6-era values and are read by exactly one thing:
+  were frozen at their B6-era values, read by exactly one thing:
   `resolveProductRegistry()`'s unmigrated-database fallback.
+* **AUDIT_REPORT.md #37 Part 2 (2026-09-05)** — that fallback was confirmed no
+  longer needed (every real deployment had migrated onto `products`) and
+  removed, and the three legacy columns (`productCodes`, `productMatrixConfig`,
+  `productProfileMap`) were dropped from the schema entirely.
 
 The API contract is unchanged and is NOT a guide to storage: `PATCH
 /api/config` still accepts the three legacy field names, and `GET /api/config`
-still returns them — as projections derived from `products`.
+still returns them — as projections derived from `products`
+(`deriveLegacyStructures()` in `lib/productEntry.ts`).
 
 ```typescript
 export interface AppConfig {

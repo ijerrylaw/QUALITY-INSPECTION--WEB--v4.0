@@ -10,8 +10,10 @@
  * AND write target for the product registry: B3 moved the admin/config
  * surface's reads onto it, B4 moved the grading engine's (both through
  * resolveProductRegistry() below), and B6 made it the only column written.
- * The three legacy columns are frozen and are read by exactly one thing —
- * that resolver's unmigrated-database fallback.
+ * The three legacy columns were frozen after B6, then DROPPED from the schema
+ * entirely (AUDIT_REPORT.md #37 Part 2) once resolveProductRegistry()'s
+ * unmigrated-database fallback — their last reader — was confirmed no longer
+ * needed (every real deployment had long since migrated onto `products`).
  *
  * Mirrors DATA_SCHEMAS_AND_TYPES.md §3's ProductConfig/SizeConfig/
  * ProductDimensionDef shapes exactly — kept intentionally separate from
@@ -263,12 +265,9 @@ export interface LegacyProductStructures {
  *     `code: null` — matching the legacy structure's own convention of only
  *     holding codes that actually have a profile linked.
  */
-/** The raw AppConfig JSON columns this module needs. Structural, not Prisma-typed. */
+/** The raw AppConfig JSON column this module needs. Structural, not Prisma-typed. */
 export interface RawProductColumns {
   products?: string | null;
-  productCodes?: string | null;
-  productMatrixConfig?: string | null;
-  productProfileMap?: string | null;
 }
 
 function parseJSON<T>(raw: string | null | undefined, fallback: T): T {
@@ -286,50 +285,24 @@ function parseJSON<T>(raw: string | null | undefined, fallback: T): T {
  * engine (resolveVerdict.ts, cut over in B4).
  *
  * Promoted here from config.routes.ts in B4 precisely so both callers share
- * one implementation and one fallback policy. If the admin UI and the grading
- * engine could ever disagree about which codes exist or what a code's matrix
- * says, that disagreement would be invisible in the UI and would surface only
- * as a wrong pass/fail — exactly the failure mode this consolidation exists to
+ * one implementation. If the admin UI and the grading engine could ever
+ * disagree about which codes exist or what a code's matrix says, that
+ * disagreement would be invisible in the UI and would surface only as a wrong
+ * pass/fail — exactly the failure mode this consolidation exists to
  * eliminate.
  *
- * SAFETY FALLBACK: if `products` is empty while the legacy columns still hold
- * codes, this is an unmigrated database (e.g. a dev.db restored from before
- * Session A, which added the column). Reading `products` there would silently
- * report an EMPTY registry — which for the admin UI means every code vanishing,
- * and for the GRADING engine means every dimension gate failing closed with
- * VerdictNoUsableDimensionConfigError. Falls back to the legacy columns and
- * logs loudly instead.
- *
- * B6 makes this fallback MORE load-bearing, not less. The legacy columns are no
- * longer written (they are frozen at their B6-era values), and the manual
- * migrate/verify scripts were deleted, so this is now the ONLY recovery path
- * for such a database. It is also self-healing: the fallback values feed
- * buildProductsMap() on the next PATCH that touches the product registry, which
- * persists them into `products` and retires the fallback permanently. Until
- * that save happens, reads keep working off the frozen columns.
- *
- * The fallback is deliberately all-or-nothing on that one unambiguous signal:
- * it never merges per-code, because a per-code fallback would paper over
- * exactly the real drift this cutover needs to surface.
+ * Until AUDIT_REPORT.md #37 Part 2, this also carried an unmigrated-database
+ * fallback onto the three legacy columns (productCodes/productMatrixConfig/
+ * productProfileMap) for a `products`-empty database — e.g. a dev.db restored
+ * from before Session A, which added the column. That fallback's last real
+ * use case never recurred once every live deployment had migrated onto
+ * `products` (confirmed 2026-09-05), and the columns it read were dropped
+ * from the schema in the same pass — so the fallback branch and the three
+ * legacy columns went together. `products` is now unconditionally the only
+ * source this resolver reads.
  */
 export function resolveProductRegistry(config: RawProductColumns): LegacyProductStructures {
   const products = parseJSON<ProductsMap>(config.products, {});
-  const legacyCodes = parseJSON<string[]>(config.productCodes, []);
-
-  if (Object.keys(products).length === 0 && legacyCodes.length > 0) {
-    console.warn(
-      `[productRegistry] AppConfig.products is empty but the frozen productCodes column holds ${legacyCodes.length} code(s) — ` +
-      'falling back to the legacy columns. This database predates the `products` column (Session A) ' +
-      'or was never migrated. No action needed: the next configuration save will persist this ' +
-      'registry into `products` and the fallback will stop firing.',
-    );
-    return {
-      productCodes: legacyCodes,
-      productMatrixConfig: parseJSON<Record<string, ProductConfig>>(config.productMatrixConfig, {}),
-      productProfileMap: parseJSON<Record<string, string>>(config.productProfileMap, {}),
-    };
-  }
-
   return deriveLegacyStructures(products);
 }
 

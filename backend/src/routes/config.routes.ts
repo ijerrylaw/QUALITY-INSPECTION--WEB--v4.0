@@ -19,7 +19,7 @@ import { requireRole } from '../middleware/auth';
 import { logAccess } from '../lib/accessLog';
 // resolveProductRegistry lives in lib/productEntry.ts as of B4 — shared with
 // the grading engine (resolveVerdict.ts) so both read the registry through
-// exactly one implementation and one fallback policy.
+// exactly one implementation.
 import { buildProductsMap, resolveProductRegistry } from '../lib/productEntry';
 import type { ProductsMap, ProductConfig } from '../lib/productEntry';
 
@@ -29,12 +29,12 @@ const router = Router();
  * JSON field names on AppConfig model that store arrays or objects.
  *
  * B6 — productCodes / productMatrixConfig / productProfileMap are deliberately
- * ABSENT from this list. Those three DB columns are no longer written: the
- * consolidated `products` column is now the sole write target for the product
- * registry (see the PATCH handler below). Their columns are left in place and
- * frozen at whatever value they held when B6 shipped — no schema migration —
- * and nothing reads them any more except resolveProductRegistry()'s
- * unmigrated-database fallback.
+ * ABSENT from this list. Those three DB columns stopped being written at B6:
+ * the consolidated `products` column is the sole write target for the product
+ * registry (see the PATCH handler below). The columns themselves were later
+ * DROPPED from the schema entirely (AUDIT_REPORT.md #37 Part 2) once
+ * resolveProductRegistry()'s unmigrated-database fallback — their last
+ * reader — was confirmed no longer needed and removed.
  *
  * The API contract is unchanged: PATCH still ACCEPTS those three field names in
  * the request body, and GET still RETURNS them (projected out of `products`).
@@ -513,10 +513,10 @@ router.patch('/', requireRole('MANAGER', 'ADMIN'), async (req: Request, res: Res
       ? await prisma.appConfig.findUnique({ where: { id: '1' } })
       : null;
 
-    // The CURRENT registry, read through `products` (same resolver, and
-    // therefore same unmigrated-database fallback, as GET /api/config). Empty
-    // defaults rather than null so the first-run create path needs no special
-    // casing — equivalent to the `?? []` / `?? {}` the checks used before.
+    // The CURRENT registry, read through `products` (same resolver as
+    // GET /api/config). Empty defaults rather than null so the first-run
+    // create path needs no special casing — equivalent to the `?? []` / `?? {}`
+    // the checks used before.
     const currentRegistry = currentConfig
       ? resolveProductRegistry(currentConfig)
       : { productCodes: [], productMatrixConfig: {}, productProfileMap: {} };
@@ -743,8 +743,9 @@ router.patch('/', requireRole('MANAGER', 'ADMIN'), async (req: Request, res: Res
     // is stored.
     //
     // productCodes / productMatrixConfig / productProfileMap are intentionally
-    // NOT written: they are absent from JSON_FIELDS, so their columns keep
-    // whatever value they held when B6 shipped and are frozen from here on.
+    // NOT written: the columns themselves were dropped from the schema
+    // (AUDIT_REPORT.md #37 Part 2) — `products` is the only storage for the
+    // product registry now.
     if (incomingProducts) {
       updateData['products'] = JSON.stringify(incomingProducts);
     }
