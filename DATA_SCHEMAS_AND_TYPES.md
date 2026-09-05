@@ -68,11 +68,11 @@ export interface Submission {
   totalCarton?: number;
   gloveWeight?: number;
   /**
-   * Opaque historical reference to whichever AppConfig.inspectionProfiles[]
-   * entry was in effect at submit time. NOT a foreign key — InspectionProfile
-   * was removed as a relational model (§2.1); this is a plain string checked
-   * against AppConfig.inspectionProfiles/the 'prof_default' sentinel, not a
-   * Prisma relation.
+   * Opaque historical reference to whichever profile was in effect at submit
+   * time. NOT a foreign key — this is a plain string, sanity-checked against
+   * the `Profile` table (identity as of Stage A0)/the 'prof_default' sentinel,
+   * not a Prisma relation on Submission (AUDIT_REPORT.md #37; see
+   * `submissions.routes.ts`'s `isKnownProfileId()`).
    * NULLABLE — submissions made before a profile was linked, when the wizard
    * sends no profileId, or when the id doesn't resolve, will have this as
    * null. The backend falls back to the GLOBAL STANDARD (DEFAULT) profile
@@ -232,18 +232,18 @@ export interface AmendmentLog {
 
 ### 2.1 AQL Rules Storage & Engine Normalization
 
-> **⚠ Superseded for grading (Stage 2, 2026-09-03):** the AQL engine no longer reads categories or defects from this section's JSON — it reads them from the global Master Defect List / Category Inventory tables described in **§2.2**. What remains true here: the JSON is still what `PATCH /api/config` stores and what the admin UI writes, it still carries profile **identity** (id / name / isDefault), and `PATCH /api/config` re-projects it into the §2.2 tables on every write so the two cannot drift. The `AQLCategory` / `DefectDefinition` / `InspectionProfile` interfaces below still describe that stored JSON accurately. The one thing that changed shape is the engine-side defect link — see §2.2's "Engine input shape".
+> **⚠ Superseded for both storage and grading (Stage 2 → A0 → A → B, 2026-09-03 → 2026-09-05, AUDIT_REPORT.md #37):** there is no longer any `AppConfig.inspectionProfiles` JSON column — it was frozen at Stage A (write path removed) and dropped from the schema entirely at Stage B. The AQL engine reads categories/defects from the global Master Defect List / Category Inventory tables described in **§2.2**, and profile **identity** (id / name / isDefault / order) lives on the `Profile` model (§2.2's "As-migrated state"). **The API contract did NOT move**: `PATCH /api/config` still ACCEPTS an `inspectionProfiles` key in this exact shape — it is `syncProfileRegistry()`'s input, projected into `Profile` + the §2.2 tables — and `GET /api/config` still RETURNS `inspectionProfiles` in this exact shape, reconstructed from `Profile` + §2.2 by `reconstructInspectionProfiles()` (`backend/src/routes/config.routes.ts`). The interfaces below describe that payload/response shape, not a stored blob.
 
-> **Important:** `InspectionProfile`, `AQLCategory`, and `DefectDefinition` are **not** Prisma models — those tables were removed after confirming they sat fully unused (0 rows) since real profile data has only ever lived in `AppConfig.inspectionProfiles` JSON (see `AUDIT_REPORT.md` §9.3 Option B / §10 Part 3). `AppConfig.inspectionProfiles` (a JSON-serialized array on the `AppConfig` singleton row) is the single source of truth. The interfaces below describe that JSON shape, plus the internal shape `evaluateAQLVerdict()` (the pure verdict engine) actually operates on — the two differ on one field name, reconciled by normalization at resolve time.
+> **Important:** `InspectionProfile`, `AQLCategory`, and `DefectDefinition` are **not** Prisma models. The shapes below are a pure wire contract — what `PATCH /api/config` accepts and what `GET /api/config` returns — reconstructed on every read from `Profile` + the §2.2 registry tables, never stored verbatim anywhere.
 >
-> Specifically: defect definitions in the stored JSON use `categoryId` as the linking field, but the engine expects `currentClass`. `resolveVerdict()` normalizes `categoryId → currentClass` (falling back to `categoryId` for `defaultClass` too) before calling the engine — see `backend/src/engine/resolveVerdict.ts`.
+> The one thing that changed shape since this contract was first documented: `DefectDefinition.currentClass`/`.defaultClass` are **gone from the engine and the reconstructed response** — §2.2's "Engine input shape" explains why the name-OR-id join they supported was removed at Stage 2. `categoryId` is now the sole, strict link, on both the wire shape and the engine's own `DefectDefinition` type (`backend/src/engine/aqlEvaluator.ts`). The frontend's local `DefectDefinition` type (`ConfigContext.tsx`) still carries `currentClass`/`defaultClass` as optional fields for lenient typing, but nothing reads or writes them.
 
 ```typescript
 export type EvaluationMode = 'CUMULATIVE' | 'GRANULAR' | 'N/A' | '';
 
 /**
- * AQLCategory — the shape stored in AppConfig.inspectionProfiles JSON and
- * consumed directly by the verdict engine (no field renaming needed for this type).
+ * AQLCategory — the shape PATCH /api/config accepts and GET /api/config
+ * returns for one profile's category list (no field renaming needed for this type).
  * evaluationMode may be empty/unset for a category not yet configured in Configuration Control.
  */
 export interface AQLCategory {
@@ -259,24 +259,17 @@ export interface AQLCategory {
 }
 
 /**
- * DefectDefinition — two field naming conventions coexist:
- *
- * Engine-normalized shape (what evaluateAQLVerdict() actually reads):
- *   currentClass  — the category this defect is assigned to (matches AQLCategory.name or .id)
- *   defaultClass  — the factory-default category before any profile override
- *
- * AppConfig JSON storage shape (what's actually persisted in AppConfig.inspectionProfiles):
- *   categoryId    — serves the same linking role as currentClass
- *
- * resolveVerdict() normalizes categoryId → currentClass/defaultClass before
- * calling the engine — see backend/src/engine/resolveVerdict.ts.
+ * DefectDefinition — the shape PATCH /api/config accepts and GET /api/config
+ * returns, and (as of Stage 2) also the engine's own internal shape — all
+ * three now agree on one field. `categoryId` is a strict id link: the engine
+ * resolves a category's members by `d.categoryId === category.id`, no name
+ * fallback. See §2.2's "Engine input shape" for why the old `currentClass`
+ * name-OR-id join and `defaultClass` were both removed.
  */
 export interface DefectDefinition {
   id: string;
   name: string;
-  currentClass: string;   // Engine field: links defect to its parent AQLCategory
-  defaultClass: string;   // Engine field: factory default before profile override
-  categoryId?: string;    // AppConfig JSON storage field: equivalent to currentClass
+  categoryId: string;      // Strict id link to its parent AQLCategory
 }
 
 export interface InspectionProfile {
@@ -293,9 +286,11 @@ defect's `name` must be unique within its own `InspectionProfile` — the same
 name in a *different* profile is not a conflict. Enforced in
 `QualityRules.tsx` (`findDuplicateDefectName()`), case-insensitive with
 internal whitespace collapsed, applied on both Add and Rename. There is no
-corresponding backend check — `PATCH /api/config` treats
-`inspectionProfiles` as a serialize-passthrough JSON field with no
-validation of its own, so this constraint exists only in the admin UI.
+corresponding backend check on this specific rule — `PATCH /api/config`
+projects `inspectionProfiles` into `Profile` + the §2.2 tables via
+`syncProfileRegistry()`, which enforces its own invariants (e.g. global name
+uniqueness on `Defect`/`Category`, §2.2) but not per-profile same-name
+rejection, so this constraint exists only in the admin UI.
 
 **Duplicate Profile always mints fresh ids.** `handleDuplicateProfile`
 (`QualityRules.tsx`) never copies the source profile's category/defect ids
@@ -312,7 +307,7 @@ though every id string changed. The source profile itself is never mutated.
 
 ### 2.2 Master Defect List & Category Inventory (LIVE for grading as of Stage 2)
 
-> **Status:** these four models are what the AQL engine grades from. `resolveVerdict.ts` loads a profile's categories, AQL levels, and defect membership through `backend/src/engine/profileRules.ts`. Still on the JSON side: profile identity, and the admin UI (`QualityRules.tsx`), which moves at Stage 3 — until then `PATCH /api/config` re-projects the JSON into these tables on every write via `lib/profileRegistrySync.ts`, so a Quality Rules edit cannot leave the engine on stale rules.
+> **Status:** these four models are what the AQL engine grades from. `resolveVerdict.ts` loads a profile's categories, AQL levels, and defect membership through `backend/src/engine/profileRules.ts`. Profile identity moved off the JSON and onto the `Profile` model at Stage A0 (see "As-migrated state" below) — there is no `AppConfig.inspectionProfiles` JSON column any more (dropped at Stage B). The admin UI (`QualityRules.tsx`) never moved onto a new endpoint; it still sends an `inspectionProfiles`-shaped payload on every save, which `PATCH /api/config` projects into `Profile` + these tables via `lib/profileRegistrySync.ts` (`syncProfileRegistry()`), so a Quality Rules edit cannot leave the engine on stale rules.
 
 #### Engine input shape
 
@@ -320,7 +315,7 @@ though every id string changed. The source profile itself is never mutated.
 
 `evaluationMode` reaching the engine is always the wire dialect (`'CUMULATIVE' | 'GRANULAR' | 'N/A' | ''`), translated once from `ProfileCategory.evaluationMode` in `profileRules.ts` — see the mapping table below.
 
-These models introduce a **global defect/category vocabulary** that profiles select from, replacing the model where each profile invented and independently spelled its own defects. They are the first relational profile-adjacent tables since `InspectionProfile`/`AQLCategory`/`DefectDefinition` were removed (§2.1) — and deliberately not a revival of those: they store the *global vocabulary* (which never existed before) plus the *per-profile selection* of it. Profiles themselves still live in `AppConfig.inspectionProfiles` JSON.
+These models introduce a **global defect/category vocabulary** that profiles select from, replacing the model where each profile invented and independently spelled its own defects. They are the first relational profile-adjacent tables since `InspectionProfile`/`AQLCategory`/`DefectDefinition` were removed (§2.1) — and deliberately not a revival of those: they store the *global vocabulary* (which never existed before) plus the *per-profile selection* of it. Profile identity itself lives on the separate `Profile` model (Stage A0, see "As-migrated state" below), not in JSON — `AppConfig.inspectionProfiles` no longer exists as a column.
 
 ```
 Defect                 global Master Defect List (one row per canonical defect name)
@@ -424,14 +419,19 @@ export interface AppConfig {
   dimensions: ProductDimensionDef[];
   targetWeight: { target: number; tolerance: number };
   /**
-   * All inspection profiles. Stored as a JSON-serialized string in the Prisma
-   * AppConfig row (not a Prisma relation). Parse with JSON.parse() before use.
+   * All inspection profiles. NOT stored as a JSON column — reconstructed on
+   * every `GET /api/config` from the `Profile` table + the Master Defect List
+   * registry (§2.2), by `reconstructInspectionProfiles()`. `PATCH /api/config`
+   * still accepts this exact shape as `syncProfileRegistry()`'s input (§2.1).
    * InspectionProfile categories and defects live here, NOT at the AppConfig root.
    */
   inspectionProfiles?: InspectionProfile[];
   /**
    * Maps productCode → profileId for automatic profile resolution at submit time.
-   * Stored as a JSON-serialized string in the Prisma AppConfig row.
+   * NOT stored as its own column — derived from the consolidated `products`
+   * column on every read/write (§3.1's `deriveLegacyStructures()`/
+   * `buildProductsMap()`); the legacy `productProfileMap` column itself was
+   * dropped (AUDIT_REPORT.md #37 Part 2).
    */
   productProfileMap?: Record<string, string>;
   /**
