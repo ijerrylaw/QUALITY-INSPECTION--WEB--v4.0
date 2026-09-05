@@ -40,8 +40,16 @@ import {
   SUBMISSION_FIELD_LABELS,
   DIMENSION_STAT_LABELS,
   isDerivedTopLevelField,
+  detectDefectCategoryChange,
+  formatEvalModeForDisplay,
 } from '../../lib/amendmentDiffLabels';
-import type { SectionId, DefectLabelContext, ProfileDisplayValue } from '../../lib/amendmentDiffLabels';
+import type {
+  SectionId,
+  CrossProfileDefectContext,
+  ProfileDisplayValue,
+  DefectCategoryChange,
+  DefectCategoryChangeKind,
+} from '../../lib/amendmentDiffLabels';
 
 export interface AmendmentDiffViewProps {
   /** Root diff tree from buildDiffTree() — its `children` are the top-level Submission fields. */
@@ -50,9 +58,9 @@ export interface AmendmentDiffViewProps {
   dimensionLabels: Record<string, string>;
   /** `dimensionId -> decimal places`, same source/order as `dimensionLabels` — used to round dimensionMins' derived numeric stats. */
   dimensionDecimals: Record<string, number>;
-  /** `defectId -> display name`, resolved for this amendment's profileId (see resolveDefectLabelContext). */
-  defectLabelContext: DefectLabelContext;
-  /** Resolves a raw `profileId` diff-side value to a display name (strict match, same rule as defectLabelContext). */
+  /** Both sides' defect label + category context (see resolveCrossProfileDefectContext) — a profile-switch amendment's before/after profile can differ, so this is never a single flat map. */
+  defectContext: CrossProfileDefectContext;
+  /** Resolves a raw `profileId` diff-side value to a display name (strict match, same rule as defectContext). */
   resolveProfileValue: (raw: unknown) => ProfileDisplayValue;
 }
 
@@ -88,7 +96,7 @@ function pickSectionNode(tree: DiffNode, fields: string[]): DiffNode {
   return { status: anyChanged ? 'changed' : 'unchanged', children, isArray: false };
 }
 
-// ── Defects: implicit-zero diffing ──────────────────────────────────────────
+// ── Defects: implicit-zero + category-aware diffing (AUDIT_REPORT.md #42) ──
 // `defects` is a sparse Record<defectId, count> — a defect id absent from one
 // side means "never recorded" (count 0), not "no value to compare." The
 // generic diffTree.ts algorithm doesn't know this (it's a domain rule
@@ -102,25 +110,130 @@ function pickSectionNode(tree: DiffNode, fields: string[]): DiffNode {
 // untouched field — bypassing collectChangedLeaves/collectUnchanged (which
 // operate at DiffStatus/top-level-of-subtree granularity, not this field's
 // domain-specific implicit-zero rule) for the defects section only.
+//
+// AUDIT_REPORT.md #42 found that count-equality alone is NOT sufficient
+// reason to treat a defect as unchanged: a profile-switch amendment can move
+// a defect to a different category, change its evaluationMode, or drop it
+// from every category the new profile defines — all while its raw count
+// stays identical — and none of that was visible. A row now stays visible
+// (never collapsed) if EITHER the count changed OR
+// `detectDefectCategoryChange` finds a category-level change.
 function toDefectCount(value: unknown): number {
   return typeof value === 'number' ? value : (Number(value) || 0);
 }
 
-function resolveDefectRows(defectsNode: DiffNode | undefined): { rows: DiffRow[]; unchangedEntries: UnchangedEntry[] } {
-  const rows: DiffRow[] = [];
+export interface DefectDiffRow {
+  defectId: string;
+  originalCount: number;
+  proposedCount: number;
+  /** Non-null when this defect's category/evalMode assignment differs between the before and after profile — see `detectDefectCategoryChange`. */
+  categoryChange: DefectCategoryChange | null;
+}
+
+function resolveDefectRows(
+  defectsNode: DiffNode | undefined,
+  defectContext: CrossProfileDefectContext,
+): { rows: DefectDiffRow[]; unchangedEntries: UnchangedEntry[] } {
+  const rows: DefectDiffRow[] = [];
   const unchangedEntries: UnchangedEntry[] = [];
   if (!defectsNode?.children) return { rows, unchangedEntries };
 
   for (const [defectId, child] of Object.entries(defectsNode.children)) {
-    const original = toDefectCount(child.original);
-    const proposed = toDefectCount(child.proposed);
-    if (original === proposed) {
-      unchangedEntries.push({ path: defectId, value: proposed });
+    const originalCount = toDefectCount(child.original);
+    const proposedCount = toDefectCount(child.proposed);
+    const categoryChange = detectDefectCategoryChange(
+      defectContext.before.categories[defectId],
+      defectContext.after.categories[defectId],
+    );
+
+    if (originalCount === proposedCount && !categoryChange) {
+      unchangedEntries.push({ path: defectId, value: proposedCount });
     } else {
-      rows.push({ keyPath: ['defects', defectId], node: { status: 'changed', original, proposed } });
+      rows.push({ defectId, originalCount, proposedCount, categoryChange });
     }
   }
   return { rows, unchangedEntries };
+}
+
+// ── Category-change badge (moved / evalModeChanged / orphaned) ────────────
+
+const CATEGORY_CHANGE_BADGE: Record<DefectCategoryChangeKind, { label: string; classes: string }> = {
+  // Amber — Action Required / Warning (UI_DESIGN_SYSTEM.md §4.9): a defect
+  // silently dropping out of grading entirely warrants a reviewer's attention,
+  // distinct from the merely-informational Cyan used below.
+  orphaned: {
+    label: 'Orphaned — Not Graded',
+    classes: 'bg-amber-500/10 border border-amber-500/30 text-amber-400',
+  },
+  // Cyan — Info/provenance (§5.3): a genuine change the reviewer must see,
+  // but not inherently a problem the way an orphaned defect is.
+  moved: {
+    label: 'Moved Category',
+    classes: 'bg-brand-secondary/10 border border-brand-secondary/30 text-brand-secondary',
+  },
+  evalModeChanged: {
+    label: 'Eval Mode Changed',
+    classes: 'bg-brand-secondary/10 border border-brand-secondary/30 text-brand-secondary',
+  },
+};
+
+const CATEGORY_CHANGE_EXPLANATION: Record<DefectCategoryChangeKind, string> = {
+  orphaned: 'No category under the proposed profile covers this defect — it would be excluded from grading entirely if approved.',
+  moved: 'This defect is graded under a different category under the proposed profile.',
+  evalModeChanged: 'Same category, but the proposed profile grades it under a different evaluation mode.',
+};
+
+function categoryLabel(info: { categoryName: string; aqlLevel: string; evaluationMode: string } | null): string {
+  if (!info) return '—';
+  return `${info.categoryName} (${formatEvalModeForDisplay(info.aqlLevel, info.evaluationMode)})`;
+}
+
+function DefectCategoryChangeDetail({ change }: { change: DefectCategoryChange }) {
+  const badge = CATEGORY_CHANGE_BADGE[change.kind];
+  return (
+    <div className="flex flex-col gap-1 pt-1">
+      <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono">
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0 ${badge.classes}`}>
+          {badge.label}
+        </span>
+        <span className="text-rose-400/80">{categoryLabel(change.before)}</span>
+        {change.kind !== 'orphaned' && (
+          <>
+            <ArrowRight className="w-3 h-3 text-muted shrink-0" strokeWidth={2} />
+            <span className="text-emerald-400">{categoryLabel(change.after)}</span>
+          </>
+        )}
+      </div>
+      <p className="text-[10px] text-muted italic">{CATEGORY_CHANGE_EXPLANATION[change.kind]}</p>
+    </div>
+  );
+}
+
+function DefectRowView({ row, labels }: { row: DefectDiffRow; labels: Record<string, string> }) {
+  const name = labels[row.defectId] ?? row.defectId;
+  const countChanged = row.originalCount !== row.proposedCount;
+
+  return (
+    <div className="flex flex-col gap-1 py-2.5 px-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-4">
+        <span className="text-[11px] font-bold text-muted uppercase tracking-wide shrink-0 sm:max-w-[45%]">
+          {name}
+        </span>
+        <span className="text-sm font-mono flex items-center gap-2 flex-wrap sm:justify-end">
+          {countChanged ? (
+            <>
+              <span className="text-rose-400 opacity-60">{row.originalCount}</span>
+              <ArrowRight className="w-3.5 h-3.5 text-muted shrink-0" strokeWidth={2} />
+              <span className="text-emerald-400 font-semibold">{row.proposedCount}</span>
+            </>
+          ) : (
+            <span className="text-primary">{row.proposedCount}</span>
+          )}
+        </span>
+      </div>
+      {row.categoryChange && <DefectCategoryChangeDetail change={row.categoryChange} />}
+    </div>
+  );
 }
 
 // ── Label resolution per row ───────────────────────────────────────────────
@@ -129,15 +242,12 @@ function labelForRow(
   sectionId: SectionId,
   keyPath: (string | number)[],
   dimensionLabels: Record<string, string>,
-  defectLabels: Record<string, string>,
 ): string {
   const top = String(keyPath[0]);
   const rest = keyPath.slice(1);
 
-  if (sectionId === 'defects') {
-    const defectId = String(rest[0] ?? top);
-    return defectLabels[defectId] ?? defectId;
-  }
+  // 'defects' never reaches this generic path — it has its own bespoke
+  // DefectRowView (see resolveDefectRows/DefectRowView above).
 
   if (sectionId === 'dimensions') {
     const dimId = String(rest[0]);
@@ -200,14 +310,12 @@ function formatValue(value: unknown): string {
 function DiffRowView({
   label,
   node,
-  unavailableNote,
   formatOriginal,
   formatProposed,
   muted,
 }: {
   label: string;
   node: DiffNode;
-  unavailableNote?: boolean;
   formatOriginal?: (v: unknown) => string;
   formatProposed?: (v: unknown) => string;
   muted?: boolean;
@@ -221,11 +329,6 @@ function DiffRowView({
     <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-4 py-2.5 px-3 ${muted ? 'opacity-80' : ''}`}>
       <span className="text-[11px] font-bold text-muted uppercase tracking-wide shrink-0 sm:max-w-[45%]">
         {label}
-        {unavailableNote && (
-          <span className="ml-1.5 text-[10px] font-normal normal-case italic text-amber-400/80">
-            (profile unavailable)
-          </span>
-        )}
       </span>
       <span className="text-sm font-mono flex items-center gap-2 flex-wrap sm:justify-end">
         {showOld && (
@@ -302,7 +405,6 @@ function DiffSubgroup({
   sectionId,
   dimensionLabels,
   dimensionDecimals,
-  defectLabelContext,
   resolveProfileValue,
   showUnchanged,
   onToggleUnchanged,
@@ -315,7 +417,6 @@ function DiffSubgroup({
   sectionId: SectionId;
   dimensionLabels: Record<string, string>;
   dimensionDecimals: Record<string, number>;
-  defectLabelContext: DefectLabelContext;
   resolveProfileValue: (raw: unknown) => ProfileDisplayValue;
   showUnchanged: boolean;
   onToggleUnchanged: () => void;
@@ -333,8 +434,6 @@ function DiffSubgroup({
         <div className={`divide-y divide-gray-800/60 border border-gray-800 rounded-lg overflow-hidden ${muted ? 'bg-canvas/15' : 'bg-canvas/30'}`}>
           {rows.map((row, i) => {
             const isProfileRow = sectionId === 'batch' && String(row.keyPath[0]) === 'profileId';
-            const isDefectRow = sectionId === 'defects';
-            const unavailableNote = isDefectRow && defectLabelContext.unavailable;
             const statInfo = dimensionStatRowInfo(sectionId, row.keyPath);
 
             let formatOriginal: ((v: unknown) => string) | undefined;
@@ -351,9 +450,8 @@ function DiffSubgroup({
             return (
               <DiffRowView
                 key={i}
-                label={labelForRow(sectionId, row.keyPath, dimensionLabels, defectLabelContext.labels)}
+                label={labelForRow(sectionId, row.keyPath, dimensionLabels)}
                 node={row.node}
-                unavailableNote={unavailableNote}
                 formatOriginal={formatOriginal}
                 formatProposed={formatProposed}
                 muted={muted}
@@ -378,7 +476,7 @@ function AmendmentDiffSection({
   sectionNode,
   dimensionLabels,
   dimensionDecimals,
-  defectLabelContext,
+  defectContext,
   resolveProfileValue,
   expandedGroups,
   onToggleGroup,
@@ -388,32 +486,43 @@ function AmendmentDiffSection({
   sectionNode: DiffNode;
   dimensionLabels: Record<string, string>;
   dimensionDecimals: Record<string, number>;
-  defectLabelContext: DefectLabelContext;
+  defectContext: CrossProfileDefectContext;
   resolveProfileValue: (raw: unknown) => ProfileDisplayValue;
   expandedGroups: Record<string, boolean>;
   onToggleGroup: (key: string) => void;
 }) {
-  // Defects gets its own implicit-zero resolution instead of the generic
-  // DiffStatus-based walk — see resolveDefectRows() above. Every other
-  // section keeps the standard collectChangedLeaves/collectUnchanged path.
+  // Defects gets its own category-aware, implicit-zero resolution instead of
+  // the generic DiffStatus-based walk — see resolveDefectRows() above. Every
+  // other section keeps the standard collectChangedLeaves/collectUnchanged path.
   if (sectionId === 'defects') {
-    const { rows, unchangedEntries } = resolveDefectRows(sectionNode.children?.['defects']);
+    const { rows, unchangedEntries } = resolveDefectRows(sectionNode.children?.['defects'], defectContext);
     if (rows.length === 0 && unchangedEntries.length === 0) return null;
+    const showUnchanged = Boolean(expandedGroups[`${sectionId}:raw`]);
 
     return (
       <div className="space-y-2">
-        <h4 className="text-xs font-bold text-brand-secondary uppercase tracking-widest">{title}</h4>
-        <DiffSubgroup
-          rows={rows}
-          unchangedEntries={unchangedEntries}
-          sectionId={sectionId}
-          dimensionLabels={dimensionLabels}
-          dimensionDecimals={dimensionDecimals}
-          defectLabelContext={defectLabelContext}
-          resolveProfileValue={resolveProfileValue}
-          showUnchanged={Boolean(expandedGroups[`${sectionId}:raw`])}
-          onToggleUnchanged={() => onToggleGroup(`${sectionId}:raw`)}
-          labelForPath={(defectId) => defectLabelContext.labels[defectId] ?? defectId}
+        <h4 className="text-xs font-bold text-brand-secondary uppercase tracking-widest flex items-center gap-2">
+          {title}
+          {defectContext.unavailable && (
+            <span className="text-[10px] font-normal normal-case italic text-amber-400/80">
+              (proposed profile unavailable — defect names/categories may be incomplete)
+            </span>
+          )}
+        </h4>
+        {rows.length > 0 ? (
+          <div className="divide-y divide-gray-800/60 border border-gray-800 rounded-lg overflow-hidden bg-canvas/30">
+            {rows.map((row) => (
+              <DefectRowView key={row.defectId} row={row} labels={defectContext.labels} />
+            ))}
+          </div>
+        ) : (
+          <div className="text-xs text-muted italic px-3 py-2">No changes.</div>
+        )}
+        <UnchangedCollapse
+          entries={unchangedEntries}
+          expanded={showUnchanged}
+          onToggle={() => onToggleGroup(`${sectionId}:raw`)}
+          labelForPath={(defectId) => defectContext.labels[defectId] ?? defectId}
         />
       </div>
     );
@@ -439,7 +548,6 @@ function AmendmentDiffSection({
         sectionId={sectionId}
         dimensionLabels={dimensionLabels}
         dimensionDecimals={dimensionDecimals}
-        defectLabelContext={defectLabelContext}
         resolveProfileValue={resolveProfileValue}
         showUnchanged={Boolean(expandedGroups[`${sectionId}:raw`])}
         onToggleUnchanged={() => onToggleGroup(`${sectionId}:raw`)}
@@ -453,7 +561,6 @@ function AmendmentDiffSection({
         sectionId={sectionId}
         dimensionLabels={dimensionLabels}
         dimensionDecimals={dimensionDecimals}
-        defectLabelContext={defectLabelContext}
         resolveProfileValue={resolveProfileValue}
         showUnchanged={Boolean(expandedGroups[`${sectionId}:derived`])}
         onToggleUnchanged={() => onToggleGroup(`${sectionId}:derived`)}
@@ -468,7 +575,7 @@ export function AmendmentDiffView({
   tree,
   dimensionLabels,
   dimensionDecimals,
-  defectLabelContext,
+  defectContext,
   resolveProfileValue,
 }: AmendmentDiffViewProps) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -492,7 +599,7 @@ export function AmendmentDiffView({
           sectionNode={pickSectionNode(tree, section.fields)}
           dimensionLabels={dimensionLabels}
           dimensionDecimals={dimensionDecimals}
-          defectLabelContext={defectLabelContext}
+          defectContext={defectContext}
           resolveProfileValue={resolveProfileValue}
           expandedGroups={expandedGroups}
           onToggleGroup={toggle}

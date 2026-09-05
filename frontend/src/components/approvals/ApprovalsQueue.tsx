@@ -8,9 +8,10 @@ import { useAuth, authHeader, authIdentity } from '../../context/AuthContext';
 import {
   buildDimensionLabelMap,
   buildDimensionDecimalsMap,
-  resolveDefectLabelContext,
+  resolveCrossProfileDefectContext,
   resolveProfileDisplayValue,
 } from '../../lib/amendmentDiffLabels';
+import { RecomputedVerdictSummary } from './RecomputedVerdictSummary';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,20 @@ interface AmendmentLog {
   requestedAt: string;
   supervisorNote?: string;
   status: string;
+  /**
+   * Ground-truth recompute preview, already computed server-side at DRAFT
+   * time (POST /:id/amendments calls resolveVerdict() in preview mode) and
+   * overwritten authoritatively at approval time — see
+   * API_AND_INTEGRATION_SPEC.md. Present on every real AmendmentLog row (the
+   * backend's Prisma `include` already returns them; this interface simply
+   * hadn't declared them), null only when the profile/config couldn't be
+   * resolved at draft time. AUDIT_REPORT.md #42: this was already computed
+   * correctly but never rendered anywhere — RecomputedVerdictSummary below
+   * is what surfaces it.
+   */
+  recomputedVerdict: 'PASSED' | 'FAILED' | null;
+  recomputedCategoryResults: string | null; // JSON string — CategoryResult[]
+  recomputedFailedDimensions: number | null;
 }
 
 interface PendingAmendment {
@@ -225,21 +240,34 @@ export function ApprovalsQueue() {
         const hasDiff = diffTree.status !== 'unchanged';
 
         // Proposed side is the amendment's forward-looking state, so it takes
-        // priority for resolving which product/profile's labels apply; the
+        // priority for resolving which product's dimension labels apply; the
         // original side covers the (effectively never happening) case where
         // the amendment clears the field entirely.
         const contextProductCode =
           (proposedValues['productCode'] as string | undefined) ??
           (originalValues['productCode'] as string | undefined) ??
           null;
-        const contextProfileId =
+
+        // Defect context needs BOTH profiles, not one merged id — a
+        // profile-switch amendment's before/after profileId can genuinely
+        // differ, and resolving only one side is exactly the gap
+        // AUDIT_REPORT.md #42 found (it left every defect's category change
+        // invisible). `beforeProfileId` falls back to the proposed side only
+        // in the same never-really-happens "field cleared" case as above;
+        // `afterProfileId` falls back to the original side so a same-profile
+        // amendment (the common case) still resolves correctly.
+        const beforeProfileId =
+          (originalValues['profileId'] as string | null | undefined) ??
+          (proposedValues['profileId'] as string | null | undefined) ??
+          null;
+        const afterProfileId =
           (proposedValues['profileId'] as string | null | undefined) ??
           (originalValues['profileId'] as string | null | undefined) ??
           null;
 
         const dimensionLabels = buildDimensionLabelMap(config, contextProductCode);
         const dimensionDecimals = buildDimensionDecimalsMap(config, contextProductCode);
-        const defectLabelContext = resolveDefectLabelContext(config, contextProfileId);
+        const defectContext = resolveCrossProfileDefectContext(config, beforeProfileId, afterProfileId);
         const resolveProfileValue = (raw: unknown) => resolveProfileDisplayValue(config, raw);
 
         return (
@@ -275,6 +303,14 @@ export function ApprovalsQueue() {
                   </div>
                 )}
 
+                {/* Ground-truth summary — what the server already computed this
+                    amendment WOULD grade as, at draft time (AUDIT_REPORT.md #42).
+                    Shown alongside the diff, not instead of it: the diff explains
+                    WHAT changed and WHY; this is the authoritative WHAT-IF-APPROVED
+                    answer, independent of whether the diff rebuild below catches
+                    every consequence. */}
+                {log && <RecomputedVerdictSummary log={log} />}
+
                 {/* Show notice if no fields differ */}
                 {!hasDiff ? (
                   <div className="text-center text-sm text-muted py-6">
@@ -285,7 +321,7 @@ export function ApprovalsQueue() {
                     tree={diffTree}
                     dimensionLabels={dimensionLabels}
                     dimensionDecimals={dimensionDecimals}
-                    defectLabelContext={defectLabelContext}
+                    defectContext={defectContext}
                     resolveProfileValue={resolveProfileValue}
                   />
                 )}
