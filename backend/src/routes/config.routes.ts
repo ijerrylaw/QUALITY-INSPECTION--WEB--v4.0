@@ -50,6 +50,19 @@ const router = Router();
  * PATCH still ACCEPTS the `inspectionProfiles` key in the request body — it is
  * the sync input — and GET still RETURNS `inspectionProfiles`, reconstructed
  * from Profile + the registry tables by reconstructInspectionProfiles().
+ *
+ * `aqlCategories` / `defectDefinitions` are now ABSENT for the same reason as
+ * `inspectionProfiles` above — same shape of cleanup, one stage at a time.
+ * These are the root-level legacy columns (AUDIT_REPORT.md #37): every real
+ * reader consumes the per-profile nested `profile.aqlCategories` /
+ * `.defectDefinitions`, reconstructed from the Category/Defect/ProfileCategory
+ * registry by reconstructInspectionProfiles() above — nothing has read the
+ * root-level columns since the Master Defect List Stage 2 engine cutover.
+ * Left in place and frozen at their last-written value (both already `[]`);
+ * schema-column drop is a separately-scoped future stage. PATCH still ACCEPTS
+ * both key names in the request body (silently ignored, matching how any
+ * unrecognized payload key behaves) and GET still RETURNS them, unchanged,
+ * straight off the frozen columns (`config.routes.ts`'s `formatAppConfig()`).
  */
 const JSON_FIELDS = [
   'lines',
@@ -65,8 +78,6 @@ const JSON_FIELDS = [
   'skuTextures',
   'dimensions',
   'targetWeight',
-  'aqlCategories',
-  'defectDefinitions',
 ] as const;
 
 type JsonFieldName = (typeof JSON_FIELDS)[number];
