@@ -43,7 +43,7 @@ Five roles exist. `EXECUTIVE` was merged into `MANAGER` (2026-08-24) — confirm
 
 **App Registration details (confirmed):**
 * App type: Single-Page Application (SPA) — no Client Secret required or issued (correct for MSAL.js in a browser context).
-* Redirect URI (dev): `http://localhost:4001` — will need a second production redirect URI once a production URL is finalized.
+* Redirect URIs (dev, both confirmed registered): `https://localhost:4001` and `https://10.10.110.31:4001` (LAN access — this laptop's reserved/static IP per IT; required because Entra ID only allows HTTPS for any non-`localhost` redirect URI, and mkcert issues one cert covering both hosts — see `frontend/vite.config.ts`). A production redirect URI will still be needed once a production URL is finalized.
 * API permissions granted: `openid`, `profile`, `email`, `User.Read` (standard Microsoft Graph read-only access to the authenticated user's own basic profile only — no files, calendar, mail, or other-user access).
 * **jobTitle is NOT available as an ID token claim** in this tenant's Entra configuration — `AuthContext.tsx`'s `resolveM365User()` fetches it via a separate `User.Read` call to Microsoft Graph after sign-in (falling back to an empty title on a Graph hiccup, since title is display/audit-only and never read by a permission check).
 

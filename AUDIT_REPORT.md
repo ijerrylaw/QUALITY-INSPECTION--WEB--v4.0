@@ -50,17 +50,6 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
     keep-gated.
     → `CHANGELOG.md` §24.
 
-40. **Flagged, not resolved — Entra redirect URI protocol mismatch.**
-    `NAVIGATION_AND_RBAC.md` §3.1 documents the dev Redirect URI as
-    `http://localhost:4001`, but `frontend/vite.config.ts` serves the dev
-    server over HTTPS only (mkcert cert, `https: httpsOptions`) — confirmed
-    2026-09-05. Entra does exempt `http://localhost` redirect URIs from its
-    HTTPS requirement, so this may be exactly what's registered in the Entra
-    App Registration and simply correct; verifying that requires checking the
-    actual Azure Portal registration, an external fact this session can't
-    confirm from the codebase alone. Not corrected — needs Jerry (or whoever
-    has Entra admin access) to confirm the registered value.
-
 ---
 
 ## Resolved (summary — full detail in CHANGELOG.md)
@@ -167,6 +156,23 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
       Safety rules rather than duplicating them. §5 already described
       this philosophy correctly; §4 was the section that had drifted.
       "No Incomplete Code Snippets" retained unchanged — still accurate.
+
+40. **RESOLVED 2026-09-05** (`af104d5`). Confirmed via the actual
+    Azure Portal Entra App Registration (Authentication → Single-page
+    application): the real registered dev redirect URI is
+    `https://localhost:4001` (HTTPS), not `http://localhost:4001` as
+    `NAVIGATION_AND_RBAC.md` §3.1 previously documented — a genuine doc
+    inaccuracy, not a case covered by Entra's `http://localhost`
+    exemption. Corrected the line, and also added a second registered
+    redirect URI, `https://10.10.110.31:4001` (LAN access, this laptop's
+    reserved/static IP per IT), which was not stale but simply never
+    documented anywhere in the six core MDs — confirmed absent by a full
+    grep before adding it. Both values independently cross-checked
+    against already-live code that was already treating them as
+    authoritative: `EnvironmentInfoPanel.tsx`'s
+    `EXPECTED_REDIRECT_URIS` array and `vite.config.ts`'s mkcert
+    HTTPS-for-both-hosts setup, both predating this fix and both in
+    agreement with the Portal.
 
 41. **RESOLVED 2026-09-05** (`006e676`). Wrote up the nine real, live
     endpoints flagged by the #38 docs-audit pass as absent from
