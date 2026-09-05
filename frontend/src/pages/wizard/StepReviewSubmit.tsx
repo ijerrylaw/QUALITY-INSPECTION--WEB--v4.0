@@ -60,6 +60,14 @@ export interface StepReviewSubmitProps {
   onSubmit: (retainContext: boolean) => void;
   onBack: () => void;
   onUpdate?: (partial: Record<string, any>) => void;
+  /**
+   * Amendment-mode-only content rendered as the last block before the submit
+   * controls — in practice `AmendmentAcknowledgment`. Passed as a node rather
+   * than as the half-dozen props that component needs (submission id, payload,
+   * before-profile, acknowledgment callback) so this file stays a review screen
+   * and doesn't take on the amendment gate's data flow. Null in normal entry.
+   */
+  amendmentSlot?: React.ReactNode;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -196,7 +204,7 @@ function ActualAqlChip({ actual }: { actual?: ActualAqlAchieved | null }) {
 // COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpdate }: StepReviewSubmitProps) {
+export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpdate, amendmentSlot }: StepReviewSubmitProps) {
   const { addToast } = useToast();
   const { config, getResolvedProfile } = useConfig();
 
@@ -596,6 +604,9 @@ export function StepReviewSubmit({ inspectionData, originalData, onSubmit, onUpd
           </span>
         </div>
       )}
+
+      {/* ── Amendment change acknowledgment (amendment mode only) ────────── */}
+      {amendmentSlot}
 
       {/* ── Retain Context Toggle ──────────────── */}
       <div className="flex justify-end pt-6 border-t border-gray-800">

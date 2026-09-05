@@ -12,6 +12,8 @@ import {
   resolveProfileDisplayValue,
 } from '../../lib/amendmentDiffLabels';
 import { RecomputedVerdictSummary } from './RecomputedVerdictSummary';
+import { AcknowledgmentRollup } from './AcknowledgmentRollup';
+import { AMENDMENT_REASON_LABELS, type AmendmentReasonCode } from '../../lib/amendmentReason';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -39,6 +41,16 @@ interface AmendmentLog {
   recomputedVerdict: 'PASSED' | 'FAILED' | null;
   recomputedCategoryResults: string | null; // JSON string — CategoryResult[]
   recomputedFailedDimensions: number | null;
+  /**
+   * JSON `string[]` of the change paths the requester explicitly confirmed at
+   * draft time, or null for a draft that predates the acknowledgment gate.
+   * Null is NOT an empty set — see AcknowledgmentRollup, which renders the
+   * distinction. Optional here because rows fetched before this column existed
+   * simply won't carry the key.
+   */
+  acknowledgedChanges?: string | null;
+  /** Closed-vocabulary reason code (lib/amendmentReason.ts); null on pre-gate rows. */
+  reasonCode?: string | null;
 }
 
 interface PendingAmendment {
@@ -292,14 +304,29 @@ export function ApprovalsQueue() {
               <div className="p-6 flex-1 overflow-y-auto space-y-6">
 
                 {/* Reason */}
-                {log?.supervisorNote && (
+                {/* Did the requester actually see what they were changing?
+                    Nothing else in this modal distinguishes a fully-acknowledged
+                    amendment from a pre-gate one that was never checked. */}
+                {log && <AcknowledgmentRollup acknowledgedChanges={log.acknowledgedChanges} />}
+
+                {(log?.reasonCode || log?.supervisorNote) && (
                   <div className="p-4 border border-brand-secondary/30 bg-brand-primary/5 rounded-lg">
                     <h4 className="text-xs font-bold text-brand-secondary uppercase tracking-widest mb-2 flex items-center gap-2">
                       <User className="w-4 h-4" strokeWidth={2} /> Reason for Amendment
                     </h4>
-                    <p className="text-sm text-primary italic">
-                      &ldquo;{log.supervisorNote}&rdquo;
-                    </p>
+                    {/* The code is the accountability record; the note is
+                        supplementary (and the whole reason when the code is
+                        OTHER). Pre-gate rows carry only the free text. */}
+                    {log.reasonCode && (
+                      <p className="text-sm font-bold text-primary uppercase tracking-wide">
+                        {AMENDMENT_REASON_LABELS[log.reasonCode as AmendmentReasonCode] ?? log.reasonCode}
+                      </p>
+                    )}
+                    {log.supervisorNote && (
+                      <p className={`text-sm text-primary italic ${log.reasonCode ? 'mt-1.5' : ''}`}>
+                        &ldquo;{log.supervisorNote}&rdquo;
+                      </p>
+                    )}
                   </div>
                 )}
 

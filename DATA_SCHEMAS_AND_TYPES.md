@@ -203,7 +203,54 @@ export interface AmendmentLog {
   reviewedByPinUserId?: string | null;   // FK to the PinUser who reviewed — PIN-originated only
   reviewedAt?: string;                 // ISO timestamp of approval/rejection
   status: AmendmentStatus;
-  supervisorNote?: string;             // Optional notes/reason supplied by the Supervisor
+  /**
+   * Closed-vocabulary accountability reason — one of `AMENDMENT_REASON_CODES`
+   * (`backend/src/lib/amendmentReason.ts`): `WRONG_INSPECTION_PROFILE` |
+   * `RECOUNT_OR_MISCOUNTED_DEFECT` | `DATA_ENTRY_CORRECTION` | `OTHER`.
+   *
+   * An AUDIT field ONLY. Nothing compares it against the computed diff and
+   * nothing should — proving the requester saw every change is
+   * `acknowledgedChanges`' job, a deliberately separate concern. Mapping a
+   * reason to an expected field-set would be both unmaintainable and wrong (a
+   * `DATA_ENTRY_CORRECTION` can legitimately touch any field).
+   *
+   * NULLABLE, and validated only when present: the wizard's dropdown has not
+   * shipped yet, so the live frontend still sends only the free-text note
+   * below. `POST /api/submissions/:id/amendments` rejects an unrecognized
+   * value with 400 but accepts its absence.
+   */
+  reasonCode?: string | null;
+  /** Optional free note accompanying `reasonCode` — prose only. Previously carried both the category and the note; `reasonCode` took over the category half. */
+  supervisorNote?: string;
+  /**
+   * JSON — `string[]` of `AmendmentChange.path` values the requester explicitly
+   * acknowledged at draft time. Backs the acknowledged-changes gate on
+   * `POST /api/submissions/:id/amendments`: the server recomputes the diff
+   * itself (`backend/src/lib/amendmentDiff.ts`) and rejects with 400 if this
+   * set does not cover every change it finds. Motivated by lot A001A6247003,
+   * whose note read "wrong inspection profile" while the same payload also
+   * raised two defect counts from 0 to 1.
+   *
+   * NULL IS LOAD-BEARING AND IS NOT `'[]'`. `null` means the draft came from a
+   * client that never ran the gate — every row predating this field, plus the
+   * current frontend until its checkbox UI ships — so the gate was skipped.
+   * `'[]'` means a gate-aware client ran the diff and found nothing to
+   * acknowledge, and is still enforced.
+   *
+   * GRANDFATHERING IS STRUCTURAL, NOT A DATE CUTOFF. The gate runs only at
+   * amendment CREATION; `POST /api/amendments/:id/approve` never re-validates a
+   * payload (it only recomputes the verdict), so already-PENDING drafts can
+   * never fail it retroactively. Adding the check to the approve route would
+   * break exactly that guarantee — see `amendmentGateScope.test.ts`, which
+   * guards both this and the "never applies to new submissions" invariant.
+   *
+   * Path granularity is a wire contract, not an implementation detail:
+   * `"profileId"` (one per scalar field), `"defects.<defectId>"` (one per
+   * defect, absent ≡ 0), `"dimensions.<dimId>"` (one per dimension, whole
+   * 5-slot array). `dimensionMins` is excluded as derived from `dimensions`;
+   * `verdict` is deliberately NOT excluded.
+   */
+  acknowledgedChanges?: string | null;
   /**
    * Server-recomputed verdict audit trail, via the same resolveVerdict()
    * engine used for the live submission — set (informational) at draft time

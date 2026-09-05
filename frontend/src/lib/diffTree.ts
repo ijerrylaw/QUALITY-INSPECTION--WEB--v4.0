@@ -63,6 +63,16 @@ export const NON_SUBSTANTIVE_DIFF_FIELDS = new Set<string>([
   'pinUserId',
   'gradingSnapshot',
   'gradingSnapshotProfileName',
+  // Postdates the rest of this list, which is why it was missed: like the two
+  // grading fields above it, `gloveWeightSnapshot` is server-frozen by
+  // resolveVerdict()/evaluateWeight() and never present on the frontend
+  // payload, so every amendment diffed it as a one-sided `removed` field. That
+  // surfaced as an "Other Fields" section whose only content was a repeated
+  // GLOVE WEIGHT SNAPSHOT label per nested key of the frozen DimensionResult
+  // (id/name/min/max/avg/fails/threshold/...), since oneSidedNode() recurses
+  // into a one-sided container. Kept in sync with the backend gate's own
+  // exclusion set, AMENDMENT_GATE_EXCLUDED_FIELDS (backend/src/lib/amendmentDiff.ts).
+  'gloveWeightSnapshot',
 ]);
 
 /**

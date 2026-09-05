@@ -67,6 +67,12 @@ import {
   type PinUserDisplay,
 } from '../lib/identity';
 import { requireRole, ALL_ROLES } from '../middleware/auth';
+import {
+  computeAmendmentChanges,
+  findUnacknowledgedChanges,
+  parseAcknowledgedChanges,
+} from '../lib/amendmentDiff';
+import { AMENDMENT_REASON_CODES, isAmendmentReasonCode } from '../lib/amendmentReason';
 
 const router = Router();
 
@@ -792,6 +798,57 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// POST /api/submissions/:id/amendment-preview  (read-only — no persistence)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns the changes `POST /:id/amendments` would detect for this payload,
+ * WITHOUT drafting anything. Feeds the wizard's per-change acknowledgment
+ * checklist: the operator ticks one box per returned change, and those
+ * `path` values become the `acknowledgedChanges` the draft request carries.
+ *
+ * THE POINT IS THAT THIS AND THE GATE SHARE ONE IMPLEMENTATION. Both call
+ * computeAmendmentChanges() on the same two inputs, so the checklist can never
+ * be missing a box for a change the gate will reject on — which would be an
+ * unrecoverable dead end for the operator (every box ticked, submit still 400s,
+ * no UI affordance for the difference). Any client-side re-derivation of this
+ * diff would reintroduce exactly that failure mode.
+ *
+ * Read-only and identity-free, mirroring POST /api/verdict/preview: it persists
+ * nothing and reveals nothing the caller can't already read via GET /:id.
+ *
+ * Request body:  { newValues: Partial<Submission> }
+ * Response 200:  { changes: AmendmentChange[], detectedChangeCount: number }
+ */
+router.post('/:id/amendment-preview', requireRole(...ALL_ROLES), async (req: Request, res: Response) => {
+  try {
+    const submissionId = String(req.params['id']);
+    const body = req.body as { newValues?: Record<string, unknown> };
+
+    if (!body.newValues || typeof body.newValues !== 'object' || Array.isArray(body.newValues)) {
+      res.status(400).json({ error: 'newValues payload is required' });
+      return;
+    }
+
+    const originalSubmission = await prisma.submission.findUnique({ where: { id: submissionId } });
+    if (!originalSubmission) {
+      res.status(404).json({ error: `Submission '${submissionId}' not found.` });
+      return;
+    }
+
+    const changes = computeAmendmentChanges(
+      originalSubmission as unknown as Record<string, unknown>,
+      body.newValues,
+    );
+
+    res.json({ changes, detectedChangeCount: changes.length });
+  } catch (err) {
+    console.error('[POST /api/submissions/:id/amendment-preview]', err);
+    res.status(500).json({ error: 'Internal server error', details: String(err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // POST /api/submissions/:id/amendments  (draft an amendment request)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -809,9 +866,16 @@ router.get('/:id', async (req: Request, res: Response) => {
  * amendment's profile can't be resolved, the draft still succeeds —
  * recomputedVerdict/recomputedCategoryResults are simply left null.
  *
+ * Rejects with 400 when `acknowledgedChanges` is absent, or is present but does
+ * not cover every change the server's own diff finds — see the gate block below.
+ *
  * Request body (JSON):
  * {
- *   "reason": "Data entry error in defect count",
+ *   "reasonCode": "DATA_ENTRY_CORRECTION",          // REQUIRED — closed vocabulary
+ *   "reason": "Miscounted pinholes on tray 3",      // optional free note
+ *   "acknowledgedChanges": [                        // REQUIRED — may be [] only if nothing changed
+ *     "profileId", "defects.def_thin_weak_spot"     // AmendmentChange.path values
+ *   ],
  *   "newValues": {
  *     "productCode": "...",
  *     // ... full submission payload
@@ -820,19 +884,50 @@ router.get('/:id', async (req: Request, res: Response) => {
  *   "loginMethod": "PIN" | "M365",
  *   "pinUserId": "..."   // PIN, or aadObjectId/userPrincipalName/displayName for M365
  * }
+ *
+ * Response 400 (unacknowledged changes):
+ * { error, unacknowledgedChanges: AmendmentChange[], detectedChangeCount }
  */
 router.post('/:id/amendments', requireRole(...ALL_ROLES), async (req: Request, res: Response) => {
   try {
     const submissionId = String(req.params['id']);
-    const body = req.body as { reason?: string; newValues?: Record<string, unknown> };
+    const body = req.body as {
+      reason?: string;
+      reasonCode?: string;
+      acknowledgedChanges?: unknown;
+      newValues?: Record<string, unknown>;
+    };
 
-    if (!body.reason || !body.reason.trim()) {
-      res.status(400).json({ error: 'Amendment reason is required' });
+    // `reasonCode` is now the REQUIRED accountability field, and `reason` is the
+    // optional free note that accompanies it (stored as supervisorNote, null when
+    // blank). The requiredness swapped between the two deliberately: free text is
+    // what failed here — a note reading "wrong inspection profile" sat on an
+    // amendment that also changed two defect counts (lot A001A6247003) — so the
+    // checkable field became mandatory and the unverifiable one became optional.
+    // The wizard requires a note only for OTHER, where the code carries no
+    // information by itself; that rule is client-side, since "OTHER means say
+    // more" is a UX judgment rather than a data invariant.
+    if (!isAmendmentReasonCode(body.reasonCode)) {
+      res.status(400).json({
+        error:
+          body.reasonCode === undefined || body.reasonCode === null
+            ? 'reasonCode is required.'
+            : 'Unrecognized reasonCode.',
+        allowedReasonCodes: AMENDMENT_REASON_CODES,
+      });
       return;
     }
 
     if (!body.newValues || typeof body.newValues !== 'object') {
       res.status(400).json({ error: 'newValues payload is required' });
+      return;
+    }
+
+    let acknowledgedChanges: string[] | null;
+    try {
+      acknowledgedChanges = parseAcknowledgedChanges(body.acknowledgedChanges);
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
       return;
     }
 
@@ -874,8 +969,60 @@ router.post('/:id/amendments', requireRole(...ALL_ROLES), async (req: Request, r
       return;
     }
 
-    // 2. Informational recompute preview — never blocks the draft itself.
     const newValues = body.newValues;
+
+    // 1c. ACKNOWLEDGED-CHANGES GATE.
+    //
+    // The server computes, independently of the client, exactly what this
+    // amendment changes, and refuses any change the requester did not
+    // explicitly acknowledge. This exists because the stated reason had no
+    // structural link to the payload: on lot A001A6247003 the note read "wrong
+    // inspection profile" while the same request also raised two defect counts
+    // from 0 to 1, visible to nobody who trusted the note.
+    //
+    // ALWAYS ENFORCED. `acknowledgedChanges` was briefly optional — absence meant
+    // "pre-gate client, skip the gate" — purely so the backend could ship before
+    // the wizard that populates it. That escape hatch is closed: the wizard now
+    // always sends the field, so absence no longer identifies an old client, it
+    // identifies a caller going around the checklist. An empty array is still a
+    // legitimate value and is still enforced — that is a gate-aware client
+    // reporting it found nothing to acknowledge, which is only true if the server
+    // agrees the amendment changes nothing.
+    //
+    // Placed before the recompute and before the transaction, so a rejected
+    // amendment writes nothing at all — the submission's amendmentStatus is
+    // untouched and no AmendmentLog row is created.
+    //
+    // GRANDFATHERING IS STRUCTURAL: this gate lives only here, at draft
+    // creation. POST /api/amendments/:id/approve never re-validates a payload,
+    // so already-PENDING drafts can never be failed by it retroactively. Adding
+    // this check to the approve route would break that guarantee.
+    if (acknowledgedChanges === null) {
+      res.status(400).json({
+        error:
+          'acknowledgedChanges is required. Fetch the change list from ' +
+          'POST /api/submissions/:id/amendment-preview and confirm every entry before submitting.',
+      });
+      return;
+    }
+
+    const detectedChanges = computeAmendmentChanges(
+      originalSubmission as unknown as Record<string, unknown>,
+      newValues,
+    );
+    const unacknowledged = findUnacknowledgedChanges(detectedChanges, acknowledgedChanges);
+    if (unacknowledged.length > 0) {
+      res.status(400).json({
+        error:
+          `This amendment changes ${unacknowledged.length} field(s) that were not acknowledged. ` +
+          'Review each change and confirm it before resubmitting.',
+        unacknowledgedChanges: unacknowledged,
+        detectedChangeCount: detectedChanges.length,
+      });
+      return;
+    }
+
+    // 2. Informational recompute preview — never blocks the draft itself.
     let recomputedVerdict: string | null = null;
     let recomputedCategoryResults: string | null = null;
     let recomputedFailedDimensions: number | null = null;
@@ -937,7 +1084,14 @@ router.post('/:id/amendments', requireRole(...ALL_ROLES), async (req: Request, r
           requestedBy:            requester.userPrincipalName,
           requestedByDisplayName: requester.displayName,
           requestedAt: new Date().toISOString(),
-          supervisorNote: body.reason.trim(),
+          reasonCode: body.reasonCode,
+          // Optional note — null rather than '' when blank, so "no note given"
+          // is one value everywhere instead of two that read differently.
+          supervisorNote: body.reason?.trim() || null,
+          // Never null on a row created from here on: the gate above rejects an
+          // absent set. Rows that predate the gate keep their NULL, which is what
+          // the approver's rollup banner reads to flag them as untracked.
+          acknowledgedChanges: JSON.stringify(acknowledgedChanges),
           status: 'PENDING_APPROVAL',
           recomputedVerdict,
           recomputedCategoryResults,

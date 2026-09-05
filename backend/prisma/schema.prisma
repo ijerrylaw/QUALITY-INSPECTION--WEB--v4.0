@@ -195,8 +195,35 @@ model AmendmentLog {
   /// 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED'
   status          String      @default("PENDING_APPROVAL")
 
-  /// Optional notes/reason supplied by the Supervisor
+  /// Closed-vocabulary accountability reason — one of AMENDMENT_REASON_CODES
+  /// (backend/src/lib/amendmentReason.ts). An AUDIT field only: nothing compares
+  /// it against the computed diff, and nothing should — proving the requester saw
+  /// every change is the acknowledgedChanges gate's job, deliberately separate.
+  /// NULLABLE: null on rows drafted before the code existed, and still accepted
+  /// from the current frontend, which sends only the free-text note below until
+  /// the dropdown UI ships. Validated only when present.
+  reasonCode      String?
+
+  /// Optional free note accompanying reasonCode. Was previously carrying double
+  /// duty as both the reason category and the note; reasonCode took over the
+  /// category half and this keeps its original meaning, prose.
   supervisorNote  String?
+
+  /// JSON — string[] of AmendmentChange.path values the requester explicitly
+  /// acknowledged at draft time (backend/src/lib/amendmentDiff.ts).
+  ///
+  /// NULL is load-bearing, and is NOT the same as '[]': null means the draft was
+  /// submitted by a client that never ran the gate (every row predating this
+  /// field, plus the current frontend until the checkbox UI ships), so the gate
+  /// was skipped. '[]' means a gate-aware client ran the diff and found nothing
+  /// to acknowledge — still enforced.
+  ///
+  /// GRANDFATHERING IS STRUCTURAL, NOT A DATE CUTOFF: the gate runs only in
+  /// POST /api/submissions/:id/amendments, at creation. Nothing re-validates an
+  /// existing row — POST /api/amendments/:id/approve only recomputes the verdict.
+  /// So already-PENDING drafts can never fail it. Adding this check to the
+  /// approve route would break exactly that guarantee — don't.
+  acknowledgedChanges String?
 
   /// Server-recomputed verdict via resolveVerdict() — 'PASSED' | 'FAILED'.
   /// Set at draft time (informational) and overwritten at approval time

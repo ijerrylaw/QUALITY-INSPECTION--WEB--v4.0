@@ -51,6 +51,14 @@ import { StepMetadata } from './wizard/StepMetadata';
 import { StepDimensions } from './wizard/StepDimensions';
 import { StepDefects } from './wizard/StepDefects';
 import { StepReviewSubmit } from './wizard/StepReviewSubmit';
+import { AmendmentAcknowledgment } from './wizard/AmendmentAcknowledgment';
+import { buildAmendmentNewValues } from '../lib/amendmentPayload';
+import {
+  AMENDMENT_REASON_CODES,
+  AMENDMENT_REASON_LABELS,
+  requiresSupervisorNote,
+  type AmendmentReasonCode,
+} from '../lib/amendmentReason';
 import { BatchEntry } from './wizard/BatchEntry';
 import type { BatchEntryHandle } from './wizard/BatchEntry';
 
@@ -135,6 +143,20 @@ export function WizardPage() {
   const amendId = searchParams.get('amend');
   const isAmendmentMode = Boolean(amendId);
   const [amendmentReason, setAmendmentReason] = useState('');
+  /** Closed-vocabulary reason (required in amendment mode) — lib/amendmentReason.ts. */
+  const [amendmentReasonCode, setAmendmentReasonCode] = useState<AmendmentReasonCode | ''>('');
+  /**
+   * Reported up by AmendmentAcknowledgment. `ready` gates the submit button;
+   * `acknowledgedPaths` becomes the request's `acknowledgedChanges`. Defaults to
+   * NOT ready, so the button stays disabled until the server's diff has loaded
+   * and every detected change has been ticked — a failed or still-loading diff
+   * must never fall through to an enabled submit.
+   */
+  const [amendmentAck, setAmendmentAck] = useState<{
+    ready: boolean;
+    acknowledgedPaths: string[];
+    totalChanges: number;
+  }>({ ready: false, acknowledgedPaths: [], totalChanges: 0 });
   // Guards the actual in-flight submit request — disables the Submit button
   // so a rapid double-click can't fire two POSTs (defense-in-depth; the
   // duplicate-toast bug this was checked against turned out to be two
@@ -215,6 +237,20 @@ export function WizardPage() {
     setWizardDirty(dirty);
     return () => setWizardDirty(false);
   }, [dirty, setWizardDirty]);
+
+  // ── Amendment payload (shared by the acknowledgment preview and the submit) ─
+  // Built through the SAME helper handleSubmit uses, so the diff the operator
+  // acknowledges is computed from byte-identical input to the one the server's
+  // gate re-checks at submit. `submissionTimestamp` is the only field that
+  // differs between the two builds (it is regenerated at submit time) and it sits
+  // in the gate's exclusion set, so it can never reach either diff. Pinning it to
+  // a mount-stable value here additionally keeps this memo from producing a new
+  // object — and refetching the preview — on every render.
+  const amendPreviewTimestampRef = useRef<string>(new Date().toISOString());
+  const amendmentNewValues = useMemo(
+    () => buildAmendmentNewValues(inspectionData, amendPreviewTimestampRef.current),
+    [inspectionData],
+  );
 
   // ── Pre-fill wizard from an existing submission when in amendment mode ────
   // Fetches the single target record by ID directly — independent of however
@@ -361,9 +397,15 @@ export function WizardPage() {
    * STANDARD MODE: Dispatches full Submission payload to POST /api/submissions.
    * If retainContext is true, keeps Step 1 fields for the next lot.
    *
-   * AMENDMENT MODE: Validates `amendmentReason`, then dispatches to
+   * AMENDMENT MODE: Validates the reason code, its note requirement, and that
+   * every server-detected change has been acknowledged, then dispatches to
    * POST /api/submissions/:id/amendments per API_AND_INTEGRATION_SPEC.md §1.
    * Does NOT retain context — resets to clean state after submit.
+   *
+   * The three guards below are duplicated by the server (which is the actual
+   * authority — the submit button being disabled is a courtesy, not a control).
+   * They exist here to give a specific message instead of a generic 400, and the
+   * toasts name the same conditions the server would reject on.
    */
   const handleSubmit = useCallback(async (retainContext: boolean) => {
     if (isSubmitting) return; // guard against a rapid double-click firing two POSTs
@@ -376,33 +418,32 @@ export function WizardPage() {
         addToast('error', 'Amendment source ID is missing. Cannot submit.');
         return;
       }
-      if (!amendmentReason.trim()) {
-        addToast('error', 'Please enter a reason for the amendment before submitting.');
+      if (!amendmentReasonCode) {
+        addToast('error', 'Select an amendment reason before submitting.');
+        return;
+      }
+      if (requiresSupervisorNote(amendmentReasonCode) && !amendmentReason.trim()) {
+        addToast('error', 'A note is required when the reason is "Other".');
+        return;
+      }
+      if (!amendmentAck.ready) {
+        addToast(
+          'error',
+          amendmentAck.totalChanges > 0
+            ? `Confirm all ${amendmentAck.totalChanges} detected changes before submitting.`
+            : 'Detected changes are still loading — wait for the list before submitting.',
+        );
         return;
       }
 
       const amendmentPayload = {
         reason: amendmentReason.trim(),
+        reasonCode: amendmentReasonCode,
+        acknowledgedChanges: amendmentAck.acknowledgedPaths,
         ...authIdentity(user),
-        newValues: {
-          productCode:         inspectionData.productCode        ?? '',
-          productionDate:      inspectionData.effectiveDate      ?? new Date().toISOString(),
-          samplingTime:        inspectionData.timestamp          ?? new Date().toISOString(),
-          submissionTimestamp: new Date().toISOString(),
-          machineId:           inspectionData.lineId             ?? '',
-          shift:               inspectionData.shift              ?? '',
-          batchNumber:         inspectionData.fullSystemLotNo    ?? '',
-          size:                inspectionData.size               ?? '',
-          sampleSize:          inspectionData.sampleSize         ?? 0,
-          dimensions:          inspectionData.dimensions         ?? {},
-          dimensionMins:       inspectionData.dimensionStats     ?? {},
-          defects:             inspectionData.defects            ?? {},
-          verdict:             (inspectionData.overallVerdict === 'PASS' ? 'PASSED' : 'FAILED') as 'PASSED' | 'FAILED',
-          totalCarton:         inspectionData.totalCarton,
-          gloveWeight:         inspectionData.gloveWeight,
-          profileId:           inspectionData.profileId          ?? '',
-          amendmentStatus:     'PENDING_APPROVAL' as const,
-        },
+        // Same builder the acknowledgment preview used, so the server's gate
+        // re-runs its diff over the payload the operator actually confirmed.
+        newValues: buildAmendmentNewValues(inspectionData),
       };
 
       try {
@@ -440,6 +481,11 @@ export function WizardPage() {
       setInspectionData({});
       setOriginalData(null);
       setAmendmentReason('');
+      setAmendmentReasonCode('');
+      // Reset to NOT ready, matching the initial state: a stale `ready: true`
+      // would leave the submit button enabled on the next amendment before its
+      // own diff has been fetched, let alone acknowledged.
+      setAmendmentAck({ ready: false, acknowledgedPaths: [], totalChanges: 0 });
       setCurrentStep(1);
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
@@ -525,7 +571,7 @@ export function WizardPage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [inspectionData, addToast, isAmendmentMode, amendId, amendmentReason, isSubmitting, setSearchParams, user]);
+  }, [inspectionData, addToast, isAmendmentMode, amendId, amendmentReason, amendmentReasonCode, amendmentAck, isSubmitting, setSearchParams, user]);
 
   // ── Derived tab state ─────────────────────────────────────────────────────
   const step1Done = isStep1Valid(inspectionData);
@@ -610,15 +656,49 @@ export function WizardPage() {
                   All fields have been pre-filled from the original record. Modify any field
                   and submit — the amendment will be routed to the Approvals Queue (Executive / Manager / Admin).
                 </p>
-                {/* Mandatory reason field */}
+                {/* Mandatory reason code — closed vocabulary (lib/amendmentReason.ts).
+                    Replaced a free-text box whose contents nothing could check:
+                    a note reading "wrong inspection profile" sat on an amendment
+                    that also changed two defect counts (lot A001A6247003). The
+                    code is the accountability record; the acknowledgment
+                    checklist in Step 4 is what proves the changes were seen. */}
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-amber-400/80">
                     Amendment Reason <span className="text-rose-400">*</span>
                   </label>
+                  <select
+                    value={amendmentReasonCode}
+                    onChange={(e) => setAmendmentReasonCode(e.target.value as AmendmentReasonCode | '')}
+                    className="w-full h-9 px-3 bg-canvas border border-amber-500/30 rounded-lg font-sans text-sm text-primary focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none transition-colors cursor-pointer"
+                  >
+                    <option value="">Select a reason…</option>
+                    {AMENDMENT_REASON_CODES.map((code) => (
+                      <option key={code} value={code}>
+                        {AMENDMENT_REASON_LABELS[code]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Free note — optional alongside every code, but the whole
+                    stated reason when the code is OTHER, so required there. */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-amber-400/80">
+                    Note{' '}
+                    {requiresSupervisorNote(amendmentReasonCode) ? (
+                      <span className="text-rose-400">*</span>
+                    ) : (
+                      <span className="text-amber-400/50 normal-case font-normal">(optional)</span>
+                    )}
+                  </label>
                   <textarea
                     value={amendmentReason}
                     onChange={(e) => setAmendmentReason(e.target.value)}
-                    placeholder="Describe the reason for this amendment (e.g., data entry error on defect count)..."
+                    placeholder={
+                      requiresSupervisorNote(amendmentReasonCode)
+                        ? 'Required for "Other" — describe the reason for this amendment…'
+                        : 'Add any additional context (optional)…'
+                    }
                     rows={2}
                     className="w-full px-3 py-2 bg-canvas border border-amber-500/30 rounded-lg font-sans text-sm text-primary placeholder:text-muted focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none transition-colors resize-none"
                   />
@@ -720,7 +800,18 @@ export function WizardPage() {
                   <button
                     type="submit"
                     form="wizard-step-form"
-                    disabled={isSubmitting || (isAmendmentMode && !amendmentReason.trim())}
+                    // Amendment mode blocks on all three gate conditions: a
+                    // reason code, its note when the code is OTHER, and every
+                    // server-detected change acknowledged. `amendmentAck.ready`
+                    // is false while the diff is loading or errored, so a failed
+                    // preview can never leave this enabled.
+                    disabled={
+                      isSubmitting ||
+                      (isAmendmentMode &&
+                        (!amendmentReasonCode ||
+                          (requiresSupervisorNote(amendmentReasonCode) && !amendmentReason.trim()) ||
+                          !amendmentAck.ready))
+                    }
                     className={`h-10 px-8 rounded-lg font-bold text-xs tracking-wider uppercase shadow-lg shadow-brand-primary/20 flex items-center justify-center gap-2 transition-all outline-none disabled:opacity-40 disabled:cursor-not-allowed
                       ${isAmendmentMode
                         ? 'bg-amber-500/20 border border-amber-500/50 text-amber-400 hover:bg-amber-500/30 hover:border-amber-500'
@@ -800,6 +891,16 @@ export function WizardPage() {
                 inspectionData={inspectionData}
                 originalData={originalData}
                 onSubmit={handleSubmit}
+                amendmentSlot={
+                  isAmendmentMode && (inspectionData._amendSourceId ?? amendId) ? (
+                    <AmendmentAcknowledgment
+                      submissionId={String(inspectionData._amendSourceId ?? amendId)}
+                      newValues={amendmentNewValues}
+                      beforeProfileId={originalData?.profileId}
+                      onChange={setAmendmentAck}
+                    />
+                  ) : null
+                }
               />
             )}
           </div>
