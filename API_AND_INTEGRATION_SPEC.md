@@ -162,6 +162,78 @@
   * **Response:** `200` with the updated `PinUser` (no `pinHash`/`pinSalt`) on success. `401 { error: 'Current PIN is incorrect.' }` if `currentPin` matches no active user. `400 { error: 'New PIN must be exactly 6 digits.' }` for a malformed `newPin`. `409 { error: 'This PIN is already in use by an active user.' }` if `newPin` collides with another active user.
   * **Auth:** None — deliberately ungated, same reasoning as `pin-login`: the correct `currentPin` *is* the identity/authorization check. Available to any PIN-logged-in user, not just Group A/B.
 
+---
+
+### Access Log (Group A Route)
+
+* `GET /api/access-log`
+  * **Role:** Paginated, newest-first read of the `AccessLog` audit trail — every M365/PIN login attempt (success and failure) and every `PATCH /api/config` write attempt (success and failure). Rows are written elsewhere (`backend/src/lib/accessLog.ts`, called from `m365Users.routes.ts`, `pinUsers.routes.ts`, and `config.routes.ts`); this endpoint only serves them back.
+  * **Query params:** `page` (1-based, default `1`), `limit` (default `50`, capped at `200`) — same pagination contract as `GET /api/amendments/pending`.
+  * **Response 200:** `{ logs[], count, page, limit, totalCount, hasMore }`. Each `logs[]` entry: `{ id, userId: string | null, role: string | null, userDisplayName: string | null, action: string, detail: string | null, ipAddress: string | null, timestamp }`. `action` is one of `'M365_LOGIN_SUCCESS' | 'M365_LOGIN_FAILURE' | 'PIN_LOGIN_SUCCESS' | 'PIN_LOGIN_FAILURE' | 'CONFIG_WRITE' | 'CONFIG_WRITE_FAILURE'` (enforced in route code, not the DB). `detail` is populated only for `CONFIG_WRITE`/`CONFIG_WRITE_FAILURE` rows (a short label of the configuration section touched, or the specific rejection reason on failure). `userId`/`role`/`userDisplayName` are nullable because a failed login before identity resolution (malformed request, unknown/inactive PIN) may not resolve to a real user.
+  * **Auth:** Requires `X-User-Role` header, Group A only (`requireGroup('A')`) — tighter than the PIN/M365 admin screens (Group A/B), since this surfaces every user's login/config-write history, not just one admin task. See `NAVIGATION_AND_RBAC.md` §5.1.
+
+---
+
+### Microsoft 365 User Administration (Group A Routes)
+
+Real MSAL/Entra ID SSO role assignment (`NAVIGATION_AND_RBAC.md` §3.1). The granted Entra security group by itself does not distinguish which app role a member should get — this surface owns the resulting `aadObjectId → role` mapping, mirroring the PIN admin pattern but for SSO users (who have no `PinUser` row). All six routes below are gated tighter than PIN admin (Group A only, not Group A/B) since role assignment/offboarding here can grant or remove System Admin itself.
+
+* `GET /api/m365-users`
+  * **Role:** Lists all `M365UserRole` mappings, with pending (`role: null`, awaiting assignment) rows sorted first so an admin sees who's waiting immediately.
+  * **Response 200:** `{ m365Users: [...] }` — each entry `{ id, aadObjectId: string | null, userPrincipalName, displayName, jobTitle: string | null, role: 'ADMIN' | 'MANAGER' | 'SUPERVISOR' | null, isActive, createdAt, updatedAt }`. `aadObjectId` is `null` for an invited-but-unclaimed row.
+  * **Auth:** Requires `X-User-Role` header, Group A only.
+
+* `POST /api/m365-users/invite`
+  * **Role:** Pre-registers a future admin/manager/supervisor by email, before they've ever logged in. Auto-claimed on that person's first real MSAL login (see `POST /api/auth/m365-login` branch below).
+  * **Payload:** `{ userPrincipalName: string, displayName?: string, role: 'ADMIN' | 'MANAGER' | 'SUPERVISOR' }` — `displayName` defaults to `userPrincipalName` if omitted.
+  * **Response 201:** The created row (same shape as `GET`'s entries). **Response 400:** `{ error }` for a missing `userPrincipalName` or an unrecognized `role`. **Response 409:** `{ error }` — "already has an M365 access row (claimed)" or "already been invited," depending on which.
+  * **Auth:** Requires `X-User-Role` header, Group A only.
+
+* `PATCH /api/m365-users/:id`
+  * **Role:** Assigns or changes a mapping's role.
+  * **Payload:** `{ role: 'ADMIN' | 'MANAGER' | 'SUPERVISOR' }`
+  * **Response 200:** The updated row. **Response 404:** `{ error: 'M365 user not found' }`. **Response 409:** `{ error: 'Cannot demote the last administrator — promote another user to ADMIN first.' }` if the target is currently the sole active `ADMIN` and the payload would move it off `ADMIN` (`requireNotLastActiveAdmin()`).
+  * **Auth:** Requires `X-User-Role` header, Group A only.
+
+* `PATCH /api/m365-users/:id/deactivate`
+  * **Role:** Revokes access — also the mechanism for revoking an invite that hasn't been claimed yet (`aadObjectId` still `null`); the row's `isActive` flips to `false` either way, and login-claim logic then skips an inactive invited row rather than letting it be silently claimed.
+  * **Response 200:** The updated row. **Response 404:** `{ error: 'M365 user not found' }`. **Response 409:** `{ error: 'Cannot deactivate the last administrator — promote another user to ADMIN first.' }` (same last-active-admin lockout as `PATCH /:id`).
+  * **Auth:** Requires `X-User-Role` header, Group A only.
+
+* `PATCH /api/m365-users/:id/reactivate`
+  * **Role:** Restores access. No PIN-admin equivalent exists — `NAVIGATION_AND_RBAC.md` §3.2 documents PIN's own admin screen as deliberately having no reactivate; added here per this feature's own design.
+  * **Response 200:** The updated row. **Response 404:** `{ error: 'M365 user not found' }`.
+  * **Auth:** Requires `X-User-Role` header, Group A only.
+
+* `DELETE /api/m365-users/:id`
+  * **Role:** Hard-deletes a mapping. Unlike `PinUser`'s `DELETE`, there is no delete-safety history check: `Submission`/`AmendmentLog` store a frozen `displayName`/`userPrincipalName` snapshot at write time for SSO rows (`backend/src/lib/identity.ts`), never a live FK/join back to `M365UserRole` — deleting a row here has zero effect on any existing inspection/amendment record or its display. The last-active-admin lockout still applies.
+  * **Response 200:** `{ success: true }`. **Response 404:** `{ error: 'M365 user not found' }`. **Response 409:** `{ error: 'Cannot delete the last administrator — promote another user to ADMIN first.' }`.
+  * **Auth:** Requires `X-User-Role` header, Group A only.
+
+* `POST /api/auth/m365-login`
+  * **Role:** Called immediately after a real MSAL popup login succeeds, to resolve the signed-in person's role server-side. Deliberately ungated — by the time this is called, MSAL has already completed a real Entra login popup, the same trust model as `POST /api/auth/pin-login`. Branches on the `M365UserRole` table into five statuses; see `NAVIGATION_AND_RBAC.md` §3.1 for the full per-branch narrative (known active/revoked account, unclaimed-invite claim, fresh-install bootstrap eligibility, or auto-provisioned pending row).
+  * **Payload:** `{ aadObjectId: string, userPrincipalName: string, displayName: string, jobTitle?: string }`. `jobTitle` is only applied when non-empty — a transient Graph failure (frontend sends `''` when its own Graph call failed) never blanks out a previously captured value.
+  * **Response 200:** `{ role: string | null, status: 'active' | 'revoked' | 'invite-claimed' | 'bootstrap-eligible' | 'pending' }`. `role` alone (the `active`/`pending` branches) is the pre-existing response shape; older callers that don't read `status` keep working unchanged for those two branches. **Response 400:** `{ error }` if `aadObjectId`, `userPrincipalName`, or `displayName` is missing.
+  * **Auth:** None — deliberately ungated (see above).
+
+* `POST /api/auth/claim-bootstrap-admin`
+  * **Role:** One-time self-assignment of the very first `ADMIN` on a fresh install, offered by the frontend when `POST /api/auth/m365-login` reports `status: 'bootstrap-eligible'`. Deliberately ungated — there is no admin yet to gate against on a fresh install. Re-checks at call time that the `M365UserRole` table is still completely empty (never trusts an earlier "eligible" response); race-safe against a concurrent second claim via a fixed sentinel row id, since SQLite's primary-key uniqueness constraint guarantees only one concurrent `INSERT` with that id can ever succeed.
+  * **Payload:** `{ aadObjectId: string, userPrincipalName: string, displayName: string, jobTitle?: string }`
+  * **Response 201:** `{ role: 'ADMIN', status: 'active' }`. **Response 400:** `{ error }` for a missing required field. **Response 409:** `{ error: 'Bootstrap admin has already been claimed for this install.' }` if the table is no longer empty (whether by a prior request or a lost race against a concurrent one).
+  * **Auth:** None — deliberately ungated (see above).
+
+---
+
+### Dev Tools (Development Only)
+
+* `DELETE /api/dev/submissions/all`
+  * **Role:** Wipes every `Submission` and `AmendmentLog` row (child table deleted first, same transaction) so a developer can reset test data without touching `PinUser`/`M365UserRole`/`AppConfig`. Backing the `/dev-tools` frontend page.
+  * **Response 200:** `{ beforeCount, afterCount, unlockedProductCodes: string[] }` — `unlockedProductCodes` lists every distinct `productCode` that had ≥1 `Submission` before the wipe (and is therefore "locked" per `getProductCodeUsage()`'s rule in `PATCH /api/config`), since deleting every submission unlocks all of them.
+  * **Production gating:** every route on this router runs `blockInProduction` first — under `NODE_ENV=production` it returns `404 { error: 'Route not found' }` before any other logic runs (not `403`, so the route's existence isn't even disclosed). Verified live: backend 404s under `NODE_ENV=production`, and the frontend dead-code-eliminates the `/dev-tools` page in a production build (AUDIT_REPORT.md #24 — pre-launch checklist item, not an active fix).
+  * **Auth:** No `X-User-Role` gate — the production block above is the only guard. Development use only.
+
+---
+
 ### Global Registry (Master Defect List & Category Inventory)
 
 Management surface for the two global registries introduced in Stage 1 (`DATA_SCHEMAS_AND_TYPES.md` §2.2). Read, create, rename. **Nothing here assigns an entry to a profile or a category** — that stays with `PATCH /api/config`'s `inspectionProfiles` write and its re-projection hook (`syncProfileRegistry()`). Stage 4 (`DefectPickerModal.tsx`/`CategoryPickerModal.tsx`) added a picker UI for choosing an existing registry entry instead of free-typing a new name, but did not change the write mechanism: a pick still lands in `QualityRules.tsx`'s draft state and is persisted only by the screen's SAVE CONFIGURATION action, via this same `PATCH /api/config` path.

@@ -79,20 +79,6 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
     confirm from the codebase alone. Not corrected — needs Jerry (or whoever
     has Entra admin access) to confirm the registered value.
 
-41. **Flagged, not resolved — endpoint documentation coverage gap.**
-    Surfaced during the #38 docs-audit pass. Three groups of real, live
-    endpoints are absent from `API_AND_INTEGRATION_SPEC.md`'s "REST API
-    ENDPOINTS" section and from `NAVIGATION_AND_RBAC.md` §5.1's session-gate
-    table: `GET /api/access-log`; the full M365 admin CRUD surface
-    (`GET/PATCH/DELETE /api/m365-users`, `POST /api/m365-users/invite`,
-    `PATCH /api/m365-users/:id/deactivate`/`reactivate`,
-    `POST /api/auth/claim-bootstrap-admin`); and the dev-tools routes
-    (`DELETE /api/dev/submissions/all` et al., #24 above). Not a stale
-    reference — nothing false is claimed, these routes are simply never
-    written up — so left as a to-do rather than authored unilaterally
-    (writing accurate, complete endpoint docs for ~9 routes is a distinct,
-    larger task than correcting existing prose).
-
 ---
 
 ## Resolved (summary — full detail in CHANGELOG.md)
@@ -175,6 +161,30 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
     content was flagged rather than resolved unilaterally — see #39
     (AI_RULES.md process-rule ambiguity), #40 (Entra redirect URI protocol
     question), #41 (endpoint documentation coverage gap).
+
+41. **RESOLVED 2026-09-05** (`006e676`). Wrote up the nine real, live
+    endpoints flagged by the #38 docs-audit pass as absent from
+    `API_AND_INTEGRATION_SPEC.md`'s "REST API ENDPOINTS" section: `GET
+    /api/access-log`; the full M365 admin CRUD surface (`GET/PATCH/DELETE
+    /api/m365-users`, `POST /api/m365-users/invite`, `PATCH
+    /api/m365-users/:id/deactivate`/`reactivate`, `POST
+    /api/auth/m365-login`, `POST /api/auth/claim-bootstrap-admin`); and
+    `DELETE /api/dev/submissions/all` (confirmed the only route under
+    `/api/dev/*` — no others exist). Two new subsections added to
+    `API_AND_INTEGRATION_SPEC.md` §1 ("Access Log (Group A Route)" and
+    "Microsoft 365 User Administration (Group A Routes)"), matching the
+    existing Role/Payload/Response/Auth bullet structure, full
+    request/response shapes verified against the actual route
+    implementations (`accessLog.routes.ts`, `m365Users.routes.ts`,
+    `devTools.routes.ts`), not assumed.
+    **Correction to this item's own original framing:** the original
+    flag also claimed `GET /api/access-log` was absent from
+    `NAVIGATION_AND_RBAC.md` §5.1's session-gate table — checked and that
+    was already incorrect when written; the row was already present
+    there. The genuine gap in that table was the eight M365/dev-tools
+    routes, now added (`GET /api/m365-users` through `POST
+    /api/auth/claim-bootstrap-admin`, plus `DELETE
+    /api/dev/submissions/all`).
 
 42. **RESOLVED 2026-09-05** (`127267f`, `7952b4b`, `14ff794`). Investigated
     2026-09-05 against the real pending amendment on lot `A001A6247003`

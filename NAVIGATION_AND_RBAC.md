@@ -111,9 +111,16 @@ Every mutating backend route is gated by `requireRole(...)`/`requireGroup(...)` 
 | `POST /api/auth/pin-login` | Ungated — this *is* the login step |
 | `POST /api/auth/pin-change` | Ungated — the correct current PIN *is* the identity check (§3.2) |
 | `GET /api/access-log` | Group A only — the one gated `GET` route; see below |
+| `GET /api/m365-users` | Group A only |
+| `POST /api/m365-users/invite` | Group A only |
+| `PATCH /api/m365-users/:id`, `PATCH /api/m365-users/:id/deactivate`, `PATCH /api/m365-users/:id/reactivate` | Group A only |
+| `DELETE /api/m365-users/:id` | Group A only |
+| `POST /api/auth/m365-login` | Ungated — MSAL popup already completed the real login |
+| `POST /api/auth/claim-bootstrap-admin` | Ungated — no admin exists yet to gate against |
 | `GET/POST /api/registry/categories`, `PATCH /api/registry/categories/:id` | Group A/B |
 | `GET/POST /api/registry/defects`, `PATCH /api/registry/defects/:id` | Group A/B |
 | All other `GET` routes (`/api/health`, `/api/config`, `/api/submissions`) and `POST /api/verdict/preview` | Ungated — non-mutating |
+| `DELETE /api/dev/submissions/all` | Dev-only — 404s under `NODE_ENV=production` (`blockInProduction` guard), not role-gated |
 
 **Registry routes are the second gated `GET` family.** Unlike `/api/config`, the two `GET /api/registry/*` routes are gated (Group A/B) rather than ungated-because-non-mutating. They serve the global Master Defect List and Category Inventory together with per-entry lock state and submission counts — configuration-administration data with no consumer outside Configuration Control, so there is no reason to expose it to a floor session. Group A/B rather than Group A: this is ordinary configuration work, and Group A is reserved for System Admin.
 
