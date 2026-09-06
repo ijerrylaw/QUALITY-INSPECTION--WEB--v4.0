@@ -70,6 +70,7 @@ or summarized in the split — this is the original content, relocated.
 - [§45](#45-patch-apiconfig-made-atomic--rejected-saves-now-audited--2026-09-03) — PATCH /api/config made atomic + rejected saves now audited — 2026-09-03
 - [§46](#46-category-becomes-name-only--evaluationmode-moves-to-profilecategory--2026-09-03) — Category becomes name-only; evaluationMode moves to ProfileCategory — 2026-09-03
 - [§47](#47-38-docs-audit-flagged-items-closed-ai_rulesmd-33-navigation_and_rbacmd-31-api_and_integration_specmd-1--2026-09-05) — #38 docs-audit flagged items closed: AI_RULES.md §3/§4, NAVIGATION_AND_RBAC.md §3.1, API_AND_INTEGRATION_SPEC.md §1 — 2026-09-05
+- [§48](#48-amendment-change-acknowledgment-gate--2026-09-05) — Amendment change-acknowledgment gate — 2026-09-05
 
 ---
 
@@ -6252,3 +6253,178 @@ Documentation-only across all three — no code, schema, or behavior
 changes. Backend `tsc --noEmit` clean, 24/24 tests; frontend `tsc -b`
 clean, `oxlint` 0 errors, 88/88 tests — run once at session close to
 confirm the doc-only diffs hadn't touched anything else.
+
+---
+
+## 48. Amendment change-acknowledgment gate — 2026-09-05
+
+An amendment's stated reason had no structural relationship to what the
+amendment actually changed. The case that prompted this is lot
+`A001A6247003`: its note read `"wrong inpsection profile"` while the same
+payload also raised `def_thin_weak_spot` and `def_shining_oily_mark` from 0
+to 1. Nothing in the app could distinguish that from an amendment whose
+reason genuinely covered its contents — the reason was free text, and free
+text is not checkable against anything.
+
+Investigated first as a suspected engine bug, then fixed as a process gap
+rather than a code defect.
+
+Commits: `1ad0eca` (feat), `0c88f66` (chore(dev.db)).
+
+### What the investigation actually found
+
+The two 0→1 defect counts were **not** produced by the cross-profile
+recompute. Both defects are, and always were, full members of FACTORY
+STANDARD's `VISUALS` category (GRANULAR, AQL 2.5) — not orphaned, not
+invisible — and the original submission simply never recorded them. The
+counts were in the client's POST body: `POST /:id/amendments` stores
+`JSON.stringify(body.newValues)` verbatim, and the only code path that can
+put `def_thin_weak_spot: 1` there is `handleIncrement()` in
+`StepDefects.tsx`. Two increment taps during the amend session, on top of the
+intended profile switch.
+
+So the engine was correct and the amendment was, in the app's own terms,
+valid. What was missing was any requirement that the person submitting it had
+*seen* what they were submitting.
+
+### The gate
+
+`backend/src/lib/amendmentDiff.ts` — a field-agnostic comparator producing a
+flat `{path, changeType, from, to}` list. Three things it has to get right:
+
+- **Serialization asymmetry.** `originalValues` is the raw Prisma row, where
+  `defects`/`dimensions` are JSON *strings*; `newValues` is the frontend
+  payload, where the same fields are live *objects*. Without normalization
+  every amendment would report both as changed.
+- **Sparse defects.** A defect id absent from one side means "never
+  recorded" (count 0), not "no value to compare" — so a 0-vs-1 key reports as
+  `modified` (0 → 1), matching what `AmendmentDiffView` displays.
+- **Omission means untouched.** An amendment is a `Partial<Submission>` and
+  legitimately omits fields it does not change; `POST /api/amendments/:id/approve`
+  already reads every field as `newValues[k] ?? existing[k]`. Treating an
+  omitted key as a removal would report a dozen phantom changes per amendment.
+
+Path granularity is a **wire contract**, not an implementation detail — the
+strings round-trip as the acknowledgment keys. One entry per scalar
+(`profileId`), per defect (`defects.<id>`), per dimension
+(`dimensions.<id>`, whole 5-slot array — an operator re-measures a dimension,
+not a slot). `dimensionMins` is excluded as derived from `dimensions`;
+`verdict` is deliberately **not** excluded.
+
+### Why a preview endpoint rather than a client-side comparator
+
+`POST /api/submissions/:id/amendment-preview` is read-only and runs the same
+`computeAmendmentChanges()` the gate runs. A client-side re-derivation was
+considered and rejected: if the checklist finds N changes and the gate finds
+N+1, the operator ticks every box, the button enables, and the submit 400s on
+a change that has no checkbox — with no recovery path in the UI. Sharing one
+implementation makes that state unreachable. `frontend/src/lib/amendmentPayload.ts`
+closes the same hole from the other side: one builder for both the preview
+and the submit, so the two provably diff identical input.
+
+### Per-change checkboxes, not one blanket confirm
+
+A single "I confirm all changes are intentional" box costs the same whether
+an amendment changes one field or twelve, so it proves nothing about whether
+anything was read — it would have been ticked just as readily on
+`A001A6247003`. One box per change means the cost of confirming scales with
+what is being changed, and an unexpected line item is something the operator
+has to physically look at.
+
+### Reason: requiredness swapped between two fields
+
+`reasonCode` (closed four-code vocabulary, `lib/amendmentReason.ts`) became
+**required**; `reason`/`supervisorNote` became the **optional** note. The
+checkable field is now mandatory and the unverifiable one is not — which is
+the whole lesson of the originating incident. The note is required
+client-side only for `OTHER`, where the code carries no information by
+itself. `reasonCode` is an **audit** field: nothing compares it against the
+diff, deliberately — proving the requester saw every change is the
+acknowledgment set's job, and mapping a reason to an expected field-set would
+be both unmaintainable and wrong.
+
+### Sequencing: shipped optional, flipped in the same change as the UI
+
+Both fields shipped nullable and validated-only-when-present so the backend
+could land before the wizard that populates them. Making either
+unconditionally required at that point would have 400'd every amendment from
+the live frontend. The flip to required landed in the same change that makes
+the wizard always send them — verified live first, in that order.
+
+### Grandfathering is structural, not a date cutoff
+
+The gate runs only at draft creation, and `POST /api/amendments/:id/approve`
+never re-validates a payload (it only recomputes the verdict), so
+already-pending drafts cannot fail it retroactively. No timestamp constant
+and no schema version marker were needed. `acknowledgedChanges` NULL is what
+marks a pre-gate row, and the approver's `AcknowledgmentRollup` banner reads
+exactly that to flag it amber for manual review.
+
+`backend/src/routes/__tests__/amendmentGateScope.test.ts` guards four
+invariants by source inspection — there is no runtime call that can observe
+"this code was *not* consulted here":
+1. Gate stays out of the approve route.
+2. Gate stays out of `POST /api/submissions` (no prior record to diff).
+3. The preview route may compute but must never reject or write.
+4. Exactly one enforcement site, placed ahead of the recompute and the
+   transaction so a rejection writes nothing.
+
+### Schema
+
+Two additive nullable columns via `prisma db push` (never `migrate dev`, per
+`AI_RULES.md` §7), previewed with `migrate diff --script` first — no drops,
+no table rewrite:
+
+```sql
+ALTER TABLE "AmendmentLog" ADD COLUMN "acknowledgedChanges" TEXT;
+ALTER TABLE "AmendmentLog" ADD COLUMN "reasonCode" TEXT;
+```
+
+**`null` vs `'[]'` on `acknowledgedChanges` is load-bearing.** `null` = a
+caller that never ran the gate (pre-gate rows; post-flip it is an outright
+rejection). `'[]'` = a gate-aware client reporting nothing to acknowledge,
+still enforced. Collapsing them either reopens the bypass or rejects a valid
+no-op amendment.
+
+### Also fixed
+
+`NON_SUBSTANTIVE_DIFF_FIELDS` in `frontend/src/lib/diffTree.ts` was missing
+`gloveWeightSnapshot` — it postdates the rest of that list. Because
+`oneSidedNode()` recurses into a one-sided container, every amendment diff
+rendered an "Other Fields" section containing one `GLOVE WEIGHT SNAPSHOT` row
+per nested key of the frozen `DimensionResult` (11 of them), all sharing the
+same label since `labelForRow` reads only `keyPath[0]`. That field was the
+section's only occupant, so excluding it empties the section rather than
+merely tidying it.
+
+### Cross-workspace mirror
+
+The frontend cannot import from `backend/` at build time
+(`tsconfig.app.json` is `include: ["src"]`), so `amendmentReason.ts` exists
+twice, drift-guarded by `amendmentReason.sync.test.ts` — the same test-only
+cross-boundary import already used for `defaultProfileSeed` (AUDIT_REPORT.md
+#10). Drift here is not cosmetic: a code added on the frontend alone would
+render in the dropdown and then 400 every submission that selected it.
+
+### Verification
+
+Backend 58/58, frontend 113/113, `tsc` clean both sides, `oxlint` 0 errors
+with the warning count unchanged from baseline. `dev.db` `integrity_check`
+ok, `foreign_key_check` clean.
+
+Live click-through as a PIN operator (Jason Tan / OT4321) on lot
+`A001A6247001`: the `OTHER`-requires-note rule flipped the label and
+placeholder as specified; the checklist rendered two real changes with
+humanized labels (`FACTORY STANDARD → MEDLINE`, `EMBEDDED PARTICLE 0 → 1`)
+and agreed with the independent pre-submit summary; submit stayed disabled at
+0/2 and 1/2 and enabled at 2/2; the round trip persisted `reasonCode` and
+`acknowledgedChanges` correctly. A direct POST around the disabled button was
+rejected naming exactly the unacknowledged change. The test amendment was
+then rejected through `POST /api/amendments/:id/reject` — note that route
+takes the **submission** id, not the AmendmentLog id.
+
+Approver-side verification (Group A, MSAL — not drivable from an agent
+session) was done by Jerry directly: a fresh post-flip amendment acknowledged
+10 paths including `verdict` and a `dimensions.<id>` entry, and three
+pre-gate rows (`acknowledgedChanges` NULL) were reviewed through the amber
+untracked banner.
