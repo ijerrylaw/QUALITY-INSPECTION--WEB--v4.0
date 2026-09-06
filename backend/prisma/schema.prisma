@@ -1,6 +1,6 @@
 // ============================================================
 // QUALITY INSPECTION (WEB) v4.0 — Prisma Schema
-// Source of Truth: V4_MASTER_BLUEPRINT.md § 4 (Core Data Structures)
+// Source of Truth: DATA_SCHEMAS_AND_TYPES.md
 // ORM:      Prisma 7 (Early Access)
 // Provider: SQLite (dev) — swap datasource.url for PostgreSQL in prod
 // ============================================================

@@ -12,7 +12,7 @@
  *
  * Level 1 System Precedence: AI_RULES.md & UI_DESIGN_SYSTEM.md
  * Level 2 Feature Spec: v4_optimized_blueprint.md & implementation_plan.md
- * Level 3 Global Context: V4_MASTER_BLUEPRINT.md § 5 (evaluation modes)
+ * Level 3 Global Context: ISO2859_MATH_ENGINE.md § 2 (evaluation modes)
  */
 
 import {
@@ -375,7 +375,7 @@ export interface EvaluateAQLVerdictParams {
  * ISO 2859-1 threshold via getAQLThresholds(), and applies the category's
  * evaluationMode logic. A single failing category fails the whole lot.
  *
- * Evaluation Modes (per V4_MASTER_BLUEPRINT.md § 5):
+ * Evaluation Modes (per ISO2859_MATH_ENGINE.md § 2):
  *
  *   CUMULATIVE — Sum all defect counts in the category.
  *                FAIL if sum > Ac (threshold.ac).
