@@ -19,7 +19,14 @@
 /** The wizard's accumulated draft state (WizardPage.tsx's `inspectionData`). */
 export type WizardInspectionData = Record<string, any>;
 
-export interface AmendmentNewValues {
+/**
+ * Object-literal `type`, not `interface`, deliberately: consumers pass this
+ * where `Record<string, unknown>` is expected (the acknowledgment checklist's
+ * `newValues` prop, the gate-relevant test helper). A `type` alias to an object
+ * literal gets an implicit index signature for that assignability; an
+ * `interface` does not, because it is open to declaration merging.
+ */
+export type AmendmentNewValues = {
   productCode: string;
   productionDate: string;
   samplingTime: string;

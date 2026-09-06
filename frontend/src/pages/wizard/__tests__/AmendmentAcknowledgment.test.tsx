@@ -84,7 +84,10 @@ const NEW_VALUES = {
 };
 
 function stubPreview(changes: unknown[] = REAL_CHANGES) {
-  const spy = vi.fn(async () =>
+  // Declare the fetch args the component actually passes so `spy.mock.calls[N]`
+  // is typed `[string, RequestInit]` rather than the empty tuple a zero-arg
+  // implementation would produce.
+  const spy = vi.fn(async (_url: string, _init: RequestInit) =>
     new Response(JSON.stringify({ changes, detectedChangeCount: changes.length }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
