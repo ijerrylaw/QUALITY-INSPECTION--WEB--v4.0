@@ -1,0 +1,235 @@
+# Installer Package Manifest — what ships to a server, what never does
+
+**Status:** definition + verification only. No installer/packaging script exists in
+this repo yet (verified: no `Dockerfile`, `docker-compose.yml`, CI YAML, `Procfile`,
+`deploy*`, `package*.sh/.ps1`, `rsync`/`robocopy` wrapper, or `build:package` npm
+script anywhere). This file is the spec that the future packaging step MUST follow.
+
+**Goal restated:** the folder copied to a customer's server must not reveal that
+AI tooling (Claude Code, Antigravity) was used to build this app. The local repo
+and its git history are explicitly out of scope and are not being changed.
+
+---
+
+## 1. What SHOULD be in the installer package (allowlist)
+
+The package is the runtime app only: a pre-built frontend, the backend it needs to
+run, dependency manifests for a clean `npm install` on the server, the Prisma
+schema + migrations, install/update scripts, and env templates. Nothing else.
+
+```
+<package-root>/
+├── frontend/
+│   └── dist/                         # output of `npm run build --workspace=frontend`
+│       ├── index.html                #   (static SPA — the ONLY frontend artifact
+│       ├── assets/*.js               #    that ships; minified, comments stripped
+│       └── assets/*.css              #    by Vite/esbuild — see §4 note)
+│
+├── backend/
+│   ├── server.ts                     # entrypoint  ┐
+│   ├── src/**/*.ts                   # app code    │ EXCLUDING every __tests__/ dir
+│   ├── prisma/
+│   │   ├── schema.prisma
+│   │   └── migrations/**             # all migration.sql + migration_lock.toml
+│   ├── prisma.config.ts
+│   ├── tsconfig.json
+│   └── package.json                  # backend dependency manifest
+│
+├── package.json                      # root: workspaces + engines + `allowScripts`
+├── package-lock.json                 # root lockfile — required for reproducible
+│                                     #   `npm ci` on the server
+│
+├── scripts/
+│   └── setup.mjs                     # day-zero Entra credential wizard (`npm run setup`)
+│
+├── install/                          # NEW — to be written with the packaging step
+│   ├── install.(sh|ps1|md)           # npm ci → prisma migrate deploy → build check → start
+│   └── update.(sh|ps1|md)            # git-less update: swap files, npm ci, migrate deploy
+│
+├── backend/.env.example              # NEW — template (keys only, placeholder values):
+│                                     #   DATABASE_URL="file:./prod.db"   (or a Postgres URL)
+│                                     #   PORT=4009
+│                                     #   NODE_ENV=production
+│
+└── frontend/.env.example             # EXISTS — already placeholder-only (all-zero GUIDs);
+                                      #   ship as-is. Consumed at BUILD time, so on a
+                                      #   pre-built package it is informational only.
+```
+
+### Notes on specific "should ship" items
+
+- **`frontend/dist/` only** — never `frontend/src/`, `frontend/README.md`,
+  `frontend/vite.config.ts`, `frontend/index.html` (the source one),
+  `frontend/*.pem`, `frontend/.env.local`, or `frontend/node_modules`.
+- **Backend ships as TypeScript source** (the app currently runs via `tsx`). If the
+  packaging step instead pre-compiles to `.js` (`tsc`), ship `backend/dist/` +
+  `backend/prisma/` + manifests and drop the `.ts`. **Either way** the AI-tooling
+  comments in `backend/server.ts` / `src/**` still ship unless stripped — see §4.
+- **`package-lock.json`** must ship so the server runs `npm ci` (exact, reproducible)
+  rather than `npm install`.
+- **Prisma migrations ship**; the server runs `npx prisma migrate deploy` to build a
+  fresh empty database. The dev database file is never copied (see §2).
+- **`scripts/setup.mjs`** is safe to ship — checked, contains no AI-tooling references.
+- **`.env.example` templates ship; real `.env` / `.env.local` never do** (see §2).
+
+---
+
+## 2. What must NEVER be included — and current status
+
+| # | Item | In repo? | Ships under a correct allowlist? | Notes |
+|---|------|----------|-------------------------------|-------|
+| 1 | **`.git/`** (all history, every commit message + `Antigravity AI` authorship + 320 `Co-Authored-By: Claude` trailers) | yes, `.git/` is 7.0 MB | **No** — allowlist copies named paths, never `.git/` | The single biggest disclosure vector. An allowlist/`git archive`-based package excludes it structurally. A naive "copy the whole project folder" would include it — see §4. |
+| 2 | **`docs/` folder** | `docs/` exists on disk with `docs/reference/2026-05…07 *.xlsx` (real One Glove production data) — **not git-tracked** (`*.xlsx` gitignored) | **No** — `docs/` is not on the allowlist | The `.xlsx` files are real customer data *and* the source of taxonomy reconciliation; must never ship. |
+| 3 | **`AI_RULES.md`** (root) | yes, tracked | **No** — root `*.md` are not on the allowlist | Whole file is "AI Project Rules & Workspace Operating Protocol". Most obvious tell. |
+| 4 | **`CHANGELOG.md`, `AUDIT_REPORT.md`** | yes, tracked (CHANGELOG is 447 KB) | **No** | Both contain "Claude Code" / "Antigravity" / model-ID prose. |
+| 5 | **The other root spec docs** (`API_AND_INTEGRATION_SPEC.md`, `DATA_SCHEMAS_AND_TYPES.md`, `ISO2859_MATH_ENGINE.md`, `NAVIGATION_AND_RBAC.md`, `UI_DESIGN_SYSTEM.md`) | yes, tracked | **No** | Not AI-revealing per se, but internal design docs with no place on a customer server. Excluded for the same reason as #3/#4. |
+| 6 | **`archived/` folder** (8 files incl. `archived/AI_RULES.md` titled "Antigravity AI Project Rules") | yes, tracked | **No** — not on the allowlist | Superseded predecessor docs; referenced by nothing runnable. |
+| 7 | **`.claude/`** (and any `.cursor/`, `.windsurf/`, `.aider*`, `.continue/`, `.idea/`, `.vscode/`) | `.claude/` on disk, **gitignored** (`.gitignore:15`), never tracked. Empty `backend/.windsurf/` on disk, untracked, not ignored. | **No** — not on the allowlist; also gitignored so absent from `git archive` | Confirmed explicitly. Recommend deleting the stray empty `backend/.windsurf/` and widening `.gitignore` (see §5). |
+| 8 | **`node_modules/`** (root, `frontend/`, `backend/`) | on disk, gitignored | **No** — the server runs `npm ci` itself | Copying it would also be slow, platform-wrong, and could carry `.package-lock`/bin junk. |
+| 9 | **`backend/dev.db`** (real/seed SQLite data) | **yes — git-TRACKED** (`backend/.gitignore` does *not* list `dev.db`) | **No** — not on the allowlist; server builds a fresh DB via `prisma migrate deploy` | Because it is tracked, a `git archive` package would include it unless explicitly excluded. Put it on the exclude list (§3) **and** consider `git rm --cached backend/dev.db` + gitignoring it in a later chore. |
+| 10 | **`backend/test_api.mjs`, `backend/test_api.ps1`, `backend/test_fail.json`, `backend/test_pass.json`** | yes, tracked | **No** — not on the allowlist (backend allowlist is `server.ts` + `src/**` minus `__tests__` + `prisma/**` + manifests) | Ad-hoc API test scaffolding. |
+| 11 | **All `__tests__/` dirs + `*.test.ts`** under `backend/src/` and `frontend/src/` | yes, tracked | **No** — allowlist excludes `**/__tests__/**`; frontend ships only `dist/` | — |
+| 12 | **`backend/scripts/` one-off backfill scripts** (`backfill-*.ts`, `regression-grading-snapshot.ts`) | yes, tracked | **No** — `backend/scripts/` is not on the allowlist | Historical data-migration one-offs, not runtime. Exclude. |
+| 13 | **`*.pem`, `mkcert.exe`** (`frontend/10.10.110.31+1*.pem`) | gitignored (`frontend/.gitignore`), not tracked | **No** | Machine-specific dev TLS material. The server must generate/provide its own cert (see §4 caveat about the hardcoded path). |
+| 14 | **Real `.env` files** — `backend/.env` (holds `DATABASE_URL`), `frontend/.env.local` (holds real tenant/client GUIDs) | gitignored, not tracked | **No** — only `*.env.example` ships | — |
+| 15 | **Source maps (`*.js.map`)** | none produced | **No** — confirmed, see §4 | Holds. |
+| 16 | **`frontend/vite.config.ts`, `frontend/README.md`, editor/OS cruft** (`.DS_Store`, `*.log`) | mixed | **No** | Not on the allowlist. |
+
+---
+
+## 3. Codified exclude pattern (use until a real packaging script exists)
+
+**Preferred: build the package from a clean tree, not the working copy.**
+
+```
+# 1. Frontend: produce the static bundle
+npm ci
+npm run build --workspace=frontend        # -> frontend/dist/
+
+# 2. Backend + shared: export tracked files only, no .git, then prune
+git archive --format=tar HEAD | tar -x -C <package-root>
+
+# 3. Prune everything that must never ship (paths relative to <package-root>)
+rm -rf  <package-root>/.git \
+        <package-root>/docs \
+        <package-root>/archived \
+        <package-root>/AI_RULES.md \
+        <package-root>/CHANGELOG.md \
+        <package-root>/AUDIT_REPORT.md \
+        <package-root>/API_AND_INTEGRATION_SPEC.md \
+        <package-root>/DATA_SCHEMAS_AND_TYPES.md \
+        <package-root>/ISO2859_MATH_ENGINE.md \
+        <package-root>/NAVIGATION_AND_RBAC.md \
+        <package-root>/UI_DESIGN_SYSTEM.md \
+        <package-root>/backend/dev.db \
+        <package-root>/backend/test_api.mjs \
+        <package-root>/backend/test_api.ps1 \
+        <package-root>/backend/test_fail.json \
+        <package-root>/backend/test_pass.json \
+        <package-root>/backend/scripts \
+        <package-root>/frontend/src \
+        <package-root>/frontend/public \
+        <package-root>/frontend/index.html \
+        <package-root>/frontend/vite.config.ts \
+        <package-root>/frontend/README.md \
+        <package-root>/frontend/tsconfig*.json \
+        <package-root>/frontend/eslint.config.js \
+        <package-root>/frontend/package.json.disabled-if-any
+find <package-root> -type d -name __tests__ -prune -exec rm -rf {} +
+find <package-root> -type f -name '*.test.ts' -delete
+find <package-root> -type f -name '*.test.tsx' -delete
+
+# 4. Copy in the freshly built frontend
+mkdir -p <package-root>/frontend
+cp -r frontend/dist <package-root>/frontend/dist
+
+# 5. Add the not-yet-written install/ scripts + backend/.env.example, then archive
+```
+
+**rsync exclude list (equivalent, if copying from the working tree instead):**
+
+```
+--exclude='.git/'            --exclude='.gitignore'
+--exclude='.claude/'         --exclude='.cursor/'     --exclude='.windsurf/'
+--exclude='.idea/'           --exclude='.vscode/'
+--exclude='node_modules/'
+--exclude='docs/'            --exclude='archived/'
+--exclude='*.md'             # then explicitly re-add only install/*.md if used
+--exclude='backend/dev.db'   --exclude='backend/dev.db-*'
+--exclude='backend/test_*'   --exclude='backend/scripts/'
+--exclude='**/__tests__/'    --exclude='*.test.ts'    --exclude='*.test.tsx'
+--exclude='frontend/src/'    --exclude='frontend/public/'
+--exclude='frontend/vite.config.ts' --exclude='frontend/index.html'
+--exclude='frontend/*.pem'   --exclude='mkcert.exe'
+--exclude='*.map'
+--exclude='.env'             --exclude='.env.local'   --exclude='.env.production'
+--exclude='.DS_Store'        --exclude='*.log'
+```
+
+Whichever method is used, the packaging step MUST finish with an automated check
+(fail the build on any hit):
+
+```
+grep -rIl -e 'Claude' -e 'Anthropic' -e 'Antigravity' -e 'AI_RULES' -e 'Co-Authored-By' <package-root> ; test $? -eq 1
+test ! -e <package-root>/.git
+test ! -e <package-root>/backend/dev.db
+```
+
+---
+
+## 4. Risk assessment — does the current approach already exclude everything?
+
+**There is no packaging script yet, so there is nothing that "already" excludes
+anything.** The risk of accidental inclusion is **real and high** if the future
+step is written naively, because everything dangerous sits at or near the repo
+root next to the code that must ship:
+
+- `.git/` (7 MB of history with `Antigravity AI` authorship + Claude trailers),
+  `AI_RULES.md`, `CHANGELOG.md`, `AUDIT_REPORT.md`, `archived/`, and `docs/`
+  (real `.xlsx` customer data) are all one level above / beside `frontend/` and
+  `backend/`. A `xcopy /E`, `robocopy /MIR`, `Compress-Archive -Path .\*`, or
+  `tar czf app.tgz .` from the project root would sweep in **all** of it.
+- `backend/dev.db` is **git-tracked**, so even the clean `git archive` route
+  includes it unless it is explicitly pruned (it is, in §3).
+
+**One risk that an allowlist alone does NOT remove:** the backend ships as source
+(it runs via `tsx`), and these shipping files carry AI-tooling references in their
+header comments:
+
+| File | Line | Comment text |
+|------|------|--------------|
+| `backend/server.ts` | 14, 17 | `Level 1 System Precedence: AI_RULES.md …` / `(superseded the Antigravity-era v4_optimized_blueprint.md / implementation_plan.md)` |
+| `backend/src/engine/aqlEvaluator.ts` | 13, 15 | same pair |
+| `backend/src/routes/config.routes.ts` | 8, 12 | same pair |
+| `backend/src/routes/submissions.routes.ts` | 54, 58 | same pair |
+
+`frontend/src/context/ConfigContext.tsx:23` and `frontend/src/pages/WizardPage.tsx:34`
+have the same `AI_RULES.md` comment, **but** the frontend ships only as
+`vite build` output, which strips all comments — so those do not reach the package.
+The **four backend files do**. These header comments should be reworded (drop the
+`AI_RULES.md` reference and the `Antigravity-era` clause — e.g. just cite the live
+spec docs by their neutral names, or delete the "Level 1/Level 2 precedence" block)
+as a normal working-tree commit before the first real package is cut. This is a
+code-comment edit, unrelated to git-history rewriting.
+
+**Source maps — confirmed clean.** `frontend/vite.config.ts` has no `build` block,
+so `build.sourcemap` is Vite's default `false` — `vite build` emits no `*.js.map`.
+No `sourceMap` in `backend/tsconfig.json` either, and the backend isn't compiled in
+the current run model. Holds as long as nobody sets `sourcemap: true` later; the
+§3 automated check (`--exclude='*.map'` + a `find … -name '*.map'` assertion)
+guards against regression.
+
+**Secondary, non-AI deployment note (flag for the packaging work, not this task):**
+`backend/server.ts:46-48` and `frontend/vite.config.ts:17-18` both
+`fs.readFileSync` a hardcoded `frontend/10.10.110.31+1*.pem` path (this laptop's
+mkcert cert + static LAN IP). The app will not start on another host until that
+TLS-material loading is made configurable. Out of scope for the AI-scrub question,
+but the installer can't be considered "done" without it.
+
+---
+
+## Database migration
+
+**No.** This task added one documentation file (`docs/INSTALLER_PACKAGE_MANIFEST.md`)
+and changed nothing else — no schema change, no `prisma db push`, no migration
+added or modified, no code or data touched.
