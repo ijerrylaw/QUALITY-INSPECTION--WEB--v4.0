@@ -15,6 +15,13 @@
  *    "locked" the same way — >=1 referencing Submission — so wiping every
  *    Submission unlocks every productCode that had any).
  *
+ *  DELETE /api/dev/submissions/by-product-code   body: { productCode }
+ *    Same wipe, but scoped to ONE exact productCode: deletes only the
+ *    AmendmentLog rows whose parent Submission has that productCode, then
+ *    only those Submissions. Every other productCode's submissions — and
+ *    PinUser/M365UserRole/AppConfig — are untouched. Returns before/after
+ *    counts for that code and whether it unlocked (afterCount === 0).
+ *
  * AUDIT_REPORT.md carries an open item noting this router exists and must
  * be manually confirmed dead/removed before go-live, even though it's
  * env-gated — a conscious pre-launch checklist item, not just trust-the-gate.
@@ -73,6 +80,50 @@ router.delete('/submissions/all', async (_req: Request, res: Response) => {
     res.status(200).json({ beforeCount, afterCount, unlockedProductCodes });
   } catch (err) {
     console.error('[DELETE /api/dev/submissions/all]', err);
+    res.status(500).json({ error: 'Internal server error', details: String(err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /api/dev/submissions/by-product-code   body: { productCode }
+// ─────────────────────────────────────────────────────────────────────────────
+router.delete('/submissions/by-product-code', async (req: Request, res: Response) => {
+  try {
+    const raw = (req.body ?? {}) as { productCode?: unknown };
+    const productCode = typeof raw.productCode === 'string' ? raw.productCode.trim() : '';
+    if (!productCode) {
+      res.status(400).json({ error: 'productCode is required.' });
+      return;
+    }
+
+    const beforeCount = await prisma.submission.count({ where: { productCode } });
+    if (beforeCount === 0) {
+      res.status(404).json({ error: `No submissions found for product code "${productCode}".` });
+      return;
+    }
+
+    // FK-safe order: AmendmentLog children (scoped by their parent
+    // Submission's productCode) before the Submission parents — one
+    // transaction so a mid-wipe failure can't orphan AmendmentLog rows.
+    // Only rows matching this exact productCode are touched; PinUser and
+    // M365UserRole are never referenced.
+    await prisma.$transaction([
+      prisma.amendmentLog.deleteMany({ where: { submission: { productCode } } }),
+      prisma.submission.deleteMany({ where: { productCode } }),
+    ]);
+
+    const afterCount = await prisma.submission.count({ where: { productCode } });
+
+    res.status(200).json({
+      productCode,
+      beforeCount,
+      afterCount,
+      // getProductCodeUsage() (config.routes.ts) treats a code with zero
+      // referencing Submissions as unlocked — true here once afterCount is 0.
+      unlocked: afterCount === 0,
+    });
+  } catch (err) {
+    console.error('[DELETE /api/dev/submissions/by-product-code]', err);
     res.status(500).json({ error: 'Internal server error', details: String(err) });
   }
 });
