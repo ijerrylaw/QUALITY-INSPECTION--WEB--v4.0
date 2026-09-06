@@ -72,202 +72,51 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
 ## Resolved (summary — full detail in CHANGELOG.md)
 
 37. **RESOLVED 2026-09-05** (`dd27e5d`, `ac5a44a`, `1b4dbe2` + three
-    `chore(dev.db)` checkpoints). Discovery found two independent
-    dead/dying groups of `AppConfig` JSON columns: `aqlCategories`/
-    `defectDefinitions` (written every PATCH, never meaningfully read —
-    every real reader consumes the per-profile nested field reconstructed
-    from the Master Defect List registry instead) and `productCodes`/
-    `productMatrixConfig`/`productProfileMap` (writes already frozen at B6;
-    read only by `resolveProductRegistry()`'s unmigrated-database fallback).
-    Fixed in three stages, same shape as the `inspectionProfiles` Stage A/B
-    arc:
-    - **Part 1** — dropped `aqlCategories`/`defectDefinitions` from
-      `config.routes.ts`'s `JSON_FIELDS`. Columns left in place, frozen (both
-      already `"[]"`); their schema-column drop deferred to a separately-scoped
-      future stage. Live PATCH proof against an isolated `dev.db` copy: a
-      poisoned payload for both fields left the stored columns byte-identical
-      while the real per-profile reconstruction (registry-backed) was
-      unaffected.
-    - **Part 2** — confirmed the unmigrated-database fallback in
-      `resolveProductRegistry()` (`productEntry.ts`) was no longer needed
-      (every live deployment had migrated onto `AppConfig.products`),
-      removed it, and dropped all three legacy columns via `prisma db push
-      --accept-data-loss` (27 → 24 surviving `AppConfig` columns). Rollback
-      tag `pre-appconfig-legacy-cleanup` pushed beforehand.
-    - **Stage B** (2026-09-05, same-day follow-up) — the Part 1 deferral
-      came due: re-confirmed via a fresh full-codebase grep (not reusing the
-      Part 1 evidence) that `aqlCategories`/`defectDefinitions` still had zero
-      real reads, then dropped both columns the same way (24 → 22 surviving
-      `AppConfig` columns). `formatAppConfig()`'s GET projection — the one
-      remaining column-shaped read, since it echoed the columns back in the
-      response — now hardcodes `[]` instead (the value it always produced).
-      Rollback tag `pre-aqlcategories-defectdefinitions-column-drop` pushed
-      beforehand.
-    API contract unchanged throughout every stage — `PATCH`/`GET /api/config`
-    still accept/return all five field names; only storage moved, then
-    disappeared. Verification (each stage): 88/88 regression cases
-    byte-identical, proven twice for every schema drop (frozen pre-drop copy
-    and live post-drop `dev.db`); backend tsc + 20/20 tests, frontend tsc +
-    74/74 tests, oxlint 0 errors; `PRAGMA integrity_check`/`foreign_key_check`
-    clean; zero remaining references to the dropped fields in the regenerated
-    Prisma client. Doc corrections: `schema.prisma` tombstone comments for
-    both groups (disambiguated from the unrelated, earlier `inspectionProfiles`
-    "Stage B"), `DATA_SCHEMAS_AND_TYPES.md` §3.1's now-false fallback claim
-    corrected. See #38 for the follow-up docs-audit pass this closure
-    triggered across the six core reference docs.
+    `chore(dev.db)` checkpoints). Two dead/dying `AppConfig` JSON column
+    groups — `aqlCategories`/`defectDefinitions` and `productCodes`/
+    `productMatrixConfig`/`productProfileMap` — frozen then dropped from the
+    schema in three stages (27 → 24 → 22 surviving columns), rollback-tagged
+    each time. API contract unchanged; 88/88 regression byte-identical at
+    every stage. Triggered the six-core-doc audit pass (#38).
+    → `CHANGELOG.md` §49.
 
-38. **RESOLVED 2026-09-05** (`e451494`). Docs-audit pass on all six core
-    reference docs (`AI_RULES.md`, `API_AND_INTEGRATION_SPEC.md`,
-    `DATA_SCHEMAS_AND_TYPES.md`, `ISO2859_MATH_ENGINE.md`,
-    `NAVIGATION_AND_RBAC.md`, `UI_DESIGN_SYSTEM.md`), triggered by #37's
-    column drops. Root cause of everything found: two already-completed
-    migrations whose downstream doc references were never updated — profile
-    identity moving off `AppConfig.inspectionProfiles` JSON onto the `Profile`
-    table (Stage A0, then the column dropped entirely at Stage B), and
-    `DefectDefinition` dropping `currentClass`/`defaultClass` for a strict
-    `categoryId` link at the Master Defect List Stage 2 engine cutover.
-    Three of six docs needed correction:
-    - `API_AND_INTEGRATION_SPEC.md` — `POST /api/submissions`'s profileId
-      sanity-check/404 paths renamed from `AppConfig.inspectionProfiles` to
-      the `Profile` table; the registry section's stale "until Stage 4
-      replaces it" note updated to reflect that Stage 4's pickers shipped
-      without changing the write mechanism.
-    - `DATA_SCHEMAS_AND_TYPES.md` — the largest correction. §2.1 rewritten:
-      no JSON column exists, the documented interfaces are a pure wire
-      contract (PATCH payload / GET response shape), `currentClass`/
-      `defaultClass` are gone from both the engine and the reconstructed
-      response. §2.2 had an internal contradiction with its own later
-      "As-migrated state" section — two stale "profile identity is still on
-      the JSON side" claims corrected to match. §1/§3 storage comments
-      corrected to match §3.1's already-accurate account.
-    - `ISO2859_MATH_ENGINE.md` — two lines repeating the same stale
-      profile-identity claim, corrected.
-    `AI_RULES.md`, `NAVIGATION_AND_RBAC.md`, `UI_DESIGN_SYSTEM.md` had nothing
-    in scope to correct (the first two had content worth flagging instead —
-    see #39/#40/#41 — the third is pure CSS/styling convention, unrelated to
-    the schema-cleanup arc). Per the task's brief, ambiguous or contested
-    content was flagged rather than resolved unilaterally — see #39
-    (AI_RULES.md process-rule ambiguity), #40 (Entra redirect URI protocol
-    question), #41 (endpoint documentation coverage gap).
+38. **RESOLVED 2026-09-05** (`e451494`). Docs-audit pass on the six core
+    reference docs, triggered by #37's column drops. `API_AND_INTEGRATION_SPEC.md`,
+    `DATA_SCHEMAS_AND_TYPES.md`, and `ISO2859_MATH_ENGINE.md` corrected for two
+    already-completed migrations (profile identity onto the `Profile` table;
+    `DefectDefinition` strict `categoryId` link). Three ambiguous items were
+    flagged, not fixed — closed separately as #39/#40/#41.
+    → `CHANGELOG.md` §50 (and §47 for #39/#40/#41).
 
-39. **RESOLVED 2026-09-05** (`f646211`). Jerry decided both
-    sub-issues flagged during the #38 docs-audit pass; rewrote
-    `AI_RULES.md` §3/§4 to match.
-    - **§3 (WORKSPACE EXECUTION MODES):** removed the "retained for
-      historical context only" / Antigravity-retirement blockquote —
-      wrong for this section specifically. Plan Mode is real, current
-      Claude Code behavior (the same Plan Mode this session used to
-      close out #41 just before this item), not a retired Antigravity
-      artifact. Rewrote the Plan/Execute Mode bullets to describe actual
-      current mechanics: Plan Mode entered via the `EnterPlanMode` tool
-      (task-shape-triggered, not a typed `/plan` command), read-only
-      except for the plan file, exited via `ExitPlanMode` for approval.
-      §2's identical blockquote is untouched — it's correct there (a
-      model-tier table that did include real Antigravity-era choices).
-    - **§4 (renamed EXECUTION PROTOCOL, was "INCREMENTAL EXECUTION
-      PROTOCOL / Micro-Step Rule"):** replaced "One Complete File per
-      Turn" + approve-before-every-next-file with the actually-practiced
-      rule: batched multi-file turns are normal, and approval gates are
-      reserved for genuinely irreversible steps (schema drops,
-      `--accept-data-loss`, force-push) — cross-referencing §5's Git
-      Safety rules rather than duplicating them. §5 already described
-      this philosophy correctly; §4 was the section that had drifted.
-      "No Incomplete Code Snippets" retained unchanged — still accurate.
+39. **RESOLVED 2026-09-05** (`f646211`). Jerry decided both sub-issues the
+    #38 pass flagged; `AI_RULES.md` §3 (Plan/Execute Mode mechanics — dropped
+    the wrong Antigravity-retirement blockquote) and §4 (batched multi-file
+    turns replace "one file per turn") rewritten to match current practice.
+    → `CHANGELOG.md` §47.
 
-40. **RESOLVED 2026-09-05** (`af104d5`). Confirmed via the actual
-    Azure Portal Entra App Registration (Authentication → Single-page
-    application): the real registered dev redirect URI is
-    `https://localhost:4001` (HTTPS), not `http://localhost:4001` as
-    `NAVIGATION_AND_RBAC.md` §3.1 previously documented — a genuine doc
-    inaccuracy, not a case covered by Entra's `http://localhost`
-    exemption. Corrected the line, and also added a second registered
-    redirect URI, `https://10.10.110.31:4001` (LAN access, this laptop's
-    reserved/static IP per IT), which was not stale but simply never
-    documented anywhere in the six core MDs — confirmed absent by a full
-    grep before adding it. Both values independently cross-checked
-    against already-live code that was already treating them as
-    authoritative: `EnvironmentInfoPanel.tsx`'s
-    `EXPECTED_REDIRECT_URIS` array and `vite.config.ts`'s mkcert
-    HTTPS-for-both-hosts setup, both predating this fix and both in
-    agreement with the Portal.
+40. **RESOLVED 2026-09-05** (`af104d5`). `NAVIGATION_AND_RBAC.md` §3.1's dev
+    redirect URI corrected `http://` → `https://localhost:4001` against the
+    actual Azure Portal App Registration, and the previously-undocumented
+    `https://10.10.110.31:4001` LAN URI added. Cross-checked against live
+    `EnvironmentInfoPanel.tsx` / `vite.config.ts`.
+    → `CHANGELOG.md` §47.
 
-41. **RESOLVED 2026-09-05** (`006e676`). Wrote up the nine real, live
-    endpoints flagged by the #38 docs-audit pass as absent from
-    `API_AND_INTEGRATION_SPEC.md`'s "REST API ENDPOINTS" section: `GET
-    /api/access-log`; the full M365 admin CRUD surface (`GET/PATCH/DELETE
-    /api/m365-users`, `POST /api/m365-users/invite`, `PATCH
-    /api/m365-users/:id/deactivate`/`reactivate`, `POST
-    /api/auth/m365-login`, `POST /api/auth/claim-bootstrap-admin`); and
-    `DELETE /api/dev/submissions/all` (confirmed the only route under
-    `/api/dev/*` — no others exist). Two new subsections added to
-    `API_AND_INTEGRATION_SPEC.md` §1 ("Access Log (Group A Route)" and
-    "Microsoft 365 User Administration (Group A Routes)"), matching the
-    existing Role/Payload/Response/Auth bullet structure, full
-    request/response shapes verified against the actual route
-    implementations (`accessLog.routes.ts`, `m365Users.routes.ts`,
-    `devTools.routes.ts`), not assumed.
-    **Correction to this item's own original framing:** the original
-    flag also claimed `GET /api/access-log` was absent from
-    `NAVIGATION_AND_RBAC.md` §5.1's session-gate table — checked and that
-    was already incorrect when written; the row was already present
-    there. The genuine gap in that table was the eight M365/dev-tools
-    routes, now added (`GET /api/m365-users` through `POST
-    /api/auth/claim-bootstrap-admin`, plus `DELETE
-    /api/dev/submissions/all`).
+41. **RESOLVED 2026-09-05** (`006e676`). Nine live endpoints absent from
+    `API_AND_INTEGRATION_SPEC.md` written up (access-log, the M365 admin CRUD
+    surface, `DELETE /api/dev/submissions/all`); eight also added to
+    `NAVIGATION_AND_RBAC.md` §5.1's session-gate table. `GET /api/access-log`
+    was already in that table — the original flag was wrong on that one point.
+    → `CHANGELOG.md` §47.
 
-42. **RESOLVED 2026-09-05** (`127267f`, `7952b4b`, `14ff794`). Investigated
-    2026-09-05 against the real pending amendment on lot `A001A6247003`
-    (FACTORY STANDARD → MEDLINE) and found the diff view genuinely broken,
-    not merely confusing: it compared only raw `{defectId: count}` with zero
-    concept of AQL category membership, so a profile switch could silently
-    move `def_sagging` from an excluded RECORD ONLY category into MEDLINE's
-    BARRIER category — flipping BARRIER from PASS to FAIL — and orphan
-    `def_donning`/`def_odour` entirely (MEDLINE has no OTHERS-equivalent),
-    with **none of it visible anywhere in the diff**, even fully expanded,
-    because none of those three defects' recorded *counts* changed. Fixed in
-    three parts, verified against the same real amendment (read-only
-    throughout — never approved/rejected/mutated):
-    - **Part 1** (`127267f`) — `amendmentDiffLabels.ts`'s
-      `resolveCrossProfileDefectContext()` now resolves BOTH the before and
-      after profile's defect→category maps (the old function resolved only
-      one, always the proposed side); `detectDefectCategoryChange()` flags
-      three distinct, separately-badged cases in `AmendmentDiffView.tsx` —
-      `'moved'`/`'evalModeChanged'` (Cyan, informational) and `'orphaned'`
-      (Amber, Action Required) — and a defect-level row now stays visible
-      whenever EITHER its count OR its category assignment changed, not
-      count alone. Caught mid-build: `GET /api/config` actually emits the
-      legacy `aql`/`evalMode` field names, not the canonical
-      `aqlLevel`/`evaluationMode` — `buildDefectCategoryMap()` checks both
-      spellings now. New `RecomputedVerdictSummary.tsx` surfaces
-      `AmendmentLog.recomputedVerdict`/`recomputedCategoryResults` — already
-      computed correctly at draft time, never rendered anywhere before this.
-    - **Part 2** (`7952b4b`) — `evaluateAQLVerdict()` now warns when a
-      recorded defect count matches no category in the active profile at
-      all, built from every category regardless of evaluationMode
-      (specifically NOT just the categories that reach a grading branch —
-      the naive version misfired on every normal RECORD ONLY category before
-      this distinction was caught and fixed pre-ship). Grading behavior
-      unchanged; visibility only.
-    - **Part 3** (`14ff794`) — test coverage for both parts, fixtures
-      modeled on the real category/defect ids above, not invented data.
-    Verification: 88/88 regression cases byte-identical (frozen dev.db copy,
-    proves Part 2 is a pure no-op for grading); backend 24/24 tests, frontend
-    88/88 tests, both tsc clean, oxlint 0 errors. The Part 2 warning also
-    fired live and correctly during the regression replay itself — 12 times,
-    every one for `def_donning`/`def_odour` specifically, zero false
-    positives for any RECORD ONLY-category defect across the full real
-    dataset. Final check: pulled the REAL `GET /api/config` response and the
-    real amendment's before/after values (read-only) and ran them through
-    the actual shipped `resolveCrossProfileDefectContext()`/
-    `detectDefectCategoryChange()` (not reconstructed fixtures) — confirmed
-    byte-for-byte: `def_sagging` → `'moved'` (RECORD ONLY → BARRIER),
-    `def_donning`/`def_odour` → `'orphaned'`, both resolving to real names
-    rather than raw ids. Full live-UI click-through in ApprovalsQueue was not
-    performed — Group A/B routes require M365 SSO, which cannot be completed
-    in this session's sandboxed browser; open if Jerry wants a visual
-    confirmation on top of the data-level verification above. The real
-    `A001A6247003` amendment itself was never mutated — still
-    `PENDING_APPROVAL`, exactly as found.
+42. **RESOLVED 2026-09-05** (`127267f`, `7952b4b`, `14ff794`). The amendment
+    diff view compared only raw `{defectId: count}` and so hid category-
+    membership changes caused by a profile switch (a defect moving into a
+    graded category, or orphaning entirely, with no count change).
+    `AmendmentDiffView.tsx` now badges `moved`/`evalModeChanged`/`orphaned`
+    cases; `evaluateAQLVerdict()` warns on a defect matching no category.
+    Grading unchanged (88/88 byte-identical); verified against the real
+    `A001A6247003` amendment, read-only.
+    → `CHANGELOG.md` §51.
 
 20. **RESOLVED 2026-09-02 — live-verified by Jerry** (`75b93fd`). Root
     cause was not a missing feature: `PAGE_SIZE = 50` exceeded the actual

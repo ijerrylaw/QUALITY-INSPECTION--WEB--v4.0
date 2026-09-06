@@ -71,6 +71,9 @@ or summarized in the split — this is the original content, relocated.
 - [§46](#46-category-becomes-name-only--evaluationmode-moves-to-profilecategory--2026-09-03) — Category becomes name-only; evaluationMode moves to ProfileCategory — 2026-09-03
 - [§47](#47-38-docs-audit-flagged-items-closed-ai_rulesmd-33-navigation_and_rbacmd-31-api_and_integration_specmd-1--2026-09-05) — #38 docs-audit flagged items closed: AI_RULES.md §3/§4, NAVIGATION_AND_RBAC.md §3.1, API_AND_INTEGRATION_SPEC.md §1 — 2026-09-05
 - [§48](#48-amendment-change-acknowledgment-gate--2026-09-05) — Amendment change-acknowledgment gate — 2026-09-05
+- [§49](#49-appconfig-legacy-json-column-cleanup-audit_report-37--2026-09-05) — AppConfig legacy-JSON column cleanup (AUDIT_REPORT #37) — 2026-09-05
+- [§50](#50-six-core-reference-docs--audit-corrections-audit_report-38-companion-to-47--2026-09-05) — Six core reference docs — audit corrections (AUDIT_REPORT #38; companion to §47) — 2026-09-05
+- [§51](#51-cross-profile-amendment-diff--category-membership-changes-now-surfaced-audit_report-42--2026-09-05) — Cross-profile amendment diff — category-membership changes now surfaced (AUDIT_REPORT #42) — 2026-09-05
 
 ---
 
@@ -6428,3 +6431,186 @@ session) was done by Jerry directly: a fresh post-flip amendment acknowledged
 10 paths including `verdict` and a `dimensions.<id>` entry, and three
 pre-gate rows (`acknowledgedChanges` NULL) were reviewed through the amber
 untracked banner.
+
+---
+
+## 49. AppConfig legacy-JSON column cleanup (AUDIT_REPORT #37) — 2026-09-05
+
+Closes `AUDIT_REPORT.md` #37. Commits `dd27e5d`, `ac5a44a`, `1b4dbe2`, plus
+three `chore(dev.db)` checkpoints. Relocated here 2026-09-06 from the resolved
+list in `AUDIT_REPORT.md`, verbatim in substance.
+
+### What discovery found
+
+Two independent dead/dying groups of `AppConfig` JSON columns:
+
+- **`aqlCategories` / `defectDefinitions`** — written on every `PATCH /api/config`
+  but never meaningfully read. Every real reader consumes the per-profile nested
+  field reconstructed from the Master Defect List registry (§42–§46) instead.
+- **`productCodes` / `productMatrixConfig` / `productProfileMap`** — writes already
+  frozen since the B6 product-record consolidation; read only by
+  `resolveProductRegistry()`'s unmigrated-database fallback in
+  `backend/src/lib/productEntry.ts`.
+
+### The three-stage removal (same shape as the earlier `inspectionProfiles` Stage A/B arc)
+
+- **Part 1** — dropped `aqlCategories` / `defectDefinitions` from
+  `config.routes.ts`'s `JSON_FIELDS`. The schema columns were left in place,
+  frozen (both already `"[]"`); their column-level drop was deferred to a
+  separately-scoped later stage. Live `PATCH` proof against an isolated `dev.db`
+  copy: a deliberately poisoned payload for both fields left the stored columns
+  byte-identical, while the real per-profile reconstruction (registry-backed) was
+  unaffected.
+- **Part 2** — confirmed the unmigrated-database fallback in
+  `resolveProductRegistry()` (`productEntry.ts`) was no longer needed (every live
+  deployment had already migrated onto `AppConfig.products`), removed it, and
+  dropped all three legacy product columns via `prisma db push
+  --accept-data-loss` (27 → 24 surviving `AppConfig` columns). Rollback tag
+  `pre-appconfig-legacy-cleanup` pushed beforehand.
+- **Stage B** (same day) — the Part 1 deferral came due. Re-confirmed via a fresh
+  full-codebase grep (not reusing the Part 1 evidence) that
+  `aqlCategories` / `defectDefinitions` still had zero real reads, then dropped
+  both columns the same way (24 → 22 surviving `AppConfig` columns).
+  `formatAppConfig()`'s `GET` projection — the one remaining column-shaped read,
+  since it echoed the columns back in the response — now hardcodes `[]` (the
+  value it always produced). Rollback tag
+  `pre-aqlcategories-defectdefinitions-column-drop` pushed beforehand.
+
+### API contract
+
+Unchanged throughout every stage. `PATCH` / `GET /api/config` still accept and
+return all five field names; only storage moved, then disappeared.
+
+### Verification (each stage)
+
+88/88 regression cases byte-identical, proven twice for every schema drop (a
+frozen pre-drop copy and the live post-drop `dev.db`). Backend `tsc` + 20/20
+tests; frontend `tsc` + 74/74 tests; oxlint 0 errors. `PRAGMA integrity_check` /
+`foreign_key_check` clean. Zero remaining references to the dropped fields in the
+regenerated Prisma client.
+
+### Doc corrections made in the same arc
+
+`schema.prisma` tombstone comments for both column groups (disambiguated from the
+unrelated, earlier `inspectionProfiles` "Stage B"); `DATA_SCHEMAS_AND_TYPES.md`
+§3.1's now-false fallback claim corrected. This closure also triggered the
+six-core-doc audit pass — see §50.
+
+---
+
+## 50. Six core reference docs — audit corrections (AUDIT_REPORT #38; companion to §47) — 2026-09-05
+
+Closes `AUDIT_REPORT.md` #38. Commit `e451494`. Relocated here 2026-09-06 from
+the resolved list in `AUDIT_REPORT.md`, verbatim in substance.
+
+Docs-audit pass across all six core reference docs (`AI_RULES.md`,
+`API_AND_INTEGRATION_SPEC.md`, `DATA_SCHEMAS_AND_TYPES.md`,
+`ISO2859_MATH_ENGINE.md`, `NAVIGATION_AND_RBAC.md`, `UI_DESIGN_SYSTEM.md`),
+triggered by §49's column drops.
+
+### Root cause
+
+Two already-completed migrations whose downstream doc references were never
+updated:
+1. Profile identity moving off `AppConfig.inspectionProfiles` JSON onto the
+   `Profile` table (Stage A0, then the column dropped entirely at Stage B).
+2. `DefectDefinition` dropping `currentClass` / `defaultClass` for a strict
+   `categoryId` link at the Master Defect List Stage 2 engine cutover (§43).
+
+### Three of six docs needed correction
+
+- **`API_AND_INTEGRATION_SPEC.md`** — `POST /api/submissions`'s `profileId`
+  sanity-check / 404 paths renamed from `AppConfig.inspectionProfiles` to the
+  `Profile` table; the registry section's stale "until Stage 4 replaces it" note
+  updated to reflect that Stage 4's pickers shipped without changing the write
+  mechanism.
+- **`DATA_SCHEMAS_AND_TYPES.md`** — the largest correction. §2.1 rewritten: no
+  JSON column exists, the documented interfaces are a pure wire contract (PATCH
+  payload / GET response shape), `currentClass` / `defaultClass` gone from both
+  the engine and the reconstructed response. §2.2 had an internal contradiction
+  with its own later "As-migrated state" section — two stale "profile identity is
+  still on the JSON side" claims corrected to match. §1 / §3 storage comments
+  corrected to match §3.1's already-accurate account.
+- **`ISO2859_MATH_ENGINE.md`** — two lines repeating the same stale
+  profile-identity claim, corrected.
+
+### The other three docs
+
+`AI_RULES.md`, `NAVIGATION_AND_RBAC.md`, `UI_DESIGN_SYSTEM.md` had nothing in
+scope for this schema-cleanup arc. The first two carried unrelated content worth
+flagging rather than fixing unilaterally; those flagged items were decided by
+Jerry and closed separately — see **§47** (AUDIT_REPORT #39 `AI_RULES.md` §3/§4
+process-rule staleness, #40 Entra redirect URI, #41 endpoint documentation
+coverage gap). `UI_DESIGN_SYSTEM.md` is pure styling convention, unrelated.
+
+### Verification
+
+Documentation-only — no code, schema, or behaviour change. Backend `tsc --noEmit`
+clean, 24/24 tests; frontend `tsc -b` clean, oxlint 0 errors, 74/74 tests.
+
+---
+
+## 51. Cross-profile amendment diff — category-membership changes now surfaced (AUDIT_REPORT #42) — 2026-09-05
+
+Closes `AUDIT_REPORT.md` #42. Commits `127267f`, `7952b4b`, `14ff794`. Relocated
+here 2026-09-06 from the resolved list in `AUDIT_REPORT.md`, verbatim in
+substance.
+
+### The bug
+
+Investigated against the real pending amendment on lot `A001A6247003`
+(FACTORY STANDARD → MEDLINE). The amendment diff view was genuinely broken, not
+merely confusing: it compared only raw `{defectId: count}` with zero concept of
+AQL category membership. So a profile switch could silently move `def_sagging`
+from an excluded RECORD ONLY category into MEDLINE's BARRIER category — flipping
+BARRIER from PASS to FAIL — and orphan `def_donning` / `def_odour` entirely
+(MEDLINE has no OTHERS-equivalent), with **none of it visible anywhere in the
+diff**, even fully expanded, because none of those three defects' recorded
+*counts* changed.
+
+### Fix — three parts, verified against the same real amendment (read-only throughout; never approved/rejected/mutated)
+
+- **Part 1** (`127267f`) — `amendmentDiffLabels.ts`'s
+  `resolveCrossProfileDefectContext()` now resolves BOTH the before- and
+  after-profile's defect→category maps (the old function resolved only one,
+  always the proposed side). `detectDefectCategoryChange()` flags three distinct,
+  separately-badged cases in `AmendmentDiffView.tsx` — `'moved'` /
+  `'evalModeChanged'` (Cyan, informational) and `'orphaned'` (Amber, Action
+  Required) — and a defect-level row now stays visible whenever EITHER its count
+  OR its category assignment changed, not count alone. Caught mid-build:
+  `GET /api/config` actually emits the legacy `aql` / `evalMode` field names, not
+  the canonical `aqlLevel` / `evaluationMode`, so `buildDefectCategoryMap()`
+  checks both spellings now. New `RecomputedVerdictSummary.tsx` surfaces
+  `AmendmentLog.recomputedVerdict` / `recomputedCategoryResults` — already
+  computed correctly at draft time, never rendered anywhere before this.
+- **Part 2** (`7952b4b`) — `evaluateAQLVerdict()` now warns when a recorded
+  defect count matches no category in the active profile at all, built from every
+  category regardless of `evaluationMode` (specifically NOT just the categories
+  that reach a grading branch — the naive version misfired on every normal RECORD
+  ONLY category before this distinction was caught and fixed pre-ship). Grading
+  behaviour unchanged; visibility only.
+- **Part 3** (`14ff794`) — test coverage for both parts, fixtures modelled on the
+  real category / defect ids above, not invented data.
+
+### Verification
+
+88/88 regression cases byte-identical (frozen `dev.db` copy — proves Part 2 is a
+pure no-op for grading). Backend 24/24 tests, frontend 88/88 tests, both `tsc`
+clean, oxlint 0 errors. The Part 2 warning also fired live and correctly during
+the regression replay itself — 12 times, every one for `def_donning` /
+`def_odour` specifically, zero false positives for any RECORD ONLY-category
+defect across the full real dataset. Final check: pulled the REAL `GET /api/config`
+response and the real amendment's before/after values (read-only) and ran them
+through the actual shipped `resolveCrossProfileDefectContext()` /
+`detectDefectCategoryChange()` (not reconstructed fixtures) — confirmed
+byte-for-byte: `def_sagging` → `'moved'` (RECORD ONLY → BARRIER),
+`def_donning` / `def_odour` → `'orphaned'`, both resolving to real names rather
+than raw ids.
+
+### Not done
+
+Full live-UI click-through in ApprovalsQueue was not performed — Group A/B routes
+require M365 SSO, which cannot be completed in a sandboxed browser session; open
+if a visual confirmation on top of the data-level verification is wanted. The
+real `A001A6247003` amendment was never mutated — still `PENDING_APPROVAL`,
+exactly as found.
