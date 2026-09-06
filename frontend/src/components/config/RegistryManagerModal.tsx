@@ -13,7 +13,7 @@
  * profile states both, at the moment it adds a category.
  *
  * ── Scope (Stage 3) ─────────────────────────────────────────────────────────
- * View the registry, register new entries, rename existing ones. This modal
+ * View the registry, register entries, rename existing ones. This modal
  * does NOT add an entry to a profile or a category — that is the Stage 4
  * picker's job, reached from the per-category "+ ADD" buttons and the kanban,
  * which this stage deliberately leaves alone.
@@ -51,7 +51,7 @@ interface RegistryEntry {
 const ENTITY_CONFIG = {
   defect: {
     title: 'MASTER DEFECT LIST',
-    blurb: 'Every defect name the system knows. Profiles select from this list.',
+    blurb: 'Every defect name the system knows. Profiles add from this list.',
     path: 'defects',
     noun: 'defect',
     addLabel: 'REGISTER DEFECT',
@@ -59,7 +59,7 @@ const ENTITY_CONFIG = {
   },
   category: {
     title: 'CATEGORY INVENTORY',
-    blurb: 'Every severity category name the system knows. Each profile picks its own subset and sets its own AQL level and evaluation mode.',
+    blurb: 'Every severity category name the system knows. Each profile adds its own subset and sets its own AQL level and evaluation mode.',
     path: 'categories',
     noun: 'category',
     addLabel: 'REGISTER CATEGORY',

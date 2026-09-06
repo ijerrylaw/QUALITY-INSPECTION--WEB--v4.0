@@ -76,6 +76,7 @@ or summarized in the split — this is the original content, relocated.
 - [§51](#51-cross-profile-amendment-diff--category-membership-changes-now-surfaced-audit_report-42--2026-09-05) — Cross-profile amendment diff — category-membership changes now surfaced (AUDIT_REPORT #42) — 2026-09-05
 - [§52](#52-picker-modal-titles-use-select-not-add-audit_report-43--2026-09-06) — Picker modal titles use SELECT not ADD (AUDIT_REPORT #43) — 2026-09-06
 - [§53](#53-category-and-defect-action-verbs-finalized-manage-register-add-supersedes-52--2026-09-06) — Category and Defect action verbs finalized: MANAGE, REGISTER, ADD (supersedes §52) — 2026-09-06
+- [§54](#54-registrymanagermodal-blurb-and-help-text-wording-closes-53-loose-ends--2026-09-06) — RegistryManagerModal blurb and help text wording (closes §53 loose ends) — 2026-09-06
 
 ---
 
@@ -6845,7 +6846,9 @@ the canonical create example.
   same category ids…") is about profile duplication, not this flow. Untouched.
 - **`RegistryManagerModal` defect blurb** — "Every defect name the system knows.
   Profiles select from this list." The lowercase "select" is descriptive prose,
-  not a control label; left as-is, noted here for a future call.
+  not a control label; left as-is, noted here for a future call. **Closed in §54.**
+- **`RegistryManagerModal` `@description`** — "register new entries" still carried
+  the redundant "new". **Closed in §54.**
 - **The §3.6 dashed `+ ADD` buttons** — already correct under the final model.
 
 ### Verification
@@ -6869,3 +6872,39 @@ the canonical create example.
 
 Same quirk as §47 / §52: `a30e394` is replaced by exactly one amend and is
 thereafter one amend-generation stale. Expected.
+
+---
+
+## 54. RegistryManagerModal blurb and help text wording (closes §53 loose ends) — 2026-09-06
+
+Prose-only follow-up to §53. Commit `dd9eb5f`. Closes the two wording loose
+ends §53 left flagged under "Deliberately not changed", for full consistency with
+the MANAGE / REGISTER / ADD model. No logic, no control labels — three string
+literals in `RegistryManagerModal.tsx`.
+
+| Loc | Before | After |
+|---|---|---|
+| ~16 `@description` | `View the registry, register new entries, rename existing ones.` | `View the registry, register entries, rename existing ones.` |
+| ~54 `ENTITY_CONFIG.defect.blurb` | `Every defect name the system knows. Profiles select from this list.` | `Every defect name the system knows. Profiles add from this list.` |
+| ~62 `ENTITY_CONFIG.category.blurb` | `Every severity category name the system knows. Each profile picks its own subset and sets its own AQL level and evaluation mode.` | `Every severity category name the system knows. Each profile adds its own subset and sets its own AQL level and evaluation mode.` |
+
+The category blurb had no literal "select from" but its "picks its own subset"
+was the equivalent phrase; aligned to `adds` for verb parity between the two
+entities. "register new entries" drops the "new" now that `REGISTER CATEGORY` /
+`REGISTER DEFECT` is the standardized create-action name (no `NEW`).
+
+`AUDIT_REPORT.md` #43 needed no change — it referenced only the intentionally-
+kept identifiers, never these two wording items, as open.
+
+### Verification
+
+- `grep -i "select from" / "register new"` across `RegistryManagerModal.tsx`:
+  zero matches. No other stray occurrences.
+- Frontend `vitest run` — 113/113 (18 files). Backend `vitest run` — 58/58
+  (7 files). Byte-identical to before, as expected for a prose-only change.
+  Frontend `tsc -b` clean; `oxlint` 0 errors.
+
+### The self-referencing commit hash
+
+Same quirk as §47 / §52 / §53: `dd9eb5f` is replaced by exactly one amend
+and is thereafter one amend-generation stale. Expected.
