@@ -69,7 +69,7 @@ or summarized in the split — this is the original content, relocated.
 - [§44](#44-master-defect-list--category-inventory--stage-3-management-surfaces--2026-09-03) — Master Defect List + Category Inventory — Stage 3 (Management Surfaces) — 2026-09-03
 - [§45](#45-patch-apiconfig-made-atomic--rejected-saves-now-audited--2026-09-03) — PATCH /api/config made atomic + rejected saves now audited — 2026-09-03
 - [§46](#46-category-becomes-name-only--evaluationmode-moves-to-profilecategory--2026-09-03) — Category becomes name-only; evaluationMode moves to ProfileCategory — 2026-09-03
-- [§47](#47-38-docs-audit-flagged-items-closed-ai_rulesmd-33-navigation_and_rbacmd-31-api_and_integration_specmd-1--2026-09-05) — #38 docs-audit flagged items closed: AI_RULES.md §3/§4, NAVIGATION_AND_RBAC.md §3.1, API_AND_INTEGRATION_SPEC.md §1 — 2026-09-05
+- [§47](#47-38-docs-audit-flagged-items-closed-ai_rulesmd-34-navigation_and_rbacmd-31-api_and_integration_specmd-1--2026-09-05) — #38 docs-audit flagged items closed: AI_RULES.md §3/§4, NAVIGATION_AND_RBAC.md §3.1, API_AND_INTEGRATION_SPEC.md §1 — 2026-09-05
 - [§48](#48-amendment-change-acknowledgment-gate--2026-09-05) — Amendment change-acknowledgment gate — 2026-09-05
 - [§49](#49-appconfig-legacy-json-column-cleanup-audit_report-37--2026-09-05) — AppConfig legacy-JSON column cleanup (AUDIT_REPORT #37) — 2026-09-05
 - [§50](#50-six-core-reference-docs--audit-corrections-audit_report-38-companion-to-47--2026-09-05) — Six core reference docs — audit corrections (AUDIT_REPORT #38; companion to §47) — 2026-09-05
