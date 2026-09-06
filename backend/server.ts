@@ -12,7 +12,9 @@
  *   - POST /api/verdict/preview -> Read-only verdict preview, no persistence
  *
  * Level 1 System Precedence: AI_RULES.md & UI_DESIGN_SYSTEM.md
- * Level 2 Feature Spec: v4_optimized_blueprint.md & implementation_plan.md
+ * Level 2 Feature Spec: API_AND_INTEGRATION_SPEC.md § 1 (REST API Endpoints —
+ *   the full surface this entrypoint wires up)
+ *   (superseded the Antigravity-era v4_optimized_blueprint.md / implementation_plan.md)
  */
 
 import 'dotenv/config'; // Load .env before anything else (DATABASE_URL etc.)

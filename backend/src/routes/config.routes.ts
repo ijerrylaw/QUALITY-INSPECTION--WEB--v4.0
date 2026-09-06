@@ -6,7 +6,10 @@
  * the AppConfig singleton model in SQLite via PrismaClient.
  *
  * Level 1 System Precedence: AI_RULES.md & UI_DESIGN_SYSTEM.md
- * Level 2 Feature Spec: v4_optimized_blueprint.md & implementation_plan.md
+ * Level 2 Feature Spec: API_AND_INTEGRATION_SPEC.md § 1 "Configuration
+ *   (Group A/B Routes)" & DATA_SCHEMAS_AND_TYPES.md §§ 2–3 (AppConfig /
+ *   profile / product shapes)
+ *   (superseded the Antigravity-era v4_optimized_blueprint.md / implementation_plan.md)
  */
 
 import { Router, Request, Response } from 'express';
