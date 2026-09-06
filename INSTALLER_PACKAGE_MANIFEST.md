@@ -46,10 +46,11 @@ schema + migrations, install/update scripts, and env templates. Nothing else.
 │   ├── install.(sh|ps1|md)           # npm ci → prisma migrate deploy → build check → start
 │   └── update.(sh|ps1|md)            # git-less update: swap files, npm ci, migrate deploy
 │
-├── backend/.env.example              # NEW — template (keys only, placeholder values):
-│                                     #   DATABASE_URL="file:./prod.db"   (or a Postgres URL)
-│                                     #   PORT=4009
-│                                     #   NODE_ENV=production
+├── backend/.env.example              # EXISTS (added 2026-09-06) — template, keys +
+│                                     #   placeholder values only:
+│                                     #   DATABASE_URL="file:./dev.db"    (or a Postgres URL)
+│                                     #   PORT=4009  HOST=0.0.0.0  NODE_ENV=production
+│                                     #   TLS_KEY_PATH / TLS_CERT_PATH  (see §4 TLS note)
 │
 └── frontend/.env.example             # EXISTS — already placeholder-only (all-zero GUIDs);
                                       #   ship as-is. Consumed at BUILD time, so on a
@@ -219,12 +220,18 @@ the current run model. Holds as long as nobody sets `sourcemap: true` later; the
 §3 automated check (`--exclude='*.map'` + a `find … -name '*.map'` assertion)
 guards against regression.
 
-**Secondary, non-AI deployment note (flag for the packaging work, not this task):**
-`backend/server.ts:46-48` and `frontend/vite.config.ts:17-18` both
-`fs.readFileSync` a hardcoded `frontend/10.10.110.31+1*.pem` path (this laptop's
-mkcert cert + static LAN IP). The app will not start on another host until that
-TLS-material loading is made configurable. Out of scope for the AI-scrub question,
-but the installer can't be considered "done" without it.
+**Secondary, non-AI deployment note — RESOLVED 2026-09-06.** `backend/server.ts`
+and `frontend/vite.config.ts` previously `fs.readFileSync` a hardcoded
+`frontend/10.10.110.31+1*.pem` path (this laptop's mkcert cert + static LAN IP),
+and the app could not start on another host. Both now read `TLS_KEY_PATH` /
+`TLS_CERT_PATH` (plus `HOST`) from the environment, falling back to those exact
+laptop paths when unset, so local dev is unchanged. A relative value resolves
+against the repo root in **both** files, so one setting serves both processes;
+absolute paths are used as-is. Documented in `backend/.env.example` and
+`frontend/.env.example` (§ Host & TLS) — note Vite does not read `.env` files
+into `process.env`, so the frontend's copies must come from the real process
+environment. The server still has to supply its own cert: the `.pem` files stay
+gitignored and off the package allowlist (§2 row 13).
 
 ---
 

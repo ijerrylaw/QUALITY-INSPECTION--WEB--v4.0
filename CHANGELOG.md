@@ -78,6 +78,7 @@ or summarized in the split — this is the original content, relocated.
 - [§53](#53-category-and-defect-action-verbs-finalized-manage-register-add-supersedes-52--2026-09-06) — Category and Defect action verbs finalized: MANAGE, REGISTER, ADD (supersedes §52) — 2026-09-06
 - [§54](#54-registrymanagermodal-blurb-and-help-text-wording-closes-53-loose-ends--2026-09-06) — RegistryManagerModal blurb and help text wording (closes §53 loose ends) — 2026-09-06
 - [§55](#55-defect-taxonomy-reconciled-against-the-qa-tab-audit_report-2-and-3--2026-09-06) — Defect taxonomy reconciled against the QA tab (AUDIT_REPORT #2 and #3) — 2026-09-06
+- [§56](#56-backendfrontend-tls-cert--host-port-made-environment-configurable-closes-installer_package_manifestmd-tls-blocker--2026-09-06) — Backend/frontend TLS cert + host/port made environment-configurable (closes INSTALLER_PACKAGE_MANIFEST.md TLS blocker) — 2026-09-06
 
 ---
 
@@ -7014,3 +7015,101 @@ Read-only throughout. QA tab parsed with `openpyxl`; `prof_default` read from a
 copy of `dev.db`. No migration, no `prisma db push`, no code edit, no write to
 `dev.db` or the workbook. The only files changed by this closure are
 `AUDIT_REPORT.md` and this `CHANGELOG.md`.
+
+---
+
+## 56. Backend/frontend TLS cert + host/port made environment-configurable (closes INSTALLER_PACKAGE_MANIFEST.md TLS blocker) — 2026-09-06
+
+Closes the "Secondary, non-AI deployment note" `INSTALLER_PACKAGE_MANIFEST.md`
+had flagged: `backend/server.ts` and `frontend/vite.config.ts` both
+`fs.readFileSync`'d a hardcoded `frontend/10.10.110.31+1*.pem` path — this
+laptop's mkcert cert, keyed to its reserved/static LAN IP — plus a hardcoded
+`0.0.0.0` bind. The app could not start on any other host. Landed across two
+sessions; this entry covers both.
+
+### What changed
+
+Four env vars, all OPTIONAL, added to both `backend/server.ts` and
+`frontend/vite.config.ts`:
+
+| Var | Backend default | Frontend default |
+|---|---|---|
+| `HOST` | `0.0.0.0` | `0.0.0.0` |
+| `PORT` | `4009` (pre-existing) | `4001` (pre-existing) |
+| `TLS_KEY_PATH` | `frontend/10.10.110.31+1-key.pem` | same |
+| `TLS_CERT_PATH` | `frontend/10.10.110.31+1.pem` | same |
+
+Every default reproduces the exact laptop values byte-for-byte, so local dev
+needs nothing set. A relative `TLS_*` value resolves against the **repo
+root** (parent of both `backend/` and `frontend/`) in both files, so one pair
+of values serves both processes; an absolute path is used as-is. No other
+server behavior, routing, CORS/JSON middleware, or TLS logic touched.
+
+New `backend/.env.example` (backend already loads `.env` via
+`dotenv/config`). `frontend/.env.example` gained a documented "Host & TLS"
+block. Neither file contains real cert/key contents — paths and placeholders
+only; the `.pem` files themselves stay gitignored (`frontend/.gitignore`,
+already tracked as untracked before this change — `git ls-files` confirms
+zero `.pem` files under version control, then and now).
+
+### Session 2 — `loadEnv()` wiring for the frontend
+
+Session 1 deliberately left the frontend's four vars readable only from the
+real process environment (`$env:TLS_CERT_PATH=...`), since Vite does not load
+`.env`/`.env.local` into `process.env` on its own — that mechanism is
+reserved for `VITE_*`-prefixed client vars exposed via `import.meta.env`.
+This session wires Vite's own `loadEnv()` into `vite.config.ts` (config-side,
+config-time only — nothing new reaches the shipped client bundle) so all four
+can now also be set in `frontend/.env.local`, right alongside the existing
+`VITE_MSAL_CLIENT_ID` / `VITE_MSAL_TENANT_ID`. `envDir` is `__dirname`
+(`frontend/`) — Vite's own default, and where `.env.local` already lives —
+not the repo root; only the *default* `TLS_KEY_PATH`/`TLS_CERT_PATH` fallback
+strings resolve against the repo root, unchanged from session 1. Real
+process-environment values still win over the file when both are set,
+matching dotenv's usual shell-beats-file precedence and `backend/server.ts`'s
+own `dotenv/config` (which never clobbers an already-set `process.env` key).
+
+**Checked for conflicts, as required before landing this:** `loadEnv()`
+returns a plain object — it does not itself mutate `process.env` — so it
+does not interact with Vite's own internal `VITE_*` env loading elsewhere in
+its startup path, and reads the same two files a second time redundantly but
+harmlessly. The one behavior change worth flagging: `PORT` in
+`frontend/.env.local` now moves the frontend dev server, where before it was
+shell-only. This does **not** newly reach `backend/server.ts` — `loadEnv`'s
+`envDir` is scoped to `frontend/`, and the backend loads its own, separate
+`backend/.env` — so the two sides stay independently configurable. The
+pre-existing shared-environment risk is unchanged, not worsened: a `PORT` set
+in an actual shared shell (or via root `npm run dev`'s combined process
+environment, which both workspaces' `npm run dev` inherit) still reaches
+both `process.env['PORT']` reads, exactly as it did before this session,
+since `env()`'s process-environment check is still checked first either way.
+Documented in `frontend/.env.example`.
+
+### Verification
+
+- `tsc -b` (frontend) / `tsc --noEmit` (backend): clean, both sessions.
+- Backend `vitest run` — 58/58 (7 files). Frontend `vitest run` — 113/113
+  (18 files); the two `console.error`/`console.warn` lines in that run are
+  the suite's own simulated-500 fixtures, not failures.
+- **Default path (no `.env` values, no shell vars set), both sessions:**
+  started both dev servers via `.claude/launch.json`; backend log printed
+  `Bound to: 0.0.0.0:4009 TLS cert: …\frontend\10.10.110.31+1.pem` — the
+  exact original path, resolved through the new env-var fallback. `GET
+  /api/health` returned `200 {"status":"ok","database":"connected"}` over
+  real TLS. Frontend served HTTPS on `4001` with the `Network:` line present
+  (confirming the `0.0.0.0` bind held). Loaded `https://localhost:4001` in a
+  real browser: zero console errors, `/api/config` and
+  `/api/auth/pin-directory` both `200 OK` cross-origin over TLS — live proof
+  both certs loaded and are still trusted.
+- **Override path (session 2 only):** backed up `frontend/.env.local`,
+  appended a temporary `PORT=4055`, ran `vite` directly. Vite bound `4055`
+  (`curl` `200`) and **not** `4001` (`curl` timed out) — the file value was
+  read and won, not a coincidental fallback. Killed the process, restored
+  `frontend/.env.local` from the backup byte-for-byte (`git diff` confirms
+  no residual change — the file is gitignored throughout), then re-started
+  the frontend dev server and re-confirmed it was back on `4001` by default.
+- No code, schema, or `dev.db` change. `backend/server.ts`,
+  `frontend/vite.config.ts`, `backend/.env.example` (new),
+  `frontend/.env.example`, and `INSTALLER_PACKAGE_MANIFEST.md`'s stale TLS
+  blocker note (now marked resolved) are the only files this closure
+  touches, plus this `CHANGELOG.md` entry.

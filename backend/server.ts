@@ -34,17 +34,35 @@ import devToolsRouter from './src/routes/devTools.routes';
 
 const app = express();
 const PORT = process.env['PORT'] ? Number(process.env['PORT']) : 4009;
+const HOST = process.env['HOST'] ?? '0.0.0.0';
 
 // Same mkcert-generated, local-CA-trusted cert the frontend uses (see
 // frontend/vite.config.ts) — required because Entra ID only allows HTTPS
 // for any non-localhost redirect URI, and MSAL's redirectUri is derived
 // from the frontend page's own origin, not this server's. Read from
-// frontend/ via a relative path (backend and frontend are sibling folders)
-// rather than duplicating the files here, so there's a single source of
-// truth if Jerry ever has to regenerate them (e.g. the LAN IP changes).
+// frontend/ by default (backend and frontend are sibling folders) rather
+// than duplicating the files here, so there's a single source of truth if
+// Jerry ever has to regenerate them (e.g. the LAN IP changes).
+//
+// ── Host/TLS deployment env vars (see backend/.env.example) ──────────────────
+// All four are OPTIONAL. Their defaults reproduce this laptop's original
+// hardcoded dev setup exactly, so local dev needs no env vars set at all.
+//   HOST           bind address for the listener      (default 0.0.0.0 — all NICs)
+//   PORT           listen port                        (default 4009)
+//   TLS_KEY_PATH   TLS private key, PEM   (default frontend/10.10.110.31+1-key.pem)
+//   TLS_CERT_PATH  TLS certificate, PEM   (default frontend/10.10.110.31+1.pem)
+// A relative TLS path resolves against the repo root (the parent of this
+// backend/ folder); an absolute path is used as-is. frontend/vite.config.ts
+// resolves TLS_KEY_PATH/TLS_CERT_PATH against that same repo root, so a single
+// value serves both processes. On another host, point these at that machine's
+// own cert — the .pem files themselves are gitignored and never shipped.
+const REPO_ROOT = path.resolve(__dirname, '..');
+const TLS_KEY_PATH = path.resolve(REPO_ROOT, process.env['TLS_KEY_PATH'] ?? 'frontend/10.10.110.31+1-key.pem');
+const TLS_CERT_PATH = path.resolve(REPO_ROOT, process.env['TLS_CERT_PATH'] ?? 'frontend/10.10.110.31+1.pem');
+
 const httpsOptions = {
-  key: fs.readFileSync(path.resolve(__dirname, '../frontend/10.10.110.31+1-key.pem')),
-  cert: fs.readFileSync(path.resolve(__dirname, '../frontend/10.10.110.31+1.pem')),
+  key: fs.readFileSync(TLS_KEY_PATH),
+  cert: fs.readFileSync(TLS_CERT_PATH),
 };
 
 // ── Middleware ────────────────────────────────────────────────────────────────
@@ -101,8 +119,9 @@ app.use((_req, res) => {
 });
 
 // ── Server Start ──────────────────────────────────────────────────────────────
-https.createServer(httpsOptions, app).listen(PORT, '0.0.0.0', () => {
+https.createServer(httpsOptions, app).listen(PORT, HOST, () => {
   console.log(`[QI Backend v4.0] Server running → https://localhost:${PORT}`);
+  console.log(`  Bound to:    ${HOST}:${PORT}   TLS cert: ${TLS_CERT_PATH}`);
   console.log(`  Health:      GET   https://localhost:${PORT}/api/health`);
   console.log(`  Config:      GET   https://localhost:${PORT}/api/config`);
   console.log(`  Config:      PATCH https://localhost:${PORT}/api/config`);
