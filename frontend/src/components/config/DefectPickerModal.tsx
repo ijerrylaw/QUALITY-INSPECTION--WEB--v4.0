@@ -159,7 +159,7 @@ export default function DefectPickerModal({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Add a defect from the Master Defect List"
+        aria-label="Select a defect from the Master Defect List"
         className="bg-canvas border border-gray-800 rounded-2xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl"
       >
         {/* ── Header ─────────────────────────────────────────────────────── */}
@@ -167,7 +167,7 @@ export default function DefectPickerModal({
           <div>
             <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
               <Tag className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
-              ADD DEFECT
+              SELECT DEFECT
             </h3>
             <p className="text-xs text-muted mt-1 font-normal normal-case">
               Choose from the Master Defect List — files under{' '}

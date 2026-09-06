@@ -1,7 +1,7 @@
 /**
  * @file CategoryPickerModal.tsx
  * @description Stage 4b picker — the bottom-of-table "+ ADD" in DEFECT CATEGORY
- * SETUP opens this to ADOPT a category from the global Category Inventory into
+ * SETUP opens this to SELECT a category from the global Category Inventory for
  * the active profile, choosing its AQL level + evaluation mode in the same flow.
  *
  * ── One combined flow ──────────────────────────────────────────────────────
@@ -192,7 +192,7 @@ export default function CategoryPickerModal({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Adopt a category from the Category Inventory"
+        aria-label="Select a category from the Category Inventory"
         className="bg-canvas border border-gray-800 rounded-2xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl"
       >
         {/* ── Header ─────────────────────────────────────────────────────── */}
@@ -200,7 +200,7 @@ export default function CategoryPickerModal({
           <div>
             <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
               <Tag className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
-              ADD CATEGORY
+              SELECT CATEGORY
             </h3>
             <p className="text-xs text-muted mt-1 font-normal normal-case">
               Choose from the Category Inventory and set its AQL level + evaluation mode for{' '}

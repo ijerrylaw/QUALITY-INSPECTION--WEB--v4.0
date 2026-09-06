@@ -159,7 +159,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editCategoryForm, setEditCategoryForm] = useState({ name: '', aql: '1.5', evalMode: 'CUMULATIVE' });
   // Stage 4b: the bottom-of-table "+ ADD" opens the Category Inventory picker
-  // to ADOPT a global category into this profile (choosing its AQL + eval mode
+  // to SELECT a global category for this profile (choosing its AQL + eval mode
   // in the same flow). Distinct from the header "ADD CATEGORY" button, which
   // opens RegistryManagerModal to manage the global inventory itself.
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
@@ -755,7 +755,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                   );
                 })}
 
-                {/* Adopt a category from the global Category Inventory (Stage 4b picker) */}
+                {/* Select a category from the global Category Inventory (Stage 4b picker) */}
                 <tr>
                   <td colSpan={4} className="py-2 px-3">
                     <button
@@ -978,7 +978,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                       );
                     })}
 
-                    {/* Add from the global Master Defect List (Stage 4a picker) */}
+                    {/* Select from the global Master Defect List (Stage 4a picker) */}
                     <button
                       onClick={() => setPickerCategoryId(cat.id)}
                       className="w-full h-10 rounded border border-dashed border-gray-700 bg-transparent text-muted hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 flex items-center justify-center gap-2 font-semibold text-[11px] uppercase tracking-wider transition-all outline-none"

@@ -74,6 +74,7 @@ or summarized in the split — this is the original content, relocated.
 - [§49](#49-appconfig-legacy-json-column-cleanup-audit_report-37--2026-09-05) — AppConfig legacy-JSON column cleanup (AUDIT_REPORT #37) — 2026-09-05
 - [§50](#50-six-core-reference-docs--audit-corrections-audit_report-38-companion-to-47--2026-09-05) — Six core reference docs — audit corrections (AUDIT_REPORT #38; companion to §47) — 2026-09-05
 - [§51](#51-cross-profile-amendment-diff--category-membership-changes-now-surfaced-audit_report-42--2026-09-05) — Cross-profile amendment diff — category-membership changes now surfaced (AUDIT_REPORT #42) — 2026-09-05
+- [§52](#52-picker-modal-titles-use-select-not-add-audit_report-43--2026-09-06) — Picker modal titles use SELECT not ADD (AUDIT_REPORT #43) — 2026-09-06
 
 ---
 
@@ -6614,3 +6615,99 @@ require M365 SSO, which cannot be completed in a sandboxed browser session; open
 if a visual confirmation on top of the data-level verification is wanted. The
 real `A001A6247003` amendment was never mutated — still `PENDING_APPROVAL`,
 exactly as found.
+
+---
+
+## 52. Picker modal titles use SELECT not ADD (AUDIT_REPORT #43) — 2026-09-06
+
+Closes `AUDIT_REPORT.md` #43, originally raised against §44 (Master Defect List +
+Category Inventory — Stage 3). Commit `1942ee1`.
+
+### Discovery (read-only pass, no re-investigation needed for the fix)
+
+The string `ADD CATEGORY` / `ADD DEFECT` was live in two UI places with two
+different meanings, plus a third near-collision:
+
+- **Create a new global entry** — `QualityRules.tsx` §3.5: the `+ ADD CATEGORY`
+  button on the DEFECT CATEGORY SETUP header and the `+ ADD DEFECT` button on the
+  DEFECT MANAGEMENT KANBAN header both open `RegistryManagerModal`, which
+  registers a brand-new entry into the global Category Inventory / Master Defect
+  List, system-wide.
+- **Select an existing global entry** — `CategoryPickerModal.tsx` /
+  `DefectPickerModal.tsx`: reached from the §3.6 per-profile dashed `+ ADD`
+  buttons, these only put an entry that already exists in the registry into the
+  active profile (for a category, also choosing its AQL level + evaluation mode
+  inline). Their own `<h3>` titles restated `ADD CATEGORY` / `ADD DEFECT`,
+  reading as "create" when nothing is created.
+- The two picker flows also disagreed with each other at the label/code level:
+  the category flow said **Adopt** (`aria-label` "Adopt a category from the
+  Category Inventory"; `handleAdoptCategory`), the defect flow said **Add**
+  (`aria-label` "Add a defect from the Master Defect List"; `handlePickDefect`).
+
+No functional bug — each location behaves consistently and was documented — but
+an admin reading the UI cold could not tell the create button from the pick
+modal.
+
+### Decision — rename the picker titles to SELECT, leave the create buttons alone
+
+Display/label-only. No logic changed; no function or variable renamed.
+
+- `CategoryPickerModal.tsx` — `<h3>` `ADD CATEGORY` → `SELECT CATEGORY`;
+  `aria-label` "Adopt a category from the Category Inventory" → "Select a category
+  from the Category Inventory"; the `@description` "Stage 4b picker" opening
+  sentence reworded "opens this to ADOPT" → "opens this to SELECT".
+- `DefectPickerModal.tsx` — `<h3>` `ADD DEFECT` → `SELECT DEFECT`; `aria-label`
+  "Add a defect from the Master Defect List" → "Select a defect from the Master
+  Defect List".
+- `QualityRules.tsx` — the two inline comments above the §3.6 dashed buttons, and
+  the `showCategoryPicker` state-var comment, reworded "Adopt"/"Add" → "Select"
+  (they describe the button, not the mechanism).
+- Both modals' sub-lines already read "Choose from the … List" and were left
+  as-is — consistent with the new title, no "Add"/"Adopt" verb.
+- `UI_DESIGN_SYSTEM.md` §3.5 ("Primary Add Actions — Header Buttons") gained a
+  paragraph: `ADD [ENTITY]` means create-a-new-entity; the registry header
+  buttons are the true instance of the pattern; the look-alike picker modals are
+  a separate "select existing" action titled `SELECT …` and are not an instance
+  of this pattern even though their internal `REGISTER NEW …` button borrows the
+  emerald ghost-outline styling.
+
+### Deliberately unchanged
+
+- The §3.5 `+ ADD CATEGORY` / `+ ADD DEFECT` registry header buttons — they
+  create; `ADD` is correct. Also the `QualityRules.tsx` comment that contrasts
+  the picker with "the header ADD CATEGORY button".
+- The §3.6 per-profile dashed buttons — their visible label is just `+ ADD` (not
+  the full string) and they were never part of the collision.
+- The per-row action inside each picker — a `+ ADD` pill whose `title` reads
+  `Adopt "<name>" into <profile>` (category) / `Add "<name>" to <category>`
+  (defect). That is the row-level act of filing the *already-selected* existing
+  entry into the profile; it mirrors the untouched §3.6 `+ ADD` buttons and does
+  not imply creation, so it was left. The Adopt/Add wording split there is
+  cosmetic and stops at the tooltip.
+- `handleAdoptCategory` and its JSDoc (which opens "Adopts a category chosen from
+  the global Category Inventory…") — the doc verb is anchored to the retained
+  function name; "adoption" is the established domain term for creating a
+  `ProfileCategory` join row, used across the modal `@description` mechanics
+  prose, `RegistryManagerModal`, and `CategoryPickerModal.test.tsx`
+  ("adoption flow"). Renaming that vocabulary was out of scope.
+- `ConfigDashboard.tsx` — a dead/unreachable file (§§197, 231, 2470) carrying a
+  non-wired `Add Defect` button; explicitly out of scope. `archived/` blueprints
+  untouched.
+
+### Verification
+
+- `grep -ri "ADD CATEGORY|ADD DEFECT"` over `frontend/src` afterward: the only
+  hits are the two §3.5 create buttons (intended) and the `QualityRules.tsx`
+  comment describing that button. No picker `<h3>` or `aria-label` still says
+  `ADD`.
+- Frontend `vitest run` — 113/113 (18 files, incl. `CategoryPickerModal.test.tsx`).
+  Backend `vitest run` — 58/58 (7 files). Both byte-identical to before, as
+  expected for a string/comment-only change. Frontend `tsc -b` clean; `oxlint`
+  0 errors (44 pre-existing warnings, none in the three touched source files).
+
+### The self-referencing commit hash
+
+Same accepted quirk noted in §47: this entry cites the hash of the commit that
+writes it. Per the settled pattern — write the entry, commit, read the real hash,
+do exactly one amend to insert it, stop — the cited hash ends up one
+amend-generation stale. Expected, not a bug.
