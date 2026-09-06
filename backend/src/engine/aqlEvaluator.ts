@@ -11,7 +11,8 @@
  *   - evaluateAQLVerdict()   — Master verdict engine consuming native Prisma types
  *
  * Level 1 System Precedence: AI_RULES.md & UI_DESIGN_SYSTEM.md
- * Level 2 Feature Spec: v4_optimized_blueprint.md & implementation_plan.md
+ * Level 2 Feature Spec: ISO2859_MATH_ENGINE.md & DATA_SCHEMAS_AND_TYPES.md
+ *   (superseded the Antigravity-era v4_optimized_blueprint.md / implementation_plan.md)
  * Level 3 Global Context: ISO2859_MATH_ENGINE.md § 2 (evaluation modes)
  */
 
