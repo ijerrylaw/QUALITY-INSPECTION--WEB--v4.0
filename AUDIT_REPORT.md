@@ -20,18 +20,6 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
 
 ## Open Items
 
-2. **Real defect taxonomy seeded for `prof_default` only.** MEDLINE,
-   CARDINAL, and HENRY SCHEIN profiles still hold placeholder/demo defect
-   content, not the real 47-defect taxonomy. No action possible until
-   real taxonomy data is available.
-   → `CHANGELOG.md` §12 (intro), §7.6/§7.7.
-
-3. **30 of 47 seeded defects' Visual-tier assignments are an unconfirmed
-   working draft.** Assigned from a 2021 leftover spreadsheet template
-   and, for 5 defects, reasoning alone with no data backing. No action
-   possible until real QA input is available.
-   → `CHANGELOG.md` §12.8.
-
 13. **A brand-new install's zero-state default profile is code-level, not
     admin-editable.** `HARDCODED_DEFAULT_PROFILE` (`resolveVerdict.ts`) is
     baked into backend source, used only as the very-first-run fallback
@@ -53,6 +41,28 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
 ---
 
 ## Resolved (summary — full detail in CHANGELOG.md)
+
+2. **RESOLVED 2026-09-06 — documentation-only.** Reconciled `prof_default`'s
+   live `dev.db` taxonomy against the **QA tab** of `docs/reference/2026-07
+   JUL.xlsx` — confirmed as the canonical real-factory-practice source after an
+   earlier mistaken read of a different tab. 47 of 48 QA defect fields match
+   `prof_default` exactly, normalized for trivial punctuation/whitespace;
+   nothing is missing from `dev.db` and nothing in `dev.db` is a leftover/extra
+   absent from QA. Taxonomy confirmed complete and correct. Sole discrepancy —
+   `Sagging` sits under RECORD ONLY in `dev.db` while its QA column is grouped
+   physically with the Barrier defects — confirmed by Jerry as intentional:
+   `Sagging` is tracked but must not count toward AQL grading; the QA column
+   grouping is spreadsheet layout, not grading intent. No data/code/schema
+   change.
+   → `CHANGELOG.md` §55.
+
+3. **RESOLVED 2026-09-06 — documentation-only.** The QA tab's Visual Quality
+   Rule block is a single flat category with no Critical/Major/Minor sub-tiers,
+   and it matches `prof_default`'s flat `VISUALS` placement member-for-member
+   (same 30 defects). There is no finer tier to assign the 30 drafts to — they
+   are confirmed correct as-is. `Former Crack` (the old `Edit` tab had it under
+   AND) correctly sits in `VISUALS` per the canonical QA tab.
+   → `CHANGELOG.md` §55.
 
 43. **RESOLVED 2026-09-06 — two passes** (`1942ee1`, superseded by
     `a30e394`). The `ADD CATEGORY` / `ADD DEFECT` string was reused

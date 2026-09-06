@@ -77,6 +77,7 @@ or summarized in the split — this is the original content, relocated.
 - [§52](#52-picker-modal-titles-use-select-not-add-audit_report-43--2026-09-06) — Picker modal titles use SELECT not ADD (AUDIT_REPORT #43) — 2026-09-06
 - [§53](#53-category-and-defect-action-verbs-finalized-manage-register-add-supersedes-52--2026-09-06) — Category and Defect action verbs finalized: MANAGE, REGISTER, ADD (supersedes §52) — 2026-09-06
 - [§54](#54-registrymanagermodal-blurb-and-help-text-wording-closes-53-loose-ends--2026-09-06) — RegistryManagerModal blurb and help text wording (closes §53 loose ends) — 2026-09-06
+- [§55](#55-defect-taxonomy-reconciled-against-the-qa-tab-audit_report-2-and-3--2026-09-06) — Defect taxonomy reconciled against the QA tab (AUDIT_REPORT #2 and #3) — 2026-09-06
 
 ---
 
@@ -6908,3 +6909,108 @@ kept identifiers, never these two wording items, as open.
 
 Same quirk as §47 / §52 / §53: `dd9eb5f` is replaced by exactly one amend
 and is thereafter one amend-generation stale. Expected.
+
+---
+
+## 55. Defect taxonomy reconciled against the QA tab (AUDIT_REPORT #2 and #3) — 2026-09-06
+
+Closes `AUDIT_REPORT.md` #2 and #3. **Documentation-only** — no code, schema,
+`dev.db`, or category/defect data changed. The reconciliation behind the closure
+was a read-only analysis; this section records its outcome, and #2/#3 were moved
+from the `AUDIT_REPORT.md` open list to its resolved summary in the same change.
+
+### Background — both items were "blocked, needs real data"
+
+- **#2** — the real 47-defect taxonomy had only ever been seeded into
+  `prof_default`, and there was no confirmed real-world source to validate even
+  that one against.
+- **#3** — 30 of `prof_default`'s seeded defects (47 then, 48 now) carried their
+  Visual-tier assignment over from a 2021 leftover spreadsheet template, 5 of
+  them placed by reasoning alone. Flagged an unconfirmed working draft pending
+  real QA input.
+
+### The reconciliation
+
+Read-only comparison of `prof_default`'s live `dev.db` taxonomy
+(`Profile` / `Category` / `ProfileCategory` / `ProfileCategoryDefect` /
+`Defect`) against `docs/reference/2026-07 JUL.xlsx`.
+
+An earlier pass read the **wrong sheet** — the `Edit` tab, a 2021-era template
+showing a 5-tier (`Accept No Defect` / `Barrier` / `Critical Visual` /
+`Visual Major` / `Visual Minor`) / 65-field structure. That structure is real in
+that sheet but is **not** canonical. Jerry confirmed against live app data that
+the **`QA` tab** is the sheet real inspectors use, and the workbook was then
+reduced to just that tab.
+
+**QA tab structure** — one physical header row, no merged cells, no tier/category
+label cells. Grouping is implicit: defect columns run in three contiguous blocks,
+each closed by its own `Total …` subtotal column.
+
+| QA block | # defect fields |
+|---|---|
+| Accept No Defect (AND) | 8 |
+| Barrier | 9 (includes `Sagging`) |
+| Visual Quality Rule | 30 — **one flat block, no Critical/Major/Minor sub-tiers** |
+| DONNING (standalone column) | 1 |
+
+48 defect-entry fields total. Columns 106–160 are per-defect DPM (defects-per-
+million) computed columns, **not** entry fields; they still carry vestigial split
+names from the `Edit`-era taxonomy (`Big Lump`, `Latex Residue`, `Thin Spot` /
+`Weak Spot` separately, `Small Dirt` / `Small Lump` / `Small Stain`, `Dirt` /
+`Stain` separately, `Shining`, `Wet / Oily Look`, `Excessive Powder`). These are
+spreadsheet cruft, not gaps in `dev.db`.
+
+### Result — #2 (taxonomy completeness)
+
+**47 of 48 QA defect fields match `prof_default` exactly**, normalized for
+trivial punctuation / whitespace / case only (`Dirt/stain` ↔ `Dirt / Stain`,
+`Shining/Oily Mark` ↔ `Shining / Oily Mark`, leading spaces on the pinhole
+names). 47 also sit in the equivalent category:
+
+| QA block | `prof_default` category | agree |
+|---|---|---|
+| Accept No Defect (AND) | AND | 8 / 8 |
+| Barrier | BARRIER | 8 / 9 (see `Sagging` below) |
+| Visual Quality Rule | VISUALS | 30 / 30 |
+| DONNING | OTHERS (`Donning`) | 1 / 1 |
+
+**Nothing in QA is missing from `dev.db`; nothing in `prof_default` is a
+leftover/extra absent from QA.** The `prof_default` taxonomy is confirmed
+complete and correct against real factory practice — the data blocker on #2 is
+lifted.
+
+**The one discrepancy — `Sagging`'s category.** QA's `Sagging` column sits
+physically inside the Barrier block; `dev.db` has `Sagging` under **RECORD ONLY**
+(`evaluationMode = RECORD_ONLY` — tracked, excluded from AQL grading).
+**Decision (Jerry):** RECORD ONLY is the correct, intentional placement —
+`Sagging` should be recorded but must not count toward pass/fail. A column's
+position in the QA spreadsheet is layout, not a statement of grading intent.
+**No change to `Sagging`'s category.** (`def_sagging` also appears in at least
+one frozen submission's `gradingSnapshot` under RECORD ONLY, so the confirmed
+placement matches the historical record.)
+
+### Result — #3 (the 30 unconfirmed Visual-tier drafts)
+
+**Resolved.** The QA tab's Visual Quality Rule block is a **single flat category
+with no Critical/Major/Minor sub-tiers**, and it matches `prof_default`'s flat
+`VISUALS` category **member-for-member** — the same 30 defects. There is no finer
+tier for the 30 drafts to be assigned to; the draft placements are confirmed
+correct as-is. `Former Crack`, which the `Edit` tab had filed under AND,
+correctly sits in `VISUALS` per the canonical QA tab.
+
+### Scope note
+
+#2 and #3 were always about `prof_default` — the profile that carries the real
+taxonomy. The current relational config holds two profiles, `prof_default`
+(FACTORY STANDARD) and `prof_1787197871523` (MEDLINE); MEDLINE's
+Critical/Major/Minor visual ladder is a deliberately distinct grading regime and
+was not in scope for this reconciliation. The CARDINAL / HENRY SCHEIN profiles
+named in the original #2 text are not present as seeded profiles in the current
+config.
+
+### Verification
+
+Read-only throughout. QA tab parsed with `openpyxl`; `prof_default` read from a
+copy of `dev.db`. No migration, no `prisma db push`, no code edit, no write to
+`dev.db` or the workbook. The only files changed by this closure are
+`AUDIT_REPORT.md` and this `CHANGELOG.md`.
