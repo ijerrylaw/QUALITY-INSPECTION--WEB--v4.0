@@ -1,12 +1,12 @@
 /**
  * @file CategoryPickerModal.tsx
  * @description Stage 4b picker — the bottom-of-table "+ ADD" in DEFECT CATEGORY
- * SETUP opens this to SELECT a category from the global Category Inventory for
- * the active profile, choosing its AQL level + evaluation mode in the same flow.
+ * SETUP opens this to ADD a category from the global Category Inventory to the
+ * active profile, choosing its AQL level + evaluation mode in the same flow.
  *
  * ── One combined flow ──────────────────────────────────────────────────────
  * Modelled on DefectPickerModal: search + list from GET /api/registry/categories
- * + REGISTER NEW. But a Category is a name only — how it grades is a per-profile
+ * + REGISTER CATEGORY. But a Category is a name only — how it grades is a per-profile
  * decision (DATA_SCHEMAS_AND_TYPES.md §2.2) — so picking a row expands it inline
  * to an AQL-level + evaluation-mode selector (the SAME ISO_WHITELIST / EVAL_MODES
  * / auto-lock rules QualityRules.tsx's inline editor uses, from
@@ -19,17 +19,17 @@
  * MEDLINE already share the AND / BARRIER category ids).
  *
  * ── Multi-add, modal stays open ────────────────────────────────────────────
- * Confirming an adoption flips the row to the greyed "already in this profile"
+ * Confirming flips the row to the greyed "already in this profile"
  * state in place and keeps the modal open; close via CLOSE / Esc / backdrop.
  *
  * ── Lock state ─────────────────────────────────────────────────────────────
  * A category locked by a frozen gradingSnapshot in SOME profile can still be
- * adopted into a DIFFERENT profile — adoption only creates a new ProfileCategory
+ * added to a DIFFERENT profile — that add only creates a new ProfileCategory
  * row and never touches the global Category's identity. The padlock here is
  * informational; only rename/delete of the global entity is lock-gated.
  *
  * ── Not this stage ─────────────────────────────────────────────────────────
- * - No registry create/rename here — REGISTER NEW routes to RegistryManagerModal.
+ * - No registry create/rename here — REGISTER CATEGORY routes to RegistryManagerModal.
  * - No server write — draftConfig only, saved by the screen's single SAVE.
  * - No defect bootstrapping — defects are added afterward via the Kanban "+ ADD"
  *   once the new category's column exists.
@@ -64,16 +64,16 @@ export interface CategoryAdoption {
 }
 
 interface Props {
-  /** Display name of the profile the adoption files into — header context only. */
+  /** Display name of the profile the entry is added to — header context only. */
   profileName: string;
   /**
-   * Category ids already in the active profile. A profile selects a category at
+   * Category ids already in the active profile. A profile holds a category at
    * most once, so an already-present entry is shown greyed with an "ALREADY IN
-   * THIS PROFILE" label. Grows as the admin adopts rows this session (the parent
+   * THIS PROFILE" label. Grows as the admin adds rows this session (the parent
    * re-derives it); `justAddedIds` covers the render before that round-trips.
    */
   existingCategoryIds: string[];
-  /** Hands back one confirmed adoption. Does NOT close the modal (multi-add). */
+  /** Hands back one confirmed add. Does NOT close the modal (multi-add). */
   onPick: (entry: CategoryAdoption) => void;
   onClose: () => void;
   /** Opens RegistryManagerModal (category mode) to register a brand-new name. */
@@ -95,7 +95,7 @@ export default function CategoryPickerModal({
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  // Rows adopted in THIS session — flips them to the greyed state immediately.
+  // Rows added in THIS session — flips them to the greyed state immediately.
   const [justAddedIds, setJustAddedIds] = useState<Set<string>>(new Set());
   // Which row is expanded for AQL / eval-mode selection, if any.
   const [pickingId, setPickingId] = useState<string | null>(null);
@@ -192,7 +192,7 @@ export default function CategoryPickerModal({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Select a category from the Category Inventory"
+        aria-label="Add a category from the Category Inventory"
         className="bg-canvas border border-gray-800 rounded-2xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl"
       >
         {/* ── Header ─────────────────────────────────────────────────────── */}
@@ -200,10 +200,10 @@ export default function CategoryPickerModal({
           <div>
             <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
               <Tag className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
-              SELECT CATEGORY
+              ADD CATEGORY
             </h3>
             <p className="text-xs text-muted mt-1 font-normal normal-case">
-              Choose from the Category Inventory and set its AQL level + evaluation mode for{' '}
+              Add a category from the Category Inventory and set its AQL level + evaluation mode for{' '}
               <span className="font-mono font-bold text-brand-secondary uppercase">{profileName}</span>.
             </p>
           </div>
@@ -234,7 +234,7 @@ export default function CategoryPickerModal({
             className="h-9 px-4 rounded-md bg-canvas border border-emerald-500/50 text-emerald-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0"
           >
             <Plus className="w-4 h-4" strokeWidth={2} />
-            <span>REGISTER NEW CATEGORY</span>
+            <span>REGISTER CATEGORY</span>
           </button>
         </div>
 
@@ -349,7 +349,7 @@ export default function CategoryPickerModal({
                       <div className="flex items-center gap-2">
                         {entry.locked && (
                           <span
-                            title="In use by inspection records in another profile — can still be adopted here; only renaming or deleting the global category is blocked."
+                            title="In use by inspection records in another profile — can still be added here; only renaming or deleting the global category is blocked."
                             className="shrink-0 flex items-center"
                           >
                             <Lock className="w-3 h-3 text-muted" />
@@ -365,7 +365,7 @@ export default function CategoryPickerModal({
                       <div className="flex items-center justify-end">
                         {isIn ? (
                           <span
-                            title="Already selected by this profile"
+                            title="Already in this profile"
                             className="w-8 h-8 rounded flex items-center justify-center text-muted"
                           >
                             <Check className="w-4 h-4" />
@@ -373,7 +373,7 @@ export default function CategoryPickerModal({
                         ) : (
                           <button
                             onClick={() => startPicking(entry)}
-                            title={`Adopt "${entry.name}" into ${profileName}`}
+                            title={`Add "${entry.name}" to ${profileName}`}
                             className="h-7 px-2.5 rounded border border-dashed border-gray-700 bg-transparent text-muted hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 flex items-center gap-1 font-semibold text-[11px] uppercase tracking-wider transition-all outline-none"
                           >
                             <Plus className="w-3.5 h-3.5" strokeWidth={2} />

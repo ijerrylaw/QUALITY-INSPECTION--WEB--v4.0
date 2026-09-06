@@ -54,23 +54,29 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
 
 ## Resolved (summary — full detail in CHANGELOG.md)
 
-43. **RESOLVED 2026-09-06** (`1942ee1`). The `ADD CATEGORY` /
-    `ADD DEFECT` string was live with two meanings: the §3.5 registry
-    header buttons (`QualityRules.tsx`) genuinely create a new global
-    entry, while `CategoryPickerModal.tsx` / `DefectPickerModal.tsx` — the
-    modals behind the §3.6 dashed "+ ADD" buttons — only put an existing
-    global entry into the active profile. The two picker flows also named
-    that action inconsistently in code ("Adopt" for categories, "Add" for
-    defects). Fix is label/doc-only: the two picker modal `<h3>` titles now
-    read **SELECT CATEGORY** / **SELECT DEFECT**, with matching
-    `aria-label`s and "Stage 4a/4b picker" source comments; `UI_DESIGN_
-    SYSTEM.md` §3.5 gained a note that `ADD [ENTITY]` is create-only and
-    the pickers are a separate "select existing" action. The §3.5 registry
-    header buttons and the §3.6 dashed "+ ADD" buttons were **left as-is**
-    (not the collision), and no function/variable (`handleAdoptCategory`,
-    `handlePickDefect`) was renamed. Frontend 113/113 + backend 58/58 tests
-    unchanged; `tsc -b` / `oxlint` clean.
-    → `CHANGELOG.md` §52.
+43. **RESOLVED 2026-09-06 — two passes** (`1942ee1`, superseded by
+    `a30e394`). The `ADD CATEGORY` / `ADD DEFECT` string was reused
+    for distinct actions. The **first pass** (`1942ee1`, `CHANGELOG.md`
+    §52) renamed the two picker modal titles to `SELECT …` on the premise
+    that the §3.5 header buttons "genuinely create a new global entry".
+    Post-fix discovery showed that premise was wrong: the header buttons
+    only **open** `RegistryManagerModal` — they create nothing themselves —
+    and the wider Category/Defect vocabulary was inconsistent in more
+    places than the titles (`Adopt` vs `Add`, `REGISTER` vs `REGISTER
+    NEW`, `CHOOSE` vs `SELECT`). The **second pass** (`a30e394`,
+    `CHANGELOG.md` §53) finalises one vocabulary across both flows:
+    **MANAGE** (`MANAGE CATEGORIES` / `MANAGE DEFECTS` header buttons —
+    open the registry view, no create/attach), **REGISTER** (`REGISTER
+    CATEGORY` / `REGISTER DEFECT` — the create-a-new-global-entry action,
+    identical whether reached in `RegistryManagerModal` or via a picker's
+    handoff; the picker buttons dropped the `NEW`), and **ADD** (`ADD
+    CATEGORY` / `ADD DEFECT` picker titles, `+ ADD` dashed openers, per-row
+    / confirm / footer text — attach an existing registry entry to the
+    active profile). `UI_DESIGN_SYSTEM.md` §3.5 rewritten to the three-way
+    model. Identifiers `handleAdoptCategory` / `CategoryAdoption` /
+    `handlePickDefect` intentionally not renamed. Frontend 113/113 +
+    backend 58/58; `tsc -b` / `oxlint` clean.
+    → `CHANGELOG.md` §53 (supersedes §52).
 
 37. **RESOLVED 2026-09-05** (`dd27e5d`, `ac5a44a`, `1b4dbe2` + three
     `chore(dev.db)` checkpoints). Two dead/dying `AppConfig` JSON column

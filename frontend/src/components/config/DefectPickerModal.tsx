@@ -1,8 +1,8 @@
 /**
  * @file DefectPickerModal.tsx
  * @description Stage 4a picker — the per-category "+ ADD" button in the Defect
- * Management Kanban opens this to CHOOSE a defect from the global Master Defect
- * List, instead of free-typing a new name.
+ * Management Kanban opens this to ADD a defect from the global Master Defect
+ * List to the active profile, instead of free-typing a new name.
  *
  * ── What it does ────────────────────────────────────────────────────────────
  * Lists every entry in the Master Defect List (GET /api/registry/defects — the
@@ -20,7 +20,7 @@
  * checkmark: a green tick read as an already-confirmed selection.
  *
  * ── What it does NOT do ─────────────────────────────────────────────────────
- * - It never creates or renames a registry entry. "Register a new defect"
+ * - It never creates or renames a registry entry. "REGISTER DEFECT"
  *   routes to the existing RegistryManagerModal (one registration path, not two).
  * - It does not write to the server. The pick lands in draftConfig and is
  *   persisted only by the screen's single SAVE CONFIGURATION action, via
@@ -159,7 +159,7 @@ export default function DefectPickerModal({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Select a defect from the Master Defect List"
+        aria-label="Add a defect from the Master Defect List"
         className="bg-canvas border border-gray-800 rounded-2xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl"
       >
         {/* ── Header ─────────────────────────────────────────────────────── */}
@@ -167,10 +167,10 @@ export default function DefectPickerModal({
           <div>
             <h3 className="text-lg font-semibold uppercase text-primary flex items-center gap-2">
               <Tag className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
-              SELECT DEFECT
+              ADD DEFECT
             </h3>
             <p className="text-xs text-muted mt-1 font-normal normal-case">
-              Choose from the Master Defect List — files under{' '}
+              Add a defect from the Master Defect List — files under{' '}
               <span className="font-mono font-bold text-brand-secondary uppercase">{categoryName}</span>
               {' '}in this profile.
             </p>
@@ -202,7 +202,7 @@ export default function DefectPickerModal({
             className="h-9 px-4 rounded-md bg-canvas border border-emerald-500/50 text-emerald-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0"
           >
             <Plus className="w-4 h-4" strokeWidth={2} />
-            <span>REGISTER NEW DEFECT</span>
+            <span>REGISTER DEFECT</span>
           </button>
         </div>
 

@@ -1,12 +1,12 @@
 /**
  * @file CategoryPickerModal.test.tsx
- * @description Guards the Stage 4b category-adoption picker.
+ * @description Guards the Stage 4b category picker.
  *
  * Coverage mirrors DefectPickerModal.test.tsx plus the combined-flow bits:
  * an available row picks correctly WITH a chosen AQL level + evaluation mode,
  * the auto-lock rule holds (RECORD ONLY -> '' , PASS/FAIL -> 'N/A'), an
  * already-in-profile row is greyed and unpickable, a locked category is still
- * pickable, and REGISTER NEW routes out.
+ * pickable, and REGISTER CATEGORY routes out.
  *
  * Real browser (Vitest browser mode). useAuth mocked; fetch stubbed with a
  * fake GET /api/registry/categories.
@@ -67,7 +67,7 @@ function renderModal(overrides: Partial<ComponentProps<typeof CategoryPickerModa
   return { props, ...render(<CategoryPickerModal {...props} />) };
 }
 
-describe('CategoryPickerModal — adoption flow', () => {
+describe('CategoryPickerModal — add flow', () => {
   test('available row shows "+ ADD"; picking it reveals AQL + Eval Mode selectors', async () => {
     stubFetch();
     const { findByText, getByText } = renderModal();
@@ -86,7 +86,7 @@ describe('CategoryPickerModal — adoption flow', () => {
     });
   });
 
-  test('confirming an adoption calls onPick with the chosen AQL + evalMode, never onClose, and flips the row', async () => {
+  test('confirming an add calls onPick with the chosen AQL + evalMode, never onClose, and flips the row', async () => {
     stubFetch();
     const { props, findByText, getByText } = renderModal();
 
@@ -183,10 +183,10 @@ describe('CategoryPickerModal — adoption flow', () => {
     );
   });
 
-  test('REGISTER NEW CATEGORY routes to onRegisterNew', async () => {
+  test('REGISTER CATEGORY routes to onRegisterNew', async () => {
     stubFetch();
     const { props, findByRole } = renderModal();
-    const btn = await findByRole('button', { name: /register new category/i });
+    const btn = await findByRole('button', { name: /register category/i });
     fireEvent.click(btn);
     expect(props.onRegisterNew).toHaveBeenCalledTimes(1);
   });

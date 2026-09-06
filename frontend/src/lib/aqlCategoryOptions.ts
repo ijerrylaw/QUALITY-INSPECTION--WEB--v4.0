@@ -2,7 +2,7 @@
  * @file aqlCategoryOptions.ts
  * @description Shared AQL-level / evaluation-mode option lists and the
  * auto-lock rules that bind them — the pieces QualityRules.tsx's inline
- * category editor and CategoryPickerModal.tsx (Stage 4b adoption) both need,
+ * category editor and CategoryPickerModal.tsx (Stage 4b picker) both need,
  * so the picker reuses the exact same selectors rather than rebuilding them.
  *
  * Extracted verbatim from QualityRules.tsx; no behaviour change. The values

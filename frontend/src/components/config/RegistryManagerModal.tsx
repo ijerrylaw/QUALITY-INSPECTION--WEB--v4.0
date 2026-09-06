@@ -7,10 +7,10 @@
  * the honest representation rather than a convenience.
  *
  * A Category deliberately carries no evaluation mode here. How a category is
- * graded — its evaluation mode AND its AQL level — is a decision the adopting
+ * graded — its evaluation mode AND its AQL level — is a decision the owning
  * PROFILE makes, stored on ProfileCategory, so the same category name can be
  * graded differently in different profiles. The Stage 4 picker is where a
- * profile states both, at the moment it adopts a category.
+ * profile states both, at the moment it adds a category.
  *
  * ── Scope (Stage 3) ─────────────────────────────────────────────────────────
  * View the registry, register new entries, rename existing ones. This modal

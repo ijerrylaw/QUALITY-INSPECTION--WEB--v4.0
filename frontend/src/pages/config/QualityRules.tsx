@@ -159,8 +159,8 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editCategoryForm, setEditCategoryForm] = useState({ name: '', aql: '1.5', evalMode: 'CUMULATIVE' });
   // Stage 4b: the bottom-of-table "+ ADD" opens the Category Inventory picker
-  // to SELECT a global category for this profile (choosing its AQL + eval mode
-  // in the same flow). Distinct from the header "ADD CATEGORY" button, which
+  // to ADD a global category to this profile (choosing its AQL + eval mode
+  // in the same flow). Distinct from the header "MANAGE CATEGORIES" button, which
   // opens RegistryManagerModal to manage the global inventory itself.
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
 
@@ -448,7 +448,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
    * Does NOT close the picker — it stays open for multi-add, with each picked
    * row flipping to "already in this profile" in place (the modal re-reads the
    * updated defect id list from the prop below). Closed via CLOSE / Esc /
-   * backdrop, or "REGISTER NEW DEFECT".
+   * backdrop, or "REGISTER DEFECT".
    */
   const handlePickDefect = (entry: { id: string; name: string }, categoryId: string) => {
     if (activeDefects.some((d: any) => d.id === entry.id)) {
@@ -601,7 +601,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
               className="h-9 px-4 rounded-md bg-canvas border border-emerald-500/50 text-emerald-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0"
             >
               <Plus className="w-4 h-4" strokeWidth={2} />
-              <span>ADD CATEGORY</span>
+              <span>MANAGE CATEGORIES</span>
             </button>
           </div>
 
@@ -755,7 +755,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                   );
                 })}
 
-                {/* Select a category from the global Category Inventory (Stage 4b picker) */}
+                {/* Add a category from the global Category Inventory (Stage 4b picker) */}
                 <tr>
                   <td colSpan={4} className="py-2 px-3">
                     <button
@@ -890,7 +890,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
             className="h-9 px-4 rounded-md bg-canvas border border-emerald-500/50 text-emerald-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500 font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all outline-none shrink-0"
           >
             <Plus className="w-4 h-4" strokeWidth={2} />
-            <span>ADD DEFECT</span>
+            <span>MANAGE DEFECTS</span>
           </button>
         </div>
         
@@ -978,7 +978,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
                       );
                     })}
 
-                    {/* Select from the global Master Defect List (Stage 4a picker) */}
+                    {/* Add from the global Master Defect List (Stage 4a picker) */}
                     <button
                       onClick={() => setPickerCategoryId(cat.id)}
                       className="w-full h-10 rounded border border-dashed border-gray-700 bg-transparent text-muted hover:text-brand-secondary hover:border-brand-secondary/50 hover:bg-brand-primary/10 flex items-center justify-center gap-2 font-semibold text-[11px] uppercase tracking-wider transition-all outline-none"
@@ -1039,7 +1039,7 @@ export function QualityRules({ onDirty, onChange }: QualityRulesProps) {
 
       {/* ── Global registry management ───────────────────────────────────────
           Reached from the two section header buttons, and from the defect
-          picker's "REGISTER NEW DEFECT". Manages the GLOBAL Master Defect List /
+          picker's "REGISTER DEFECT". Manages the GLOBAL Master Defect List /
           Category Inventory — registering and renaming entries system-wide. It
           does not assign anything to a profile; the Kanban "+ ADD" picker and
           drag-and-drop own that. Closing it bumps registryRefreshKey so the

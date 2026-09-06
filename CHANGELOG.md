@@ -75,6 +75,7 @@ or summarized in the split — this is the original content, relocated.
 - [§50](#50-six-core-reference-docs--audit-corrections-audit_report-38-companion-to-47--2026-09-05) — Six core reference docs — audit corrections (AUDIT_REPORT #38; companion to §47) — 2026-09-05
 - [§51](#51-cross-profile-amendment-diff--category-membership-changes-now-surfaced-audit_report-42--2026-09-05) — Cross-profile amendment diff — category-membership changes now surfaced (AUDIT_REPORT #42) — 2026-09-05
 - [§52](#52-picker-modal-titles-use-select-not-add-audit_report-43--2026-09-06) — Picker modal titles use SELECT not ADD (AUDIT_REPORT #43) — 2026-09-06
+- [§53](#53-category-and-defect-action-verbs-finalized-manage-register-add-supersedes-52--2026-09-06) — Category and Defect action verbs finalized: MANAGE, REGISTER, ADD (supersedes §52) — 2026-09-06
 
 ---
 
@@ -6711,3 +6712,160 @@ Same accepted quirk noted in §47: this entry cites the hash of the commit that
 writes it. Per the settled pattern — write the entry, commit, read the real hash,
 do exactly one amend to insert it, stop — the cited hash ends up one
 amend-generation stale. Expected, not a bug.
+
+---
+
+## 53. Category and Defect action verbs finalized: MANAGE, REGISTER, ADD (supersedes §52) — 2026-09-06
+
+Closes `AUDIT_REPORT.md` #43 for real. Commit `a30e394`. **Supersedes §52**
+(commit `c456235`, cited in-doc as `1942ee1` per the self-referencing-hash
+quirk).
+
+### What §52 got wrong
+
+§52 renamed the two per-profile picker modal titles `ADD CATEGORY` / `ADD
+DEFECT` → `SELECT CATEGORY` / `SELECT DEFECT`, justified by the claim that the
+`QualityRules.tsx` §3.5 header buttons (also labelled `ADD CATEGORY` / `ADD
+DEFECT`) "genuinely create a new global entry" and so had first claim on the
+`ADD` verb.
+
+A follow-up read-only discovery pass showed that claim was false. Those header
+buttons run `setRegistryModal('category' | 'defect')` — they **open**
+`RegistryManagerModal` and nothing more. Creating an entry is a further,
+explicit `REGISTER CATEGORY` / `REGISTER DEFECT` click *inside* that modal. The
+header button is a navigation affordance, not a create action, so naming it
+`ADD` was wrong on its own terms — and renaming the pickers to `SELECT` to
+"yield" `ADD` to it solved nothing.
+
+The same pass found the surrounding vocabulary was inconsistent in more places
+than the titles:
+
+- **Create** was `REGISTER <NOUN>` inside `RegistryManagerModal` but `REGISTER
+  NEW <NOUN>` on the pickers' create-handoff buttons — same action, two labels.
+- **Attach-to-profile** was `SELECT` (picker `<h3>`, post-§52), `CHOOSE` (picker
+  sub-lines and `DefectPickerModal`'s `@description`), `ADD` (the `+ ADD` dashed
+  openers, per-row buttons, footer counts), and `Adopt` (the Category picker's
+  row-opener tooltip and its locked-row tooltip) — four verbs for one action,
+  and `Adopt` appeared only on the Category side.
+- **Structural divergence:** the Category picker has an extra inline AQL / eval-
+  mode confirm step (so two "attach" controls per row, tooltipped `Adopt … into`
+  then `Add … to`); the Defect picker attaches in one click (`Add … to`).
+
+### The finalized model — three verbs, one meaning each
+
+| Verb | Meaning | Where it appears now |
+|---|---|---|
+| **MANAGE** | Open the global registry/management view. Creates nothing, attaches nothing. | `QualityRules.tsx` §3.5 header buttons: `MANAGE CATEGORIES` / `MANAGE DEFECTS` (open `RegistryManagerModal`) |
+| **REGISTER** | Create a brand-new global entry. | `RegistryManagerModal` `addLabel`: `REGISTER CATEGORY` / `REGISTER DEFECT`; picker create-handoff buttons: same wording (dropped `NEW`) |
+| **ADD** | Attach an entry that already exists in the registry to the active profile. | picker `<h3>`: `ADD CATEGORY` / `ADD DEFECT`; §3.6 dashed `+ ADD` openers; picker per-row + confirm buttons; picker footer "N … available to add" |
+
+### Before → after (every string touched)
+
+**`frontend/src/pages/config/QualityRules.tsx`**
+
+| Loc | Before | After |
+|---|---|---|
+| ~604 header button | `ADD CATEGORY` | `MANAGE CATEGORIES` |
+| ~893 header button | `ADD DEFECT` | `MANAGE DEFECTS` |
+| ~162 state comment | `to SELECT a global category for this profile` | `to ADD a global category to this profile` |
+| ~163 state comment | `the header "ADD CATEGORY" button` | `the header "MANAGE CATEGORIES" button` |
+| ~758 inline comment | `Select a category from the global Category Inventory (Stage 4b picker)` | `Add a category from the global Category Inventory (Stage 4b picker)` |
+| ~981 inline comment | `Select from the global Master Defect List (Stage 4a picker)` | `Add from the global Master Defect List (Stage 4a picker)` |
+| ~451 JSDoc (`handlePickDefect`) | `backdrop, or "REGISTER NEW DEFECT".` | `backdrop, or "REGISTER DEFECT".` |
+| ~1042 comment | `picker's "REGISTER NEW DEFECT".` | `picker's "REGISTER DEFECT".` |
+
+**`frontend/src/components/config/CategoryPickerModal.tsx`**
+
+| Loc | Before | After |
+|---|---|---|
+| ~4 `@description` | `opens this to SELECT a category from the global Category Inventory for the active profile` | `opens this to ADD a category from the global Category Inventory to the active profile` |
+| ~9 `@description` | `+ REGISTER NEW.` | `+ REGISTER CATEGORY.` |
+| ~22 `@description` | `Confirming an adoption flips the row` | `Confirming flips the row` |
+| ~27 `@description` | `adopted into a DIFFERENT profile — adoption only creates` | `added to a DIFFERENT profile — that add only creates` |
+| ~32 `@description` | `REGISTER NEW routes to RegistryManagerModal.` | `REGISTER CATEGORY routes to RegistryManagerModal.` |
+| ~67 prop JSDoc | `the profile the adoption files into` | `the profile the entry is added to` |
+| ~72 prop JSDoc | `A profile selects a category at most once` / `the admin adopts rows this session` | `A profile holds a category at most once` / `the admin adds rows this session` |
+| ~76 prop JSDoc | `Hands back one confirmed adoption.` | `Hands back one confirmed add.` |
+| ~98 state comment | `Rows adopted in THIS session` | `Rows added in THIS session` |
+| ~195 `aria-label` | `Select a category from the Category Inventory` | `Add a category from the Category Inventory` |
+| ~203 `<h3>` | `SELECT CATEGORY` | `ADD CATEGORY` |
+| ~206 sub-line | `Choose from the Category Inventory and set its AQL level + evaluation mode for {profileName}.` | `Add a category from the Category Inventory and set its AQL level + evaluation mode for {profileName}.` |
+| ~237 toolbar button | `REGISTER NEW CATEGORY` | `REGISTER CATEGORY` |
+| ~352 locked-row tooltip | `can still be adopted here` | `can still be added here` |
+| ~368 already-in tooltip | `Already selected by this profile` | `Already in this profile` |
+| ~376 row-opener tooltip | `Adopt "{name}" into {profileName}` | `Add "{name}" to {profileName}` |
+
+**`frontend/src/components/config/DefectPickerModal.tsx`**
+
+| Loc | Before | After |
+|---|---|---|
+| ~4 `@description` | `opens this to CHOOSE a defect from the global Master Defect List, instead of free-typing` | `opens this to ADD a defect from the global Master Defect List to the active profile, instead of free-typing` |
+| ~23 `@description` | `"Register a new defect" routes to the existing RegistryManagerModal` | `"REGISTER DEFECT" routes to the existing RegistryManagerModal` |
+| ~162 `aria-label` | `Select a defect from the Master Defect List` | `Add a defect from the Master Defect List` |
+| ~170 `<h3>` | `SELECT DEFECT` | `ADD DEFECT` |
+| ~173 sub-line | `Choose from the Master Defect List — files under {categoryName} in this profile.` | `Add a defect from the Master Defect List — files under {categoryName} in this profile.` |
+| ~205 toolbar button | `REGISTER NEW DEFECT` | `REGISTER DEFECT` |
+
+**`frontend/src/components/config/RegistryManagerModal.tsx`** (comment consistency only — the `addLabel` strings `REGISTER CATEGORY` / `REGISTER DEFECT` were already correct)
+
+| Loc | Before | After |
+|---|---|---|
+| ~10 `@description` | `a decision the adopting PROFILE makes` | `a decision the owning PROFILE makes` |
+| ~13 `@description` | `at the moment it adopts a category` | `at the moment it adds a category` |
+
+**`frontend/src/lib/aqlCategoryOptions.ts`**
+
+| Loc | Before | After |
+|---|---|---|
+| ~5 `@description` | `CategoryPickerModal.tsx (Stage 4b adoption) both need` | `CategoryPickerModal.tsx (Stage 4b picker) both need` |
+
+**`frontend/src/components/config/CategoryPickerModal.test.tsx`** (one assertion + comment/label consistency)
+
+| Loc | Before | After |
+|---|---|---|
+| ~189 assertion | `findByRole('button', { name: /register new category/i })` | `findByRole('button', { name: /register category/i })` |
+| ~186 test name | `'REGISTER NEW CATEGORY routes to onRegisterNew'` | `'REGISTER CATEGORY routes to onRegisterNew'` |
+| ~3 / ~9 file header | `category-adoption picker` / `REGISTER NEW routes out` | `category picker` / `REGISTER CATEGORY routes out` |
+| ~70 / ~89 describe/test names | `adoption flow` / `confirming an adoption` | `add flow` / `confirming an add` |
+
+**`UI_DESIGN_SYSTEM.md` §3.5** — the paragraph added in §52 (framing `ADD CATEGORY`
+as create vs `SELECT CATEGORY` as select) was wrong on both counts and was
+replaced with the three-way MANAGE / REGISTER / ADD model above. The §115
+`+ ADD CATEGORY` "create pattern" example is replaced by `REGISTER CATEGORY` as
+the canonical create example.
+
+### Deliberately not changed
+
+- **Identifiers** `handleAdoptCategory`, `CategoryAdoption` (exported type),
+  `handlePickDefect` — renaming code identifiers is outside a vocabulary/label
+  pass and would churn call sites and (for `handleAdoptCategory`) its
+  name-mirroring JSDoc at `QualityRules.tsx` ~331. Flagged for a possible
+  future rename.
+- **`QualityRules.tsx` ~201** — `handleDuplicateProfile`'s JSDoc ("ADOPTS the
+  same category ids…") is about profile duplication, not this flow. Untouched.
+- **`RegistryManagerModal` defect blurb** — "Every defect name the system knows.
+  Profiles select from this list." The lowercase "select" is descriptive prose,
+  not a control label; left as-is, noted here for a future call.
+- **The §3.6 dashed `+ ADD` buttons** — already correct under the final model.
+
+### Verification
+
+- Grep sweep over `frontend/src` for `SELECT CATEGORY`, `SELECT DEFECT`,
+  `CHOOSE`, `Choose from`, `adopt`, `REGISTER NEW`, `Already selected`: zero
+  remaining matches tied to the Category/Defect create-vs-attach flows. Residual
+  hits are all unrelated (PIN "choose a new PIN", ProductEngine "choose
+  different identity components", the eval-mode "choose a mode" tooltip) or the
+  three intentionally-kept identifiers above.
+- `REGISTER CATEGORY` / `REGISTER DEFECT` now byte-identical between
+  `RegistryManagerModal` (`addLabel`) and both picker create-handoff buttons.
+- Frontend `vitest run` — 113/113 (18 files); the one affected test
+  (`CategoryPickerModal.test.tsx` "REGISTER CATEGORY routes to onRegisterNew")
+  updated and passing. Backend `vitest run` — 58/58 (7 files). Frontend
+  `tsc -b` clean; `oxlint` 0 errors (pre-existing warnings only, none in touched
+  files). `DefectPickerModal.test.tsx` needed no change (no string assertions on
+  the renamed labels).
+
+### The self-referencing commit hash
+
+Same quirk as §47 / §52: `a30e394` is replaced by exactly one amend and is
+thereafter one amend-generation stale. Expected.
