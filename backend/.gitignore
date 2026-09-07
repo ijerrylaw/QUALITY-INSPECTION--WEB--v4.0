@@ -3,3 +3,13 @@ node_modules
 .env
 
 /generated/prisma
+
+# Production database — machine-local, never version-controlled.
+# prod.db is created at install time by copying the tracked dev.db seed
+# (see INSTALLER_PACKAGE_MANIFEST.md); it then diverges with real inspection
+# data that must not enter git history. dev.db itself stays TRACKED — it is
+# this repo's seed/reference database, committed via chore(dev.db) commits.
+prod.db
+prod.db-journal
+prod.db-wal
+prod.db-shm

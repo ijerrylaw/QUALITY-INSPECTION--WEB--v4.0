@@ -80,6 +80,7 @@ or summarized in the split — this is the original content, relocated.
 - [§55](#55-defect-taxonomy-reconciled-against-the-qa-tab-audit_report-2-and-3--2026-09-06) — Defect taxonomy reconciled against the QA tab (AUDIT_REPORT #2 and #3) — 2026-09-06
 - [§56](#56-backendfrontend-tls-cert--host-port-made-environment-configurable-closes-installer_package_manifestmd-tls-blocker--2026-09-06) — Backend/frontend TLS cert + host/port made environment-configurable (closes INSTALLER_PACKAGE_MANIFEST.md TLS blocker) — 2026-09-06
 - [§57](#57-real-data-cleanup-checkpoint-before-devdb-and-proddb-separation--2026-09-07) — Real-data cleanup checkpoint before dev.db and prod.db separation — 2026-09-07
+- [§58](#58-production-database-separated-from-the-dev-seed-via-a-database_url-default--2026-09-07) — Production database separated from the dev seed via a DATABASE_URL default — 2026-09-07
 
 ---
 
@@ -7165,3 +7166,111 @@ semantics are defined by `isDimensionGraded()` in
 `backend/src/engine/dimensionEvaluator.ts`. Row-count deltas and the
 `products` diff were reconciled against the operator's account of the
 session before committing.
+
+---
+
+## 58. Production database separated from the dev seed via a DATABASE_URL default — 2026-09-07
+
+The runtime database is now `backend/prod.db`, separate from the git-tracked
+`backend/dev.db` seed. Forked from the §57 checkpoint, so `prod.db` starts as
+the reviewed real-practice configuration with zero submissions.
+
+### What was already there
+
+`DATABASE_URL` was **already environment-driven** — this closure did not
+introduce that, it removed a hard requirement. `prisma/schema.prisma`'s
+`datasource db` block carries **no `url`**: Prisma 7 supplies it at runtime
+through a driver adapter. `backend/src/lib/prismaClient.ts` read
+`process.env['DATABASE_URL']` and passed it to `PrismaLibSql({ url })`, and
+`backend/prisma.config.ts` reads the same variable for CLI use. Both are fed by
+`import 'dotenv/config'` in `server.ts`, which loads `backend/.env`.
+
+The gap was that `prismaClient.ts` **threw** when the variable was unset — there
+was no default — and the value in `backend/.env` was the CWD-relative
+`"file:./dev.db"`.
+
+### Changes
+
+- **`backend/prod.db`** created as a one-time file copy of `dev.db` at commit
+  `9e959df`, verified byte-identical (same `sha256`) with
+  `PRAGMA integrity_check` returning `ok`. No filtering and no profile deletion:
+  2 profiles, 8 categories, 49 defects, 95 profile-defect links, 17 products,
+  0 submissions.
+- **`backend/src/lib/prismaClient.ts`** — env-wins-with-default, the same pattern
+  as `HOST` / `PORT` / `TLS_KEY_PATH` / `TLS_CERT_PATH` in `server.ts` (§56). Set
+  `DATABASE_URL` is used **verbatim**, so the deployment contract is unchanged;
+  unset falls back to the tracked `dev.db`. The resolution is factored into an
+  exported `resolveDatabaseUrl(env)` so it is testable without constructing a
+  client.
+- **`backend/.env.example`** — `DATABASE_URL` documented commented-out with a
+  placeholder absolute path aimed at `prod.db`. Also corrected a stale header
+  claiming `DATABASE_URL` was the one non-optional variable; every variable in
+  that file is now optional.
+- **`backend/.gitignore`** — `prod.db` plus its `-journal` / `-wal` / `-shm`
+  companions, with a comment recording that `dev.db` deliberately stays
+  **tracked** as this repo's seed/reference database.
+- **`INSTALLER_PACKAGE_MANIFEST.md`** — new §3.1 (resolution table, absolute-path
+  guidance for service contexts where the working directory is not guaranteed,
+  how `prod.db` is created at install time behind an existence check so re-runs
+  and updates never overwrite live data). Row 9 rewritten and row 9a added for
+  `prod.db`; `prod.db` added to both exclude lists and to the packaging
+  verification checks.
+
+### Two decisions worth recording
+
+**The default is absolute, not `file:./dev.db`.** It is derived from the backend
+package directory via `__dirname`. A CWD-relative default silently resolves
+against whatever directory the process happened to start in, which would create
+and then talk to an *empty* database rather than failing loudly — a
+wrong-database failure mode, not a missing-database one. An explicitly-set
+`DATABASE_URL` is passed through untouched, so this affects only the fallback.
+For the same reason an empty or whitespace-only value counts as unset: `??`
+alone would forward `""` into libsql and fail far from the cause, losing the
+old `if (!url)` guard's intent.
+
+**`backend/prisma.config.ts` was deliberately left without a fallback.** It
+already honours `DATABASE_URL`, which is all an installer needs to point CLI
+operations at `prod.db`. Leaving it to fail loudly when the variable is unset is
+the safer behaviour for schema-mutating commands — a silent default to `dev.db`
+there could push a schema onto the seed database by accident.
+
+### Two hazards found and recorded, not introduced
+
+- **The rsync packaging route would have swept `prod.db` into the package.**
+  `.gitignore` protects the `git archive` route but does nothing for a
+  working-tree `rsync`/`robocopy`, and `prod.db` exists on any developer
+  machine. Now explicitly excluded, and asserted absent by the §3 checks.
+- **The manifest's claim that the server "builds a fresh DB via
+  `prisma migrate deploy`" is unproven.** `prisma/migrations/` has been drifted
+  from the live schema since long before that manifest (§5.2) because this
+  project uses `prisma db push`. That claim was not repeated; §3.1 records it as
+  an explicit blocker and prefers seeding from the shipped `dev.db` copy.
+
+Also documented: never point a production deployment at `dev.db`, since a
+`git pull` of any `chore(dev.db)` commit would overwrite it and silently destroy
+live data.
+
+### Verification
+
+- Backend `tsc --noEmit` and frontend `tsc -b`: both clean.
+- Backend `vitest run` — 58/58 (7 files). Frontend `vitest run` — 113/113
+  (18 files); the two `console.error`/`console.warn` lines are the suite's own
+  simulated-500 fixtures, not failures.
+- **libsql URL form probed empirically before writing the default**, rather than
+  assumed: `file:` + a native backslashed Windows absolute path, `file:` + a
+  forward-slashed absolute path, and the existing `file:./dev.db` all connect
+  and return the same row counts. No slash conversion is needed.
+- **Unset path, live:** started a real backend with `env -u DATABASE_URL`, from a
+  **foreign working directory**, on spare port `4055` via the §56 `PORT`/`HOST`
+  variables so the running dev server was never touched. `/api/health` returned
+  `"database":"connected"`; `/api/config` returned 17 products with the exact
+  `dev.db` codes; `/api/auth/pin-directory` returned both `PinUser` rows with
+  ids matching `dev.db` exactly. **No stray `dev.db` was created in the foreign
+  working directory** — direct proof the absolute default resolved as intended,
+  where the previous relative form would have created an empty database there.
+- **Set path, live:** the dev server on `4009` (which `tsx watch` restarted on
+  the `prismaClient.ts` edit) came back healthy on the `backend/.env` value —
+  17 products, 2 PIN users. No regression in either direction.
+- No schema change, no `prisma db push`, no migration. `backend/dev.db` is
+  untouched and still tracked at `9e959df`; `prod.db` is gitignored and appears
+  nowhere in `git status`.

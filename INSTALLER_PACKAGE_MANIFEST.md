@@ -48,7 +48,7 @@ schema + migrations, install/update scripts, and env templates. Nothing else.
 │
 ├── backend/.env.example              # EXISTS (added 2026-09-06) — template, keys +
 │                                     #   placeholder values only:
-│                                     #   DATABASE_URL="file:./dev.db"    (or a Postgres URL)
+│                                     #   DATABASE_URL -> backend/prod.db  (see §3.1)
 │                                     #   PORT=4009  HOST=0.0.0.0  NODE_ENV=production
 │                                     #   TLS_KEY_PATH / TLS_CERT_PATH  (see §4 TLS note)
 │
@@ -87,7 +87,8 @@ schema + migrations, install/update scripts, and env templates. Nothing else.
 | 6 | **`archived/` folder** (8 files incl. `archived/AI_RULES.md` titled "Antigravity AI Project Rules") | yes, tracked | **No** — not on the allowlist | Superseded predecessor docs; referenced by nothing runnable. |
 | 7 | **`.claude/`** (and any `.cursor/`, `.windsurf/`, `.aider*`, `.continue/`, `.idea/`, `.vscode/`) | `.claude/` on disk, **gitignored** (`.gitignore:15`), never tracked. Empty `backend/.windsurf/` on disk, untracked, not ignored. | **No** — not on the allowlist; also gitignored so absent from `git archive` | Confirmed explicitly. Recommend deleting the stray empty `backend/.windsurf/` and widening `.gitignore` (see §5). |
 | 8 | **`node_modules/`** (root, `frontend/`, `backend/`) | on disk, gitignored | **No** — the server runs `npm ci` itself | Copying it would also be slow, platform-wrong, and could carry `.package-lock`/bin junk. |
-| 9 | **`backend/dev.db`** (real/seed SQLite data) | **yes — git-TRACKED** (`backend/.gitignore` does *not* list `dev.db`) | **No** — not on the allowlist; server builds a fresh DB via `prisma migrate deploy` | Because it is tracked, a `git archive` package would include it unless explicitly excluded. Put it on the exclude list (§3) **and** consider `git rm --cached backend/dev.db` + gitignoring it in a later chore. |
+| 9 | **`backend/dev.db`** (seed/reference SQLite data) | **yes — git-TRACKED** (deliberately; `backend/.gitignore` does *not* list `dev.db`) | **No** — not on the allowlist. The server runs against `backend/prod.db` instead (see §3.1) | Because it is tracked, a `git archive` package would include it unless explicitly excluded. It is on the exclude list (§3). Note the earlier "consider `git rm --cached backend/dev.db`" suggestion is **superseded**: `dev.db` stays tracked as this repo's seed/reference database, and the *runtime* database is the separate, gitignored `prod.db` — see §3.1. |
+| 9a | **`backend/prod.db`** (live production data) | **no — gitignored** (`backend/.gitignore`, with its `-journal`/`-wal`/`-shm` companions) | **No** — created on the server at install time, never packaged | Machine-local runtime data. Absent from any `git archive` because it is gitignored, but a working-tree `rsync`/`robocopy` **would** pick it up from a developer machine — hence the explicit exclude in §3. See §3.1 for how it is created. |
 | 10 | **`backend/test_api.mjs`, `backend/test_api.ps1`, `backend/test_fail.json`, `backend/test_pass.json`** | yes, tracked | **No** — not on the allowlist (backend allowlist is `server.ts` + `src/**` minus `__tests__` + `prisma/**` + manifests) | Ad-hoc API test scaffolding. |
 | 11 | **All `__tests__/` dirs + `*.test.ts`** under `backend/src/` and `frontend/src/` | yes, tracked | **No** — allowlist excludes `**/__tests__/**`; frontend ships only `dist/` | — |
 | 12 | **`backend/scripts/` one-off backfill scripts** (`backfill-*.ts`, `regression-grading-snapshot.ts`) | yes, tracked | **No** — `backend/scripts/` is not on the allowlist | Historical data-migration one-offs, not runtime. Exclude. |
@@ -123,6 +124,7 @@ rm -rf  <package-root>/.git \
         <package-root>/NAVIGATION_AND_RBAC.md \
         <package-root>/UI_DESIGN_SYSTEM.md \
         <package-root>/backend/dev.db \
+        <package-root>/backend/prod.db \
         <package-root>/backend/test_api.mjs \
         <package-root>/backend/test_api.ps1 \
         <package-root>/backend/test_fail.json \
@@ -157,6 +159,7 @@ cp -r frontend/dist <package-root>/frontend/dist
 --exclude='docs/'            --exclude='archived/'
 --exclude='*.md'             # then explicitly re-add only install/*.md if used
 --exclude='backend/dev.db'   --exclude='backend/dev.db-*'
+--exclude='backend/prod.db'  --exclude='backend/prod.db-*'
 --exclude='backend/test_*'   --exclude='backend/scripts/'
 --exclude='**/__tests__/'    --exclude='*.test.ts'    --exclude='*.test.tsx'
 --exclude='frontend/src/'    --exclude='frontend/public/'
@@ -174,7 +177,59 @@ Whichever method is used, the packaging step MUST finish with an automated check
 grep -rIl -e 'Claude' -e 'Anthropic' -e 'Antigravity' -e 'AI_RULES' -e 'Co-Authored-By' <package-root> ; test $? -eq 1
 test ! -e <package-root>/.git
 test ! -e <package-root>/backend/dev.db
+test ! -e <package-root>/backend/prod.db
 ```
+
+### 3.1 Database: the server runs on `prod.db`, not `dev.db`
+
+The runtime database is **`backend/prod.db`**. It is **not** shipped and **not**
+in git — it is created on the target machine at install time and then holds that
+site's real inspection data for the rest of its life.
+
+**How the backend picks its database.** `backend/src/lib/prismaClient.ts` reads
+`DATABASE_URL` from the environment (via `backend/.env`, loaded by
+`import 'dotenv/config'` in `server.ts`, or from the real process environment,
+which wins). It follows the same env-var-with-default pattern as
+`HOST`/`PORT`/`TLS_KEY_PATH`/`TLS_CERT_PATH`:
+
+| `DATABASE_URL` | Database used |
+|---|---|
+| set | used verbatim — **this is what the installer sets**, pointing at `prod.db` |
+| unset | falls back to `backend/dev.db`, the tracked seed DB — local dev only |
+
+The fallback is an absolute path derived from the backend package directory, so
+it does not depend on the working directory the server starts in. In a Windows
+service or scheduled-task context the working directory is not guaranteed, so
+the installer should set an **absolute** `DATABASE_URL`:
+
+```
+DATABASE_URL="file:C:\ProgramData\QualityInspection\prod.db"
+```
+
+**How `prod.db` is created at install time.** Two options; pick one and make the
+installer do it exactly once, guarded by an existence check so a re-run or an
+update never overwrites live data:
+
+1. **Copy the seed** — package `backend/dev.db` as, say, `install/seed.db` (a
+   deliberate, renamed copy; the raw `dev.db` path itself stays excluded per §3)
+   and copy it to the `prod.db` location on first install. This carries the
+   reviewed real-practice configuration — Factory & Line Setup, Product Engine,
+   Quality Rules — with zero submissions, which is the intended starting state.
+2. **Build an empty schema** — run Prisma against the `prod.db` URL and then
+   have an administrator enter all configuration by hand through the app.
+
+Option 1 is strongly preferred: option 2 leaves an operator to re-key the entire
+defect taxonomy and product matrix from scratch.
+
+> ⚠️ **Unresolved, and it blocks option 2:** `prisma/migrations/` has been
+> drifted from the live schema since long before this manifest (`CHANGELOG.md`
+> §5.2) — this project uses `prisma db push`, not `migrate dev`. Do **not**
+> assume `prisma migrate deploy` reproduces the current schema on a fresh
+> database until that drift is actually reconciled and verified. Nothing in this
+> repo demonstrates that it does.
+
+**Never** point a production deployment at `dev.db`: it is overwritten by every
+`git pull` of a `chore(dev.db)` commit, which would silently destroy live data.
 
 ---
 
