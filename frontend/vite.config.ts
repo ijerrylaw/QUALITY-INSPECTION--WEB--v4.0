@@ -41,13 +41,22 @@ const REPO_ROOT = resolve(__dirname, '..')
 const fileEnv = loadEnv('', __dirname, '')
 const env = (key: string): string | undefined => process.env[key] ?? fileEnv[key]
 
-const httpsOptions = {
+// Read lazily, and ONLY for `vite dev`. This used to be a top-level const, which
+// meant the config module read both .pem files the moment Vite loaded it —
+// including during `vite build`, which never opens a socket and has no use for
+// TLS material. On any machine without a cert at the configured path that made
+// the production build fail outright with ENOENT before compiling a single
+// module, which is exactly the situation on a freshly provisioned server (the
+// installer builds the frontend there, and the cert is supplied separately by
+// IT). Deferring the read keeps dev behaviour identical while letting a build
+// succeed on a machine that has no certificate at all.
+const readHttpsOptions = () => ({
   key: fs.readFileSync(resolve(REPO_ROOT, env('TLS_KEY_PATH') ?? 'frontend/10.10.110.31+1-key.pem')),
   cert: fs.readFileSync(resolve(REPO_ROOT, env('TLS_CERT_PATH') ?? 'frontend/10.10.110.31+1.pem')),
-}
+})
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [react(), tailwindcss()],
   build: {
     rollupOptions: {
@@ -71,10 +80,13 @@ export default defineConfig({
       },
     },
   },
-  server: {
-    host: env('HOST') ?? '0.0.0.0',
-    port: env('PORT') ? Number(env('PORT')) : 4001,
-    strictPort: true,
-    https: httpsOptions
-  }
-})
+  // `command` is 'serve' for `vite dev` and 'build' for `vite build`.
+  server: command === 'serve'
+    ? {
+        host: env('HOST') ?? '0.0.0.0',
+        port: env('PORT') ? Number(env('PORT')) : 4001,
+        strictPort: true,
+        https: readHttpsOptions()
+      }
+    : undefined
+}))
