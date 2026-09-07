@@ -79,6 +79,7 @@ or summarized in the split — this is the original content, relocated.
 - [§54](#54-registrymanagermodal-blurb-and-help-text-wording-closes-53-loose-ends--2026-09-06) — RegistryManagerModal blurb and help text wording (closes §53 loose ends) — 2026-09-06
 - [§55](#55-defect-taxonomy-reconciled-against-the-qa-tab-audit_report-2-and-3--2026-09-06) — Defect taxonomy reconciled against the QA tab (AUDIT_REPORT #2 and #3) — 2026-09-06
 - [§56](#56-backendfrontend-tls-cert--host-port-made-environment-configurable-closes-installer_package_manifestmd-tls-blocker--2026-09-06) — Backend/frontend TLS cert + host/port made environment-configurable (closes INSTALLER_PACKAGE_MANIFEST.md TLS blocker) — 2026-09-06
+- [§57](#57-real-data-cleanup-checkpoint-before-devdb-and-proddb-separation--2026-09-07) — Real-data cleanup checkpoint before dev.db and prod.db separation — 2026-09-07
 
 ---
 
@@ -7113,3 +7114,54 @@ Documented in `frontend/.env.example`.
   `frontend/.env.example`, and `INSTALLER_PACKAGE_MANIFEST.md`'s stale TLS
   blocker note (now marked resolved) are the only files this closure
   touches, plus this `CHANGELOG.md` entry.
+
+---
+
+## 57. Real-data cleanup checkpoint before dev.db and prod.db separation — 2026-09-07
+
+A deliberate stage point. The config control contents were reviewed and
+amended in the live app — Factory & Line Setup, Product Engine, and Quality
+Rules — to bring `dev.db` as close to real One Glove Group practice as it
+has been to date, and all test submissions were confirmed purged to zero.
+This checkpoint is taken **ahead of** the planned `dev.db` → `prod.db`
+separation; that DB fork is the next step and is not part of this commit.
+
+**What changed vs `00ddef3`:**
+
+- **`Submission` / `AmendmentLog`:** 0 rows, unchanged. Test data was
+  cleared in `00ddef3`; still empty — verified, not re-purged.
+- **Product Engine (`AppConfig.products`) — the only substantive config
+  change.** Every product (all 17) now carries a `BEADING THICKNESS`
+  dimension, recorded consistently: `decimals: 3`, `isGraded: false`
+  (record-only — measured and stored, never graded against a threshold),
+  and a per-size entry of `{minSpec: "1.000", tolerance: "MIN"}` across all
+  six sizes XS–XXL. In `00ddef3` only `N025SKB-OC-24FT` had this dimension;
+  its existing def was re-standardised here (`decimals` 2→3, `minSpec`
+  `"1.00"`→`"1.000"` on all six sizes) and the other 16 were added. All 17
+  products received a fresh `lastAmended` of 2026-09-07.
+- **Factory & Line Setup** (`lines`, `shifts`, `sides`, `sizes`,
+  `sampleSizes`) and **Quality Rules** (`Category`, `Defect`,
+  `ProfileCategory`, `ProfileCategoryDefect`): reviewed in the live app, no
+  edits required — byte-identical to `00ddef3`.
+- **`AccessLog`:** +10 rows (144 → 154) — four `M365_LOGIN_SUCCESS` and six
+  `CONFIG_WRITE` / `Product Engine` entries, all the reviewing admin from
+  `127.0.0.1` on 2026-09-07. This is the audit trail of the review session
+  itself.
+- **`M365UserRole`:** one row's `updatedAt` refreshed by login re-sync; no
+  role or identity value changed.
+- **`AppConfig.updatedAt` / `lastHistoryViewedAt`:** timestamp bumps.
+
+No schema change, no `prisma db push`, no code edit. `backend/dev.db` and
+this `CHANGELOG.md` entry are the only files this checkpoint touches.
+
+### Verification
+
+Read-only inspection. `HEAD:backend/dev.db` was extracted to a scratch copy
+and compared table-by-table against the working tree, with a recursive JSON
+diff of `AppConfig.products`, over a read-only `sqlite3` connection (Python
+stdlib; no `sqlite3` on PATH). Every `BEADING THICKNESS` def was checked for
+exact name, `decimals: 3`, and `isGraded === false`; the graded/record-only
+semantics are defined by `isDimensionGraded()` in
+`backend/src/engine/dimensionEvaluator.ts`. Row-count deltas and the
+`products` diff were reconciled against the operator's account of the
+session before committing.
