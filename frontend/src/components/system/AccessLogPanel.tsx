@@ -135,8 +135,8 @@ export function AccessLogPanel() {
             <p className="text-muted text-sm">No access log entries yet.</p>
           </div>
         ) : (
-          // Fixed-height, internally-scrolling box (Jerry's explicit sizing
-          // call — ~7-8 rows visible, both directions via one overflow-auto
+          // Fixed-height, internally-scrolling box (an explicit sizing
+          // decision — ~7-8 rows visible, both directions via one overflow-auto
           // so a table wider than the box still scrolls horizontally too).
           // Sticky `th`s (not `thead`, for consistent cross-browser sticky
           // behavior with a bordered table) pin the header to the top of

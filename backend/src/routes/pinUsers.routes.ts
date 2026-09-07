@@ -17,8 +17,8 @@
  *        the user has zero Submission/AmendmentLog history (409 otherwise,
  *        pointing the caller at Deactivate instead).
  *
- *  All five above require Group A or B (requireGroup('A', 'B')) — matches
- *  Jerry's rule that department managers (Group B) typically manage their own
+ *  All five above require Group A or B (requireGroup('A', 'B')) — department
+ *  managers (Group B) are included because they typically administer their own
  *  staff; Group C (including Supervisors) cannot reach this screen at all.
  *
  * Also exports:

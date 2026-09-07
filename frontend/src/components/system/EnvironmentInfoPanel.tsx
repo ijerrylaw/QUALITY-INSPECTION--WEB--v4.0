@@ -12,8 +12,9 @@ type BackendHealth = {
 /**
  * Read-only diagnostic panel for System Admin's ENVIRONMENT tab (Group A
  * only, via the page-level /system route gate — see App.tsx's RoleRoute).
- * Nothing here is editable; it exists so Jerry can confirm live port/
- * protocol/Entra config at a glance without opening devtools or .env files.
+ * Nothing here is editable; it exists so an administrator can confirm live
+ * port/protocol/Entra config at a glance without opening devtools or .env
+ * files.
  */
 export function EnvironmentInfoPanel() {
   const [backend, setBackend] = useState<BackendHealth>({ status: 'loading' });

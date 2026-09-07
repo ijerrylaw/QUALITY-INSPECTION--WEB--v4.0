@@ -47,7 +47,7 @@ const HOST = process.env['HOST'] ?? '0.0.0.0';
 // from the frontend page's own origin, not this server's. Read from
 // frontend/ by default (backend and frontend are sibling folders) rather
 // than duplicating the files here, so there's a single source of truth if
-// Jerry ever has to regenerate them (e.g. the LAN IP changes).
+// they ever have to be regenerated (e.g. the LAN IP changes).
 //
 // ── Host/TLS deployment env vars (see backend/.env.example) ──────────────────
 // All four are OPTIONAL. Their defaults reproduce this laptop's original

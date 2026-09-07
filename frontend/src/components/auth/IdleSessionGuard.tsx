@@ -7,8 +7,8 @@ import { useToast } from '../ui/ToastProvider';
  * floor-tablet kiosks (AUDIT_REPORT.md §11, Task 5). Does NOT apply to M365
  * sessions (personal devices, not shared).
  *
- * PLACEHOLDER VALUE — Jerry can tune this once real floor usage patterns are
- * observed; 15 minutes is a reasonable starting default, not a settled spec.
+ * PLACEHOLDER VALUE — to be tuned once real floor usage patterns are observed;
+ * 15 minutes is a reasonable starting default, not a settled spec.
  */
 export const PIN_SESSION_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 
