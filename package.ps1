@@ -134,6 +134,7 @@ $RequiredPaths = @(
     'install.ps1',
     'install/seed.db',
     'install/README.txt',
+    'install/tools/nssm.exe',   # bundled service wrapper (see NssmSha256 below)
     'package.json',
     'package-lock.json',
     'backend/server.ts',
@@ -146,11 +147,20 @@ $RequiredPaths = @(
     'frontend/src/main.tsx'
 )
 
-# Binary extensions skipped by the string scan (Select-String on a SQLite file or
-# a font is slow and produces meaningless hits).
+# SHA256 the bundled service wrapper must have. Pinned here so a corrupted or
+# swapped install/tools/nssm.exe fails the package build, not just the customer
+# install (install.ps1 re-checks the same value at install time). Provenance is
+# in install/tools/README-nssm.txt.
+$NssmExeSha256 = 'EEE9C44C29C2BE011F1F1E43BB8C3FCA888CB81053022EC5A0060035DE16D848'
+
+# Binary extensions skipped by the string scan (Select-String on a SQLite file,
+# a font or an .exe is slow and produces meaningless hits). The bundled
+# nssm.exe is a public-domain third-party binary and is not scanned for
+# forbidden strings; its integrity is covered by the SHA256 pin above instead.
 $BinaryExtensions = @(
     '.db', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp',
-    '.woff', '.woff2', '.ttf', '.eot', '.zip', '.gz', '.pdf', '.xlsx', '.xls'
+    '.woff', '.woff2', '.ttf', '.eot', '.zip', '.gz', '.pdf', '.xlsx', '.xls',
+    '.exe'
 )
 
 Write-Host ''
@@ -359,7 +369,19 @@ if ($missing.Count -gt 0) {
 }
 Write-Pass "$($RequiredPaths.Count) required files confirmed present"
 
-# ── 9. Zip ───────────────────────────────────────────────────────────────────
+# ── 9. Verify: bundled nssm.exe checksum ─────────────────────────────────────
+Write-Step 'Verifying: bundled nssm.exe checksum'
+
+$nssmInPkg = Join-Path $OutputDir 'install/tools/nssm.exe'
+$nssmHash  = (Get-FileHash -Algorithm SHA256 -LiteralPath $nssmInPkg).Hash
+if ($nssmHash -ne $NssmExeSha256) {
+    Write-Host "      expected $NssmExeSha256" -ForegroundColor Red
+    Write-Host "      actual   $nssmHash" -ForegroundColor Red
+    Fail 'install/tools/nssm.exe does not match the pinned SHA256 - refusing to package it.'
+}
+Write-Pass "install/tools/nssm.exe SHA256 matches the pin ($($NssmExeSha256.Substring(0,16))...)"
+
+# ── 10. Zip ──────────────────────────────────────────────────────────────────
 $zipPath = ''
 if ($Zip) {
     Write-Step 'Creating archive'

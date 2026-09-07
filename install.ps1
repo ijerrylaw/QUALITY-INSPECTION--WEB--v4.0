@@ -9,7 +9,8 @@
     nothing here overwrites live inspection data.
 
     What it does, in order:
-      1. Checks prerequisites (Administrator, Node.js, npm, NSSM).
+      1. Checks prerequisites (Administrator, Node.js, npm) and verifies the
+         bundled NSSM binary.
       2. Creates backend\.env from the template on first run, then STOPS so you
          can fill in this site's real values.
       3. Ensures a TLS certificate and key are in place where .env points -
@@ -24,9 +25,13 @@
     PREREQUISITES that must already be on this machine - this script does not
     download anything:
       * Node.js 20.19 or newer (22 LTS recommended). https://nodejs.org
-      * NSSM, the service wrapper. https://nssm.cc - unzip it and either put
-        nssm.exe on PATH or pass -NssmPath "C:\path\to\nssm.exe".
       * Outbound internet access, for `npm ci` to fetch dependencies.
+
+    NSSM (the service wrapper) is NOT a prerequisite. A checksum-verified copy
+    ships with the package at install\tools\nssm.exe and is used automatically;
+    install.ps1 re-checks its SHA256 and refuses to run it if it does not match.
+    Pass -NssmPath "C:\path\to\nssm.exe" only to override it with your own build.
+    See install\tools\README-nssm.txt for the binary's provenance.
 
     OPTIONAL:
       * A TLS certificate and private key, in PEM format. If you do NOT supply
@@ -46,7 +51,8 @@
     Windows service name. Default "QualityInspection".
 
 .PARAMETER NssmPath
-    Full path to nssm.exe, if it is not on PATH.
+    Full path to your own nssm.exe. Optional - overrides the checksum-verified
+    copy bundled at install\tools\nssm.exe. Use it to run a different NSSM build.
 
 .PARAMETER SkipServiceInstall
     Do everything except register/start the service. Useful for a dry run.
@@ -79,6 +85,13 @@ $SeedDb       = Join-Path $AppRoot 'install\seed.db'
 $BackendDir   = Join-Path $AppRoot 'backend'
 $ServerEntry  = Join-Path $AppRoot 'backend\server.ts'
 $LogDir       = Join-Path $AppRoot 'logs'
+
+# The service wrapper ships in the package. SHA256 of install\tools\nssm.exe -
+# re-checked at install time so a corrupted or swapped binary is never run. This
+# is NSSM 2.24-101-g897c7ad win64; see install\tools\README-nssm.txt for how the
+# binary was verified before being committed.
+$BundledNssm       = Join-Path $AppRoot 'install\tools\nssm.exe'
+$BundledNssmSha256 = 'EEE9C44C29C2BE011F1F1E43BB8C3FCA888CB81053022EC5A0060035DE16D848'
 
 # Keys the service cannot start without. Each is checked for presence AND for
 # still holding the CHANGE_ME placeholder, because a half-edited .env is the
@@ -293,22 +306,57 @@ if (-not $npmCmd) {
 Write-Pass "npm $((& npm --version).Trim())"
 
 if (-not $SkipServiceInstall) {
-    if ([string]::IsNullOrWhiteSpace($NssmPath)) {
+    # Resolution order: an explicit -NssmPath wins; otherwise the bundled,
+    # checksum-verified copy; otherwise whatever is on PATH. A binary that
+    # fails its checksum is never used - the run falls through to PATH, then
+    # to a loud failure, rather than executing an unverified file.
+    $nssmResolved = $null
+    $nssmSource   = $null
+
+    if (-not [string]::IsNullOrWhiteSpace($NssmPath)) {
+        if (-not (Test-Path -LiteralPath $NssmPath)) {
+            Fail "-NssmPath was given but no file exists there: $NssmPath" `
+                 @() `
+                 @('Fix the path, or omit -NssmPath to use the copy that ships with',
+                   'the installer at install\tools\nssm.exe.')
+        }
+        $nssmResolved = $NssmPath
+        $nssmSource   = 'from -NssmPath (override)'
+    }
+    elseif (Test-Path -LiteralPath $BundledNssm) {
+        $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $BundledNssm).Hash
+        if ($actualHash -eq $BundledNssmSha256) {
+            $nssmResolved = $BundledNssm
+            $nssmSource   = 'bundled, SHA256 verified'
+        } else {
+            Write-Warn 'The bundled install\tools\nssm.exe FAILED its checksum - it will NOT be used.'
+            Write-Info "  expected $BundledNssmSha256"
+            Write-Info "  actual   $actualHash"
+            Write-Info 'Looking for an nssm.exe on PATH instead.'
+        }
+    }
+
+    if (-not $nssmResolved) {
         $nssmCmd = Get-Command nssm -ErrorAction SilentlyContinue
-        if ($nssmCmd) { $NssmPath = $nssmCmd.Source }
+        if ($nssmCmd -and (Test-Path -LiteralPath $nssmCmd.Source)) {
+            $nssmResolved = $nssmCmd.Source
+            $nssmSource   = 'found on PATH'
+        }
     }
-    if ([string]::IsNullOrWhiteSpace($NssmPath) -or -not (Test-Path -LiteralPath $NssmPath)) {
-        Fail 'NSSM was not found.' `
-             @('NSSM is the wrapper that runs this application as a Windows service,',
-               'so that it starts on boot and restarts automatically if it stops.',
-               'It is a prerequisite and this script does not download it.') `
-             @('Download NSSM from https://nssm.cc/download',
-               'Unzip it, and take nssm.exe from the win64 folder.',
-               'Either copy it somewhere on PATH (for example C:\Windows\System32),',
-               '  or re-run this script pointing at it directly:',
-               "  .\install.ps1 -NssmPath `"C:\Tools\nssm\win64\nssm.exe`"")
+
+    if (-not $nssmResolved) {
+        Fail 'NSSM is not available.' `
+             @('A checksum-verified nssm.exe normally ships in the package at',
+               'install\tools\nssm.exe. Here it is missing or it failed its',
+               'checksum, and no nssm.exe was found on PATH either.') `
+             @('Re-copy the COMPLETE installer package to this server - the bundled',
+               '  install\tools\nssm.exe may not have transferred.',
+               'Or supply your own: download from https://nssm.cc/download and re-run',
+               '  as  .\install.ps1 -NssmPath "C:\path\to\nssm.exe"')
     }
-    Write-Pass "NSSM at $NssmPath"
+
+    $NssmPath = $nssmResolved
+    Write-Pass "NSSM ($nssmSource): $NssmPath"
 }
 
 foreach ($req in @($EnvTemplate, $ServerEntry, (Join-Path $AppRoot 'package.json'))) {

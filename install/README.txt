@@ -11,21 +11,21 @@ You do not need to be a developer to follow this. Work through it in order.
 
 
 -------------------------------------------------------------------------------
- BEFORE YOU START - two things must already be in place
+ BEFORE YOU START - one thing must already be in place
 -------------------------------------------------------------------------------
 
  1. NODE.JS, version 20.19 or newer (version 22 LTS is recommended).
     Download from https://nodejs.org and install it. Accept the option that
     adds Node.js to the system PATH.
 
- 2. NSSM, the service wrapper.
-    Download from https://nssm.cc/download and unzip it. The file you need is
-    nssm.exe inside the win64 folder. Either copy it into a folder already on
-    the PATH, or just note where you put it - the installer accepts the path
-    directly.
-
  The server also needs outbound internet access, so the installer can download
  the application's dependencies.
+
+ NSSM (the tool that runs the app as a Windows service) is NOT something you
+ need to download. A copy ships inside this package at install\tools\nssm.exe;
+ the installer checks it against a known SHA256 and uses it automatically. To
+ run a different version of NSSM instead, pass its path:
+ .\install.ps1 -NssmPath "C:\path\to\nssm.exe"  (see install\tools\README-nssm.txt).
 
 
 -------------------------------------------------------------------------------
@@ -74,7 +74,8 @@ You do not need to be a developer to follow this. Work through it in order.
 
             .\install.ps1
 
-          If nssm.exe is not on the PATH, point at it instead:
+          Nothing extra is needed - NSSM ships in the package. Only if you want
+          the installer to use your own copy of nssm.exe:
 
             .\install.ps1 -NssmPath "C:\Tools\nssm\win64\nssm.exe"
 
@@ -209,8 +210,11 @@ You do not need to be a developer to follow this. Work through it in order.
  The installer stops at the first problem and prints a WHAT TO DO section
  naming the exact fix. The most common causes are:
 
-   "NSSM was not found"
-     nssm.exe is not on the PATH. Re-run with -NssmPath pointing at it.
+   "NSSM is not available"
+     The bundled install\tools\nssm.exe is missing or failed its checksum, and
+     no nssm.exe was found on PATH. Re-copy the complete package to the server
+     (the bundled file may not have transferred), or re-run with -NssmPath
+     pointing at a copy you downloaded from https://nssm.cc/download .
 
    "Could not generate a self-signed certificate"
      Rare. Needs .NET Framework 4.7.2 or newer (standard on Windows Server

@@ -53,6 +53,7 @@ or summarized in that split either.
 - [§64](#64-redirect-uri-panel-derives-the-live-value-instead-of-a-hardcoded-list--2026-09-07) — Redirect URI panel derives the live value instead of a hardcoded list — 2026-09-07
 - [§65](#65-on-prem-installer-and-packaging-step--windows-service-seeded-database-exclusion-verification--2026-09-07) — On-prem installer and packaging step — Windows service, seeded database, exclusion verification — 2026-09-07
 - [§66](#66-installer-generates-a-self-signed-tls-certificate-when-none-is-supplied--2026-09-07) — Installer generates a self-signed TLS certificate when none is supplied — 2026-09-07
+- [§67](#67-nssm-service-wrapper-bundled-into-the-installer-package--2026-09-07) — NSSM service wrapper bundled into the installer package — 2026-09-07
 
 ---
 
@@ -2419,3 +2420,95 @@ pass a PowerShell parser check.
 **Database migration:** none. PowerShell installer and documentation only — no
 schema change, no `prisma db push`, no migration added or modified, no
 application code touched, `dev.db` untouched.
+
+---
+
+## 67. NSSM service wrapper bundled into the installer package — 2026-09-07
+
+§65's installer treated NSSM (the tool that runs the app as a Windows service)
+as a prerequisite Hakim had to download from nssm.cc and either put on PATH or
+point at with `-NssmPath`. That is an avoidable manual step, and it made the
+happy path depend on nssm.cc being reachable during the trial install (it threw
+connection resets twice during this session's research). NSSM is ~360 KB and
+public domain, so it now ships inside the package.
+
+### The binary and how it was vetted
+
+`install/tools/nssm.exe` — **NSSM 2.24-101-g897c7ad, win64, 2017-04-26**.
+
+Not the last tagged stable release (2.24, from 2014): nssm.cc's own download
+page tells "Windows 10 Creators Update or newer" users to take this pre-release
+instead, because 2.24 has service-startup failures on modern Windows — which is
+every OS this app deploys on. 2.24-101-g897c7ad is also the build the Chocolatey
+`nssm` package ships, which is what makes an independent checksum cross-check
+possible.
+
+nssm.cc publishes **no** SHA256 and **no** code signature (NSSM binaries are not
+Authenticode signed). It does publish a SHA1 per download. Verification before
+committing the binary was therefore a cross-check of a fresh HTTPS download
+against two independent sources:
+
+| Artefact | Hash | Cross-checked against |
+|---|---|---|
+| `nssm-2.24-101-g897c7ad.zip` | SHA1 `ca2f6782a05af85facf9b620e047b01271edd11d` | the hash printed on nssm.cc/download — exact match |
+| same zip | SHA256 `99f5045fffbffb745d67fe3a065a953c4a3d9c253b868892d9b685b0ee7d07b8` | Chocolatey `nssm` package `checksum64` (moderator-reviewed, years-stable) — exact match |
+| `win64/nssm.exe` extracted | **SHA256 `eee9c44c29c2be011f1f1e43bb8c3fca888cb81053022ec5a0060035de16d848`** | recomputed with both `sha256sum` and PowerShell `Get-FileHash`; PE version resource reads CompanyName "Iain Patterson" / ProductName "NSSM 64-bit" / "Public Domain … 2003-2017"; `nssm.exe version` prints `NSSM 2.24-101-g897c7ad 64-bit`; grep of the binary for `AI_RULES` / `Antigravity` / `Co-Authored-By` / `claude` / `anthropic` → nothing |
+
+The full provenance record ships alongside the binary at
+`install/tools/README-nssm.txt`, so a customer security review has it on hand.
+
+### `install.ps1` STEP 1
+
+Resolution order for `$NssmPath`:
+
+1. An explicit `-NssmPath` wins (fails fast if that path does not exist).
+2. Otherwise `install\tools\nssm.exe`, **only if its SHA256 matches the value
+   pinned in the script** (`EEE9C44C…`). A mismatch prints expected-vs-actual
+   and falls through — a binary that fails verification is never executed.
+3. Otherwise `nssm` on PATH.
+4. Otherwise `Fail 'NSSM is not available.'` telling the operator to re-copy the
+   package or supply `-NssmPath`.
+
+The success line names which source was used, e.g.
+`[ OK ]  NSSM (bundled, SHA256 verified): …\install\tools\nssm.exe`.
+
+### `package.ps1`
+
+- `install/tools/nssm.exe` added to `$RequiredPaths` — a missing bundled binary
+  now fails the package build.
+- `.exe` added to `$BinaryExtensions` so the forbidden-string scan skips it (a
+  `Select-String` pass over a 360 KB binary is slow and meaningless); its
+  integrity is covered by the SHA256 pin instead.
+- New verify step: the packaged `install/tools/nssm.exe` SHA256 is checked
+  against `$NssmExeSha256` (same value as install.ps1), so a corrupted or
+  swapped binary fails the build, not just the customer install.
+- Nothing prunes `install/tools/` — it is under `install/`, which is payload.
+
+### Docs
+
+`install/README.txt`: NSSM removed from "BEFORE YOU START" (now one prerequisite,
+Node.js); a note explains it ships in the package and `-NssmPath` overrides it;
+STEP 4 and the troubleshooting entry updated. install.ps1 header / `.PARAMETER
+NssmPath` updated to match.
+
+### Verification
+
+- `package.ps1` run to a clean pass: `install/tools/nssm.exe` present in the
+  output, SHA256 matches the pin, forbidden-string scan skips it, required-paths
+  check passes. Independent post-build audit (case-insensitive grep of the whole
+  package for AI-tooling strings) still clean.
+- `install.ps1 -SkipServiceInstall` against the built package: STEP 1 reports
+  `NSSM (bundled, SHA256 verified)`.
+- `-NssmPath` override honoured; a tampered/renamed bundled binary falls through
+  to PATH / the loud failure as designed.
+- `nssm.exe version` runs on this x64 host.
+- Quality gate: backend `tsc` + 58/58, frontend `tsc` + 124/124, `oxlint` 0
+  errors; both `.ps1` pass a parser check.
+
+**Not verified:** NSSM service registration/start (steps 8–9) — the bundled
+binary is confirmed to run and to be selected, but a real service install still
+needs an elevated run on a server, unchanged from §65/§66.
+
+**Database migration:** none. A vendored binary, PowerShell, and documentation —
+no schema change, no `prisma db push`, no migration, no application code, `dev.db`
+untouched.
