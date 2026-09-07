@@ -14,6 +14,7 @@
 
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prismaClient';
+import { internalErrorBody } from '../lib/internalError';
 import { ProfileRegistrySyncError, syncProfileRegistry } from '../lib/profileRegistrySync';
 import type { SourceProfile } from '../lib/profileRegistrySync';
 import { loadProfileRulesMap } from '../engine/profileRules';
@@ -843,10 +844,7 @@ router.patch('/', requireRole('MANAGER', 'ADMIN'), async (req: Request, res: Res
     });
   } catch (error) {
     console.error('[PATCH /api/config] Error:', error);
-    res.status(500).json({
-      error: 'Failed to update system configuration',
-      details: error instanceof Error ? error.message : String(error),
-    });
+    res.status(500).json(internalErrorBody(error, 'Failed to update system configuration'));
   }
 });
 

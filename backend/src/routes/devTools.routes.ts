@@ -35,6 +35,7 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prismaClient';
+import { internalErrorBody } from '../lib/internalError';
 
 const router = Router();
 
@@ -117,7 +118,7 @@ router.delete('/submissions/all', async (_req: Request, res: Response) => {
     res.status(200).json({ beforeCount, afterCount, unlockedProductCodes });
   } catch (err) {
     console.error('[DELETE /api/dev/submissions/all]', err);
-    res.status(500).json({ error: 'Internal server error', details: String(err) });
+    res.status(500).json(internalErrorBody(err));
   }
 });
 
@@ -161,7 +162,7 @@ router.delete('/submissions/by-product-code', async (req: Request, res: Response
     });
   } catch (err) {
     console.error('[DELETE /api/dev/submissions/by-product-code]', err);
-    res.status(500).json({ error: 'Internal server error', details: String(err) });
+    res.status(500).json(internalErrorBody(err));
   }
 });
 

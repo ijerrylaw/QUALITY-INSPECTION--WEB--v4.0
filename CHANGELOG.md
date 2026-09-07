@@ -84,6 +84,7 @@ or summarized in the split — this is the original content, relocated.
 - [§59](#59-quality-analytics-menu-item-frozen-behind-a-frontend-feature-flag--2026-09-07) — Quality Analytics menu item frozen behind a frontend feature flag — 2026-09-07
 - [§60](#60-github-actions-ci-workflow-runs-the-quality-gate-on-push-and-pr-to-master--2026-09-07) — GitHub Actions CI workflow runs the quality gate on push and PR to master — 2026-09-07
 - [§61](#61-dev-tools-wipe-endpoint-gated-behind-a-password-issue-24--2026-09-07) — Dev-tools wipe endpoint gated behind a password (issue #24) — 2026-09-07
+- [§62](#62-production-hardening-pass--frontend-console-stripping-and-generic-backend-500s--2026-09-07) — Production-hardening pass — frontend console stripping and generic backend 500s — 2026-09-07
 
 ---
 
@@ -7478,3 +7479,107 @@ to it. Left for him to set — no value was invented.
 - Backend `npm test` → `vitest run`: 58/58, unchanged from baseline.
 - Frontend untouched; `tsc -b` / `oxlint` / `vitest run` re-run as a
   regression check, all at baseline (121/121).
+
+---
+
+## 62. Production-hardening pass — frontend console stripping and generic backend 500s — 2026-09-07
+
+Follow-up to the read-only production-hardening audit (task 4). Source maps
+were already confirmed disabled; this closes the two remaining items. **Code-
+only: build config + one new backend lib module + call-site edits. No schema,
+migration, Prisma command, or `dev.db` change.**
+
+### Part 1 — `console.*` stripped from the production frontend bundle
+
+Before: nothing removed `console.*` from `vite build` output — all 31
+`console.error` / `console.warn` diagnostics in `frontend/src` shipped in the
+bundle (plus a handful more from vendored deps).
+
+`frontend/vite.config.ts` now sets, under `build.rollupOptions.output`:
+
+```
+minify: {
+  compress: { dropConsole: true, dropDebugger: true },
+  mangle: true,
+  codegen: true,
+}
+```
+
+- **Why not `esbuild: { drop: ['console'] }`** (the usual Vite recipe): this
+  project is on Vite 8, which is rolldown-based and minifies with **oxc**, not
+  esbuild. `vite build` prints *"Both esbuild and oxc options were set. oxc
+  options will be used and esbuild options will be ignored"* and the esbuild
+  `drop` is a no-op — verified: a build with that option still had 47
+  `console.*` occurrences in `dist/`. Console removal on this toolchain is an
+  oxc-**minifier** flag (`compress.dropConsole`), set on the rolldown output
+  options. Vite spreads user `rolldownOptions.output` last (over its computed
+  `minify: true`), so this override wins.
+- **`mangle` / `codegen` kept `true`** so the bundle is still fully minified —
+  an object `minify` replaces Vite's default `minify: true` wholesale, so the
+  other two sub-options have to be restated or the output balloons.
+- **Production build only.** `build.rollupOptions` is not consulted by
+  `vite dev` or the vitest browser runner (neither minifies), so local dev and
+  the test suite keep full console output — confirmed: the frontend vitest run
+  still prints its `[console.warn]` / `[console.error]` fixture lines.
+- **No source changed.** All 31 `console.*` call sites in `frontend/src` are
+  left exactly as they were; they just don't reach the shipped bundle.
+
+Verified: `rm -rf dist && npm run build` then
+`grep -rho 'console\.[a-z]*' dist/assets/*.js` → **0 matches** (was 47).
+
+### Part 2 — backend unexpected-500s no longer leak raw error text
+
+Before: ~12 of ~38 error-response sites returned
+`{ error: 'Internal server error', details: String(err) }` on an unexpected
+500 — raw error text (Prisma constraint/column names, file paths) to the
+client, in every environment, with no `NODE_ENV` gate. There was also no
+global Express error handler; a synchronous throw in a handler fell through to
+no handler at all.
+
+**New — `backend/src/lib/internalError.ts`:**
+
+- `internalErrorBody(err, message?)` — the single decision point. In
+  production (`NODE_ENV === 'production'`): `{ error }` only. Outside
+  production: `{ error, details: String(err) }`, preserving local debugging.
+  Same `NODE_ENV` gate the `/api/dev` router mount and the wipe-password
+  fail-closed already use.
+- `globalErrorHandler(err, req, res, next)` — 4-arg Express error middleware.
+  Logs `[unhandled] <method> <url>` + the error (message + stack) via
+  `console.error`, then sends `internalErrorBody(err)`. Delegates to Express's
+  built-in handler if headers were already sent.
+
+**`backend/server.ts`** — mounts `app.use(globalErrorHandler)` last, after the
+404 fallback.
+
+**Call sites converted** to `res.status(500).json(internalErrorBody(err))`
+(behaviour identical to before outside production; generic in production):
+
+- `backend/src/routes/submissions.routes.ts` — 9 sites (the former lines 451,
+  641, 799, 850, 1116, 1181, 1393, 1456, 1513).
+- `backend/src/routes/devTools.routes.ts` — 2 sites (120, 164).
+- `backend/src/routes/config.routes.ts` — 1 site (the PATCH catch-all, ~846),
+  via `internalErrorBody(error, 'Failed to update system configuration')` to
+  keep its specific client message.
+
+**Deliberately untouched:**
+
+- The ~26 already-generic sites (`pinUsers` / `m365Users` / `registry` /
+  `accessLog` routes, the `config` GET handler).
+- Curated 4xx domain `details` — `config.routes.ts:826` (409 registry-sync
+  conflict) and `submissions.routes.ts:1257/1265/1273` (422
+  `VerdictProfileNotFoundError` family). These strings are app-authored and
+  meant to reach the client as-is.
+- `submissions.routes.ts` lines ~362 / ~366 / ~1504 (`{ error: err.message,
+  code: 'NO_USABLE_*' }`) — semi-curated domain errors with a stable `code`,
+  not part of the audit's leak list.
+
+### Verification
+
+- Backend `npx tsc --noEmit`: clean. `npm test` → `vitest run`: **58/58**,
+  unchanged.
+- Frontend `tsc -b`: clean. `oxlint`: **0 errors** (44 pre-existing warnings,
+  none in `vite.config.ts` or the changed files). `vitest run`: **121/121**,
+  unchanged; the two `console` 500 lines are the suite's own fixtures.
+- Frontend production build: exit 0, `dist/` contains **0** `console.*`.
+- Backend dev server (`NODE_ENV` unset) reboots cleanly on the new
+  `server.ts` import; `GET /api/health` ok, 404 fallback intact.

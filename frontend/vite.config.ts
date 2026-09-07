@@ -49,6 +49,28 @@ const httpsOptions = {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    rollupOptions: {
+      output: {
+        // Strip every `console.*` call and `debugger` statement from the
+        // PRODUCTION bundle. This Vite (v8, rolldown/oxc) ignores esbuild's
+        // `drop` option — console removal is an oxc-minifier feature, set here
+        // via `compress.dropConsole` on the rolldown output options. This runs
+        // only during `vite build`; `vite dev` and the vitest browser runner
+        // don't minify, so local dev/test keep full console output. `mangle`
+        // and `codegen` are left on so the bundle is still fully minified
+        // (matching Vite's default `minify: true` behaviour). The ~30
+        // `console.error` / `console.warn` diagnostics in src/ stay in the
+        // source unchanged; they just don't reach the shipped bundle.
+        // See CHANGELOG §62.
+        minify: {
+          compress: { dropConsole: true, dropDebugger: true },
+          mangle: true,
+          codegen: true,
+        },
+      },
+    },
+  },
   server: {
     host: env('HOST') ?? '0.0.0.0',
     port: env('PORT') ? Number(env('PORT')) : 4001,

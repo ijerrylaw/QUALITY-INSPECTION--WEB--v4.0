@@ -63,6 +63,7 @@ import { Prisma } from '../../generated/prisma/client';
 import { resolveVerdict, VerdictProfileNotFoundError, VerdictNoUsableProfileError, VerdictNoUsableDimensionConfigError } from '../engine/resolveVerdict';
 import { FIXED_DIM_WEIGHT } from '../engine/dimensionEvaluator';
 import prisma from '../lib/prismaClient';
+import { internalErrorBody } from '../lib/internalError';
 import {
   PIN_USER_DISPLAY_SELECT,
   displayNameOf,
@@ -448,7 +449,7 @@ router.post('/', requireRole(...ALL_ROLES), async (req: Request, res: Response) 
 
   } catch (err) {
     console.error('[POST /api/submissions]', err);
-    res.status(500).json({ error: 'Internal server error', details: String(err) });
+    res.status(500).json(internalErrorBody(err));
   }
 });
 
@@ -638,7 +639,7 @@ router.get('/', async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error('[GET /api/submissions]', err);
-    res.status(500).json({ error: 'Internal server error', details: String(err) });
+    res.status(500).json(internalErrorBody(err));
   }
 });
 
@@ -796,7 +797,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     res.status(200).json({ submission: withSubmissionNames(submission) });
   } catch (err) {
     console.error('[GET /api/submissions/:id]', err);
-    res.status(500).json({ error: 'Internal server error', details: String(err) });
+    res.status(500).json(internalErrorBody(err));
   }
 });
 
@@ -847,7 +848,7 @@ router.post('/:id/amendment-preview', requireRole(...ALL_ROLES), async (req: Req
     res.json({ changes, detectedChangeCount: changes.length });
   } catch (err) {
     console.error('[POST /api/submissions/:id/amendment-preview]', err);
-    res.status(500).json({ error: 'Internal server error', details: String(err) });
+    res.status(500).json(internalErrorBody(err));
   }
 });
 
@@ -1113,7 +1114,7 @@ router.post('/:id/amendments', requireRole(...ALL_ROLES), async (req: Request, r
     });
   } catch (err) {
     console.error('[POST /api/submissions/:id/amendments]', err);
-    res.status(500).json({ error: 'Internal server error', details: String(err) });
+    res.status(500).json(internalErrorBody(err));
   }
 });
 
@@ -1178,7 +1179,7 @@ amendmentsRouter.get('/pending', async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error('[GET /api/amendments/pending]', err);
-    res.status(500).json({ error: 'Internal server error', details: String(err) });
+    res.status(500).json(internalErrorBody(err));
   }
 });
 
@@ -1390,7 +1391,7 @@ amendmentsRouter.post('/:id/approve', requireRole('MANAGER', 'ADMIN'), async (re
     });
   } catch (err) {
     console.error('[POST /api/amendments/:id/approve]', err);
-    res.status(500).json({ error: 'Internal server error', details: String(err) });
+    res.status(500).json(internalErrorBody(err));
   }
 });
 
@@ -1453,7 +1454,7 @@ amendmentsRouter.post('/:id/reject', requireRole('MANAGER', 'ADMIN'), async (req
     });
   } catch (err) {
     console.error('[POST /api/amendments/:id/reject]', err);
-    res.status(500).json({ error: 'Internal server error', details: String(err) });
+    res.status(500).json(internalErrorBody(err));
   }
 });
 
@@ -1510,6 +1511,6 @@ verdictRouter.post('/preview', async (req: Request, res: Response) => {
     res.json(result);
   } catch (err) {
     console.error('[POST /api/verdict/preview]', err);
-    res.status(500).json({ error: 'Internal server error', details: String(err) });
+    res.status(500).json(internalErrorBody(err));
   }
 });

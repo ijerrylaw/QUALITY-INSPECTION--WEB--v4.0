@@ -31,6 +31,7 @@ import { m365UsersRouter, m365AuthRouter } from './src/routes/m365Users.routes';
 import accessLogRouter from './src/routes/accessLog.routes';
 import registryRouter from './src/routes/registry.routes';
 import devToolsRouter from './src/routes/devTools.routes';
+import { globalErrorHandler } from './src/lib/internalError';
 
 const app = express();
 const PORT = process.env['PORT'] ? Number(process.env['PORT']) : 4009;
@@ -117,6 +118,14 @@ if (process.env['NODE_ENV'] !== 'production') {
 app.use((_req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
+
+// ── Global error handler ──────────────────────────────────────────────────────
+// Last middleware, after every route and the 404 fallback. Catches synchronous
+// throws in route handlers and anything forwarded via next(err); logs the full
+// error server-side and returns a generic body — the raw `details` string is
+// included only outside production (NODE_ENV gate, in src/lib/internalError.ts).
+// See CHANGELOG §62.
+app.use(globalErrorHandler);
 
 // ── Server Start ──────────────────────────────────────────────────────────────
 https.createServer(httpsOptions, app).listen(PORT, HOST, () => {
