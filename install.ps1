@@ -12,7 +12,8 @@
       1. Checks prerequisites (Administrator, Node.js, npm, NSSM).
       2. Creates backend\.env from the template on first run, then STOPS so you
          can fill in this site's real values.
-      3. Verifies the TLS certificate and key exist where .env points.
+      3. Ensures a TLS certificate and key are in place where .env points -
+         generating a self-signed pair for this server if none is supplied.
       4. Copies the seed database into place - FIRST INSTALL ONLY.
       5. Installs dependencies (npm ci).
       6. Generates the database client.
@@ -25,13 +26,18 @@
       * Node.js 20.19 or newer (22 LTS recommended). https://nodejs.org
       * NSSM, the service wrapper. https://nssm.cc - unzip it and either put
         nssm.exe on PATH or pass -NssmPath "C:\path\to\nssm.exe".
-      * A TLS certificate and private key, in PEM format, issued by the company
-        certificate authority. THIS SCRIPT DOES NOT CREATE A CERTIFICATE. IT is
-        responsible for supplying the .pem files and for making sure the issuing
-        CA is trusted on every machine that will open the app. HTTPS is not
-        optional here: Microsoft Entra ID refuses non-HTTPS sign-in redirects
-        for anything other than localhost.
       * Outbound internet access, for `npm ci` to fetch dependencies.
+
+    OPTIONAL:
+      * A TLS certificate and private key, in PEM format. If you do NOT supply
+        one, the installer generates a self-signed certificate for this server,
+        issued to its own hostname/IP and valid for several years. Self-signed
+        means each browser shows a one-time "not secure" warning; the
+        connection is still encrypted. To supply your own instead, place the
+        PEM cert + key at the TLS_CERT_PATH / TLS_KEY_PATH locations before
+        running - existing files are used untouched, never overwritten.
+        HTTPS itself is not optional: Microsoft Entra ID refuses non-HTTPS
+        sign-in redirects for anything other than localhost.
 
 .PARAMETER AppRoot
     Application folder. Defaults to the folder containing this script.
@@ -81,6 +87,15 @@ $RequiredKeys = @('NODE_ENV', 'HOST', 'DATABASE_URL', 'TLS_KEY_PATH', 'TLS_CERT_
 
 $MinNodeMajor = 20
 $MinNodeMinor = 19
+
+# Validity window for an installer-generated self-signed certificate. Long
+# enough that renewal is not a routine chore; to force a fresh pair, delete
+# both PEM files and re-run.
+$CertValidityYears = 5
+
+# Set true if this run generates the certificate, so the closing summary can
+# mention the expected first-visit browser warning.
+$SelfSignedGenerated = $false
 
 # ── Console helpers ──────────────────────────────────────────────────────────
 $script:StepNo = 0
@@ -158,6 +173,63 @@ function Resolve-AppPath {
     param([string] $Value)
     if ([System.IO.Path]::IsPathRooted($Value)) { return $Value }
     return [System.IO.Path]::GetFullPath((Join-Path $AppRoot $Value))
+}
+
+# ── Minimal DER/PEM writer ───────────────────────────────────────────────────
+# Windows PowerShell 5.1 runs on .NET Framework, whose RSA class has no
+# ExportPkcs8PrivateKey / ExportRSAPrivateKey (those are .NET Core 3+). So the
+# private key is hand-encoded from its RSAParameters into a PKCS#1 RSAPrivateKey
+# structure, which Node's OpenSSL reads as "-----BEGIN RSA PRIVATE KEY-----".
+# No external tools (openssl, mkcert) are required.
+#
+# Each function returns its byte[] via the unary comma so PowerShell does not
+# unroll it on output; callers still wrap in [byte[]](...) defensively.
+function Get-DerLength {
+    param([int] $Length)
+    $out = New-Object System.Collections.Generic.List[byte]
+    if ($Length -lt 128) {
+        $out.Add([byte] $Length)
+    } else {
+        $tmp = New-Object System.Collections.Generic.List[byte]
+        $n = $Length
+        while ($n -gt 0) { $tmp.Insert(0, [byte]($n -band 0xFF)); $n = [int]($n -shr 8) }
+        $out.Add([byte](0x80 -bor $tmp.Count))
+        $out.AddRange($tmp)
+    }
+    return , $out.ToArray()
+}
+function New-DerInteger {
+    param([byte[]] $Value)
+    $b = New-Object System.Collections.Generic.List[byte]
+    if ($null -eq $Value -or $Value.Length -eq 0) { $b.Add([byte] 0) } else { $b.AddRange($Value) }
+    while ($b.Count -gt 1 -and $b[0] -eq 0) { $b.RemoveAt(0) }   # strip leading zeros
+    if (($b[0] -band 0x80) -ne 0) { $b.Insert(0, [byte] 0) }     # keep it positive
+    $out = New-Object System.Collections.Generic.List[byte]
+    $out.Add([byte] 0x02)
+    $out.AddRange([byte[]](Get-DerLength $b.Count))
+    $out.AddRange($b)
+    return , $out.ToArray()
+}
+function New-DerSequence {
+    param([byte[]] $Content)
+    $out = New-Object System.Collections.Generic.List[byte]
+    $out.Add([byte] 0x30)
+    $out.AddRange([byte[]](Get-DerLength $Content.Length))
+    $out.AddRange($Content)
+    return , $out.ToArray()
+}
+function Format-Pem {
+    param([string] $Label, [byte[]] $Der)
+    $b64 = [System.Convert]::ToBase64String($Der)
+    $sb = New-Object System.Text.StringBuilder
+    [void] $sb.Append("-----BEGIN $Label-----`n")
+    for ($i = 0; $i -lt $b64.Length; $i += 64) {
+        $take = [Math]::Min(64, $b64.Length - $i)
+        [void] $sb.Append($b64.Substring($i, $take))
+        [void] $sb.Append("`n")
+    }
+    [void] $sb.Append("-----END $Label-----`n")
+    return $sb.ToString()
 }
 
 Write-Host ''
@@ -272,7 +344,11 @@ if (-not (Test-Path -LiteralPath $EnvFile)) {
         '# dev-only maintenance endpoints unmounted.',
         'NODE_ENV=production',
         '',
-        '# Network interface to listen on. 0.0.0.0 means all interfaces.',
+        '# Network interface to listen on. 0.0.0.0 means all interfaces, which is',
+        '# usually fine. If this server has a fixed IP address that staff will type',
+        '# into their browsers, set HOST to that exact IP: the auto-generated',
+        '# self-signed certificate is then issued to it, so the address matches and',
+        '# there is no name-mismatch error on top of the one-time trust warning.',
         'HOST=0.0.0.0',
         '',
         '# Port the application listens on. Users reach it at https://<server>:4009',
@@ -288,11 +364,20 @@ if (-not (Test-Path -LiteralPath $EnvFile)) {
         '#   DATABASE_URL=file:C:\ProgramData\QualityInspection\prod.db',
         'DATABASE_URL=CHANGE_ME',
         '',
-        '# TLS certificate and private key, PEM format, supplied by IT from the',
-        '# company certificate authority. This installer does NOT create these.',
-        '# The certificate must cover every hostname and IP address staff will use',
-        '# to reach this server, and the issuing CA must be trusted on their PCs.',
-        '# Example:',
+        '# TLS certificate and private key, in PEM format.',
+        '#',
+        '# You do NOT need to obtain a certificate. If no files exist at these two',
+        '# paths when the installer runs, it generates a self-signed certificate',
+        '# for this server automatically, issued to its hostname/IP. That causes a',
+        '# one-time "not secure" warning in each browser - expected, and it does',
+        '# not stop the app working; the connection is still encrypted.',
+        '#',
+        '# If your organisation issues its own certificates and you would rather',
+        '# use one, place the PEM cert + key at these paths BEFORE running the',
+        '# installer. Existing files are used as-is and never overwritten.',
+        '#',
+        '# Either way these must be ABSOLUTE paths in a folder the service account',
+        '# can read. Suggested location:',
         '#   TLS_KEY_PATH=C:\ProgramData\QualityInspection\certs\server-key.pem',
         '#   TLS_CERT_PATH=C:\ProgramData\QualityInspection\certs\server.pem',
         'TLS_KEY_PATH=CHANGE_ME',
@@ -317,15 +402,16 @@ if (-not (Test-Path -LiteralPath $EnvFile)) {
     Write-Host '   section marked REQUIRED at the bottom:' -ForegroundColor White
     Write-Host ''
     Write-Host '     DATABASE_URL            where the inspection database is stored' -ForegroundColor White
-    Write-Host '     TLS_KEY_PATH            the private key file, from IT' -ForegroundColor White
-    Write-Host '     TLS_CERT_PATH           the certificate file, from IT' -ForegroundColor White
+    Write-Host '     TLS_KEY_PATH            where to write the TLS private key' -ForegroundColor White
+    Write-Host '     TLS_CERT_PATH           where to write the TLS certificate' -ForegroundColor White
     Write-Host '     WIPE_ENDPOINT_PASSWORD  a password you choose' -ForegroundColor White
     Write-Host ''
     Write-Host '     HOST / PORT / NODE_ENV  already set to sensible defaults' -ForegroundColor Gray
     Write-Host ''
-    Write-Host '   The certificate and key are NOT created by this installer.' -ForegroundColor Yellow
-    Write-Host '   Ask IT for a certificate from the company CA that covers the' -ForegroundColor Yellow
-    Write-Host '   names staff will use to reach this server.' -ForegroundColor Yellow
+    Write-Host '   You do NOT need to obtain a TLS certificate. If none exists at' -ForegroundColor Gray
+    Write-Host '   those two paths, the installer generates a self-signed one for' -ForegroundColor Gray
+    Write-Host '   this server. If the server has a fixed IP that staff will type' -ForegroundColor Gray
+    Write-Host '   into the browser, set HOST to that IP so the certificate matches.' -ForegroundColor Gray
     Write-Host ''
     Write-Host '   Then run this script again:' -ForegroundColor White
     Write-Host '     .\install.ps1' -ForegroundColor Cyan
@@ -399,25 +485,196 @@ Write-Step 'Checking TLS certificate'
 $keyPath  = Resolve-AppPath $envValues['TLS_KEY_PATH']
 $certPath = Resolve-AppPath $envValues['TLS_CERT_PATH']
 
-$tlsMissing = @()
-if (-not (Test-Path -LiteralPath $keyPath))  { $tlsMissing += "private key  : $keyPath" }
-if (-not (Test-Path -LiteralPath $certPath)) { $tlsMissing += "certificate  : $certPath" }
+$existingKeyPem  = ''
+$existingCertPem = ''
+try { $existingKeyPem  = Get-Content -LiteralPath $keyPath  -Raw -ErrorAction Stop } catch { }
+try { $existingCertPem = Get-Content -LiteralPath $certPath -Raw -ErrorAction Stop } catch { }
 
-if ($tlsMissing.Count -gt 0) {
-    Fail 'The TLS certificate files were not found.' `
-         ($tlsMissing + @('', 'This installer does not create a certificate, by design.',
-                          'A self-signed certificate would make every browser show a',
-                          'security warning, and Entra ID sign-in would not work.')) `
-         @('Ask IT for a certificate and private key in PEM format, issued by the',
-           'company certificate authority, covering every hostname and IP address',
-           'staff will use to reach this server.',
-           'Copy both files onto this machine.',
-           "Set TLS_KEY_PATH and TLS_CERT_PATH in $EnvFile to point at them.",
-           'Run .\install.ps1 again.')
+$keyLooksPem  = $existingKeyPem  -match '-----BEGIN (RSA |EC |ENCRYPTED )?PRIVATE KEY-----'
+$certLooksPem = $existingCertPem -match '-----BEGIN CERTIFICATE-----'
+
+if ($keyLooksPem -and $certLooksPem) {
+    # Requirement: never regenerate over a certificate already in place. This
+    # covers both a re-run of this installer and an operator-supplied cert.
+    Write-Pass "Certificate present: $certPath"
+    Write-Pass "Private key present: $keyPath"
+    Write-Info 'Left exactly as-is - the installer never overwrites TLS files it finds.'
+    try {
+        $inspect = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList $certPath
+        Write-Info ("Subject {0}  |  expires {1}" -f $inspect.Subject, $inspect.NotAfter.ToString('yyyy-MM-dd'))
+        if ($inspect.NotAfter -lt (Get-Date)) {
+            Write-Warn 'This certificate has EXPIRED. Delete both files and re-run to have'
+            Write-Warn 'the installer generate a fresh self-signed pair, or install a new one.'
+        }
+        $inspect.Dispose()
+    } catch { }
 }
-Write-Pass "Private key : $keyPath"
-Write-Pass "Certificate : $certPath"
-Write-Info 'Not validated further here - the service start below is the real test.'
+else {
+    if (($existingKeyPem -ne '' -and -not $keyLooksPem) -or ($existingCertPem -ne '' -and -not $certLooksPem)) {
+        Write-Warn 'A file exists at a configured TLS path but is not readable PEM.'
+        Write-Info 'Both cert and key will be regenerated together so the pair matches.'
+    }
+
+    # ── Build the Subject Alternative Name list ─────────────────────────────
+    # The address staff type in the browser must appear in the certificate or
+    # the browser refuses the connection outright - a name mismatch is a hard
+    # error, unlike the click-through "not trusted" warning a self-signed cert
+    # already carries.
+    $sanCandidates = New-Object System.Collections.Generic.List[string]
+    $hostEnv = $envValues['HOST']
+    $hostSpecific = ($hostEnv) -and (@('0.0.0.0', '::', '') -notcontains $hostEnv) -and ($hostEnv -ne 'localhost')
+
+    if ($hostSpecific) {
+        $sanCandidates.Add($hostEnv)
+        $primarySubject = $hostEnv
+    } else {
+        Write-Warn "HOST is '$hostEnv' (all interfaces) - not usable as a certificate name on its own."
+        Write-Info 'Using this machine''s computer name and detected IPv4 addresses instead.'
+        Write-Info 'For an exact match, set HOST to the fixed IP staff will use and re-run.'
+        $primarySubject = $env:COMPUTERNAME
+    }
+    $sanCandidates.Add($env:COMPUTERNAME)
+
+    $detectedIps = @()
+    try {
+        $detectedIps = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+            Where-Object { $_.IPAddress -notlike '169.254.*' -and $_.IPAddress -ne '127.0.0.1' } |
+            Select-Object -ExpandProperty IPAddress)
+    } catch {
+        try {
+            $detectedIps = @([System.Net.Dns]::GetHostAddresses($env:COMPUTERNAME) |
+                Where-Object { $_.AddressFamily -eq 'InterNetwork' } |
+                ForEach-Object { $_.IPAddressToString })
+        } catch { $detectedIps = @() }
+    }
+    foreach ($ip in $detectedIps) { $sanCandidates.Add($ip) }
+    if (-not $hostSpecific -and $detectedIps.Count -gt 0) { $primarySubject = $detectedIps[0] }
+
+    $sanCandidates.Add('localhost')
+    $sanCandidates.Add('127.0.0.1')
+
+    $sanNames = @($sanCandidates | Where-Object { $_ -and ("$_".Trim() -ne '') } | Select-Object -Unique)
+
+    Write-Host ''
+    Write-Host '  ------------------------------------------------------------' -ForegroundColor Yellow
+    Write-Host '   GENERATING A SELF-SIGNED TLS CERTIFICATE' -ForegroundColor Yellow
+    Write-Host '  ------------------------------------------------------------' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host '   No certificate was found at the configured paths, and this' -ForegroundColor White
+    Write-Host '   deployment has no internal certificate authority to issue one,' -ForegroundColor White
+    Write-Host '   so the installer is creating a self-signed certificate for this' -ForegroundColor White
+    Write-Host '   server. THIS IS EXPECTED - it is not an error.' -ForegroundColor White
+    Write-Host ''
+    Write-Host '   What staff will see:' -ForegroundColor White
+    Write-Host '     - The first time each browser opens the app it shows a' -ForegroundColor White
+    Write-Host '       "Your connection is not private" / "Not secure" page.' -ForegroundColor White
+    Write-Host '     - They click Advanced, then Continue / Proceed to the site.' -ForegroundColor White
+    Write-Host '       The browser remembers the choice for that machine.' -ForegroundColor White
+    Write-Host '     - The connection is still fully encrypted. The warning only' -ForegroundColor White
+    Write-Host '       means the certificate is not signed by a public authority.' -ForegroundColor White
+    Write-Host ''
+    Write-Host '   To remove the warning for everyone (optional), IT can push the' -ForegroundColor White
+    Write-Host '   generated certificate file to staff machines'' Trusted Root' -ForegroundColor White
+    Write-Host "   store via Group Policy:  $certPath" -ForegroundColor White
+    Write-Host ''
+
+    foreach ($d in @((Split-Path -Parent $certPath), (Split-Path -Parent $keyPath))) {
+        if ($d -and -not (Test-Path -LiteralPath $d)) {
+            New-Item -ItemType Directory -Path $d -Force | Out-Null
+            Write-Info "Created folder $d"
+        }
+    }
+
+    if (-not ([System.Management.Automation.PSTypeName]'System.Security.Cryptography.X509Certificates.CertificateRequest').Type) {
+        Fail 'This machine cannot generate a certificate - .NET is too old.' `
+             @('CertificateRequest requires .NET Framework 4.7.2 or newer',
+               '(Windows Server 2019+, or Windows 10 1809+ / Windows 11).') `
+             @('Install a newer .NET Framework, OR create a PEM certificate and',
+               'private key by hand, place them at:',
+               "  $certPath",
+               "  $keyPath",
+               'and re-run this script - existing files are used as-is.')
+    }
+
+    $notAfter = (Get-Date).AddYears($CertValidityYears)
+
+    try {
+        # RSACryptoServiceProvider is a legacy CSP key: unlike a CNG key from
+        # New-SelfSignedCertificate, its parameters are always plainly exportable
+        # on .NET Framework, which is what lets the PKCS#1 PEM below be written
+        # without openssl. The cert is built around this key with
+        # CertificateRequest, so no certificate store is touched at all.
+        $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider 2048
+
+        $req = New-Object System.Security.Cryptography.X509Certificates.CertificateRequest(
+            "CN=$primarySubject",
+            $rsa,
+            [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+            [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+
+        $sanBuilder = New-Object System.Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder
+        foreach ($n in $sanNames) {
+            $asIp = $false
+            try { [void][System.Net.IPAddress]::Parse($n); $asIp = $true } catch { $asIp = $false }
+            if ($asIp) { $sanBuilder.AddIpAddress([System.Net.IPAddress]::Parse($n)) }
+            else       { $sanBuilder.AddDnsName($n) }
+        }
+        $req.CertificateExtensions.Add($sanBuilder.Build())
+
+        $ekuOids = New-Object System.Security.Cryptography.OidCollection
+        [void] $ekuOids.Add((New-Object System.Security.Cryptography.Oid('1.3.6.1.5.5.7.3.1')))   # serverAuth
+        $req.CertificateExtensions.Add(
+            (New-Object System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension($ekuOids, $false)))
+        $req.CertificateExtensions.Add(
+            (New-Object System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension($false, $false, 0, $true)))
+        $req.CertificateExtensions.Add(
+            (New-Object System.Security.Cryptography.X509Certificates.X509KeyUsageExtension(
+                ([System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature -bor
+                 [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::KeyEncipherment), $true)))
+
+        $genCert = $req.CreateSelfSigned([System.DateTimeOffset]::Now.AddDays(-1), [System.DateTimeOffset]$notAfter)
+
+        # PKCS#1 RSAPrivateKey ::= SEQUENCE { version, n, e, d, p, q, dp, dq, qInv }
+        $kp = $rsa.ExportParameters($true)
+        $seqBody = New-Object System.Collections.Generic.List[byte]
+        $seqBody.AddRange([byte[]](New-DerInteger @([byte] 0)))
+        $seqBody.AddRange([byte[]](New-DerInteger $kp.Modulus))
+        $seqBody.AddRange([byte[]](New-DerInteger $kp.Exponent))
+        $seqBody.AddRange([byte[]](New-DerInteger $kp.D))
+        $seqBody.AddRange([byte[]](New-DerInteger $kp.P))
+        $seqBody.AddRange([byte[]](New-DerInteger $kp.Q))
+        $seqBody.AddRange([byte[]](New-DerInteger $kp.DP))
+        $seqBody.AddRange([byte[]](New-DerInteger $kp.DQ))
+        $seqBody.AddRange([byte[]](New-DerInteger $kp.InverseQ))
+        $keyDer  = [byte[]](New-DerSequence ($seqBody.ToArray()))
+        $certDer = $genCert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+
+        [System.IO.File]::WriteAllText($keyPath,  (Format-Pem 'RSA PRIVATE KEY' $keyDer),  [System.Text.Encoding]::ASCII)
+        [System.IO.File]::WriteAllText($certPath, (Format-Pem 'CERTIFICATE'     $certDer), [System.Text.Encoding]::ASCII)
+
+        $rsa.Dispose(); $genCert.Dispose()
+    } catch {
+        Fail 'Could not generate a self-signed certificate.' `
+             @("Error: $($_.Exception.Message)") `
+             @('As a fallback, create a PEM certificate + private key by hand,',
+               "place them at $certPath and $keyPath, and re-run this script.")
+    }
+
+    # Restrict the private key file to the accounts the service runs as.
+    try {
+        & icacls "$keyPath" /inheritance:r /grant:r 'NT AUTHORITY\SYSTEM:(R)' 'BUILTIN\Administrators:(R)' | Out-Null
+    } catch {
+        Write-Warn "Could not tighten permissions on $keyPath - review it by hand."
+    }
+
+    $SelfSignedGenerated = $true
+    Write-Pass 'Self-signed certificate generated'
+    Write-Info ("Subject : CN={0}" -f $primarySubject)
+    Write-Info ("Names   : {0}" -f ($sanNames -join ', '))
+    Write-Info ("Valid   : until {0}  ({1} years)" -f $notAfter.ToString('yyyy-MM-dd'), $CertValidityYears)
+    Write-Info ("Cert    : {0}" -f $certPath)
+    Write-Info ("Key     : {0}" -f $keyPath)
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 Write-Step 'Preparing the database'
@@ -576,11 +833,11 @@ Write-Pass "Service is running"
 Write-Step 'Verifying the application responds'
 # ─────────────────────────────────────────────────────────────────────────────
 
-# The certificate is issued by the internal CA, which this PowerShell session has
-# no reason to trust yet. Certificate validation is bypassed FOR THIS HEALTH
-# CHECK ONLY - the point here is "is the service answering", not "is the chain
-# trusted". Browsers still validate normally, which is why the CA has to be
-# trusted on the client machines.
+# The service presents a self-signed certificate (or one the operator supplied),
+# which this PowerShell session has no reason to trust. Certificate validation is
+# bypassed FOR THIS HEALTH CHECK ONLY - the question here is "is the service
+# answering", not "is the chain trusted". Browsers still validate normally, which
+# is why staff see the one-time warning until the cert is trusted on their PCs.
 Add-Type -TypeDefinition @'
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
@@ -639,6 +896,14 @@ Write-Host ''
 Write-Host '   Staff open the app at:' -ForegroundColor White
 Write-Host "     https://$hostName`:$Port" -ForegroundColor Cyan
 Write-Host ''
+if ($SelfSignedGenerated) {
+    Write-Host '   The certificate is self-signed, so the FIRST visit from each' -ForegroundColor White
+    Write-Host '   browser shows a "Not secure" warning - staff click Advanced,' -ForegroundColor White
+    Write-Host '   then Continue. This is expected. IT can suppress it by trusting' -ForegroundColor White
+    Write-Host "     $certPath" -ForegroundColor Cyan
+    Write-Host '   on staff machines (Trusted Root store, e.g. via Group Policy).' -ForegroundColor White
+    Write-Host ''
+}
 Write-Host '   ONE STEP REMAINS, and Microsoft sign-in will fail without it:' -ForegroundColor Yellow
 Write-Host '   that exact address must be registered as a Redirect URI in the' -ForegroundColor Yellow
 Write-Host '   Entra ID App Registration. Ask IT to add it.' -ForegroundColor Yellow

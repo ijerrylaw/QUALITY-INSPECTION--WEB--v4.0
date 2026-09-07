@@ -52,6 +52,7 @@ or summarized in that split either.
 - [§63](#63-pre-packaging-cleanup--neutral-source-comments-wider-editor-ignores-changelog-archive-split--2026-09-07) — Pre-packaging cleanup — neutral source comments, wider editor ignores, CHANGELOG archive split — 2026-09-07
 - [§64](#64-redirect-uri-panel-derives-the-live-value-instead-of-a-hardcoded-list--2026-09-07) — Redirect URI panel derives the live value instead of a hardcoded list — 2026-09-07
 - [§65](#65-on-prem-installer-and-packaging-step--windows-service-seeded-database-exclusion-verification--2026-09-07) — On-prem installer and packaging step — Windows service, seeded database, exclusion verification — 2026-09-07
+- [§66](#66-installer-generates-a-self-signed-tls-certificate-when-none-is-supplied--2026-09-07) — Installer generates a self-signed TLS certificate when none is supplied — 2026-09-07
 
 ---
 
@@ -2310,3 +2311,111 @@ tests in §64); `oxlint` 0 errors.
 
 **Database migration:** none. No schema change, no `prisma db push`, no migration
 added or modified, and `dev.db` untouched.
+
+---
+
+## 66. Installer generates a self-signed TLS certificate when none is supplied — 2026-09-07
+
+Follows §65. That installer required the operator to place a PEM certificate +
+key at the configured paths and failed loudly if they were missing, on the
+assumption an internal CA would issue one. Confirmed since: the target site has
+no internal CA, so the certificate is self-signed regardless — and asking a
+non-developer operator to run `New-SelfSignedCertificate`, wrestle the private
+key out of the Windows certificate store into PEM, and build a correct SAN by
+hand is not a reasonable ask. `install.ps1` now does it.
+
+### What changed in `install.ps1`
+
+**STEP 3 ("Checking TLS certificate")** went from *verify-or-fail* to
+*keep-or-generate*:
+
+- If valid PEM cert **and** key are already at `TLS_CERT_PATH` / `TLS_KEY_PATH`
+  — a re-run, or an operator-supplied certificate — they are left **byte-for-byte
+  untouched** (verified: file hashes identical across a second run). The step
+  prints the existing cert's subject and expiry, and warns if it has expired.
+- If neither exists, a self-signed certificate is generated for this server.
+- If exactly one exists, or a file is not readable PEM, both are regenerated
+  together so the pair matches.
+
+**How the certificate is built.** No `New-SelfSignedCertificate`, no certificate
+store. Windows PowerShell 5.1 runs on .NET Framework, whose CNG-backed keys
+cannot be exported as plaintext parameters through the `RSA` API
+(`ExportParameters($true)` throws "operation not supported") — the blocker that
+makes the store route a dead end here. Instead:
+
+1. `RSACryptoServiceProvider` (a legacy CSP key — its parameters are always
+   plainly exportable on .NET Framework) generates a 2048-bit key.
+2. `System.Security.Cryptography.X509Certificates.CertificateRequest` builds the
+   certificate around that key: `CN=<primary address>`, a Subject Alternative
+   Name extension (proper `IPAddress=` entries for IPs, `DNS=` for names),
+   `serverAuth` EKU, basic constraints (not a CA), key usage. `CreateSelfSigned`
+   with a −1 day / +5 year window.
+3. The private key is hand-encoded from its `RSAParameters` into a PKCS#1
+   `RSAPrivateKey` DER structure (a tiny ~40-line DER writer added to the
+   script) and written as `-----BEGIN RSA PRIVATE KEY-----`; the certificate is
+   written as `-----BEGIN CERTIFICATE-----`. Both are exactly what
+   `backend/server.ts` already feeds to `https.createServer({ key, cert })`.
+4. `icacls` restricts the private-key file to `SYSTEM` + `Administrators` — the
+   accounts the NSSM service (LocalSystem) and the installer actually run as.
+
+`CertificateRequest` needs .NET Framework 4.7.2+ (Windows Server 2019+, Windows
+10 1809+). If it is absent the step fails with that requirement stated and the
+manual-PEM fallback spelled out.
+
+**SAN / subject selection.** `CN` and the first SAN entry come from `HOST` when
+it is a specific address (the confirmed deployment sets `HOST` to the server's
+fixed IP). When `HOST` is `0.0.0.0` the step warns and falls back to the
+machine name plus every detected non-loopback IPv4. `localhost` and `127.0.0.1`
+are always included so the post-start health check against `https://localhost`
+matches too.
+
+**Console output.** Generation prints a boxed, operator-pitched block: this is a
+self-signed certificate, browsers will show a one-time "not secure" warning on
+first visit per machine, that is expected and not an error, the connection is
+still encrypted, and IT can suppress the warning by pushing the cert file to
+clients' Trusted Root store. The closing summary repeats the warning note when a
+cert was generated this run.
+
+**Validity: 5 years** (`$CertValidityYears`), so renewal is not a routine chore;
+to force a fresh pair, delete both PEM files and re-run.
+
+### Documentation
+
+- `install/README.txt`: the TLS certificate moved from a "must already be in
+  place" prerequisite to an "usually nothing to do" section; added a
+  "THE BROWSER SECURITY WARNING" section; the troubleshooting entry for a
+  missing cert (which can no longer happen) replaced with one for the rare
+  .NET-too-old case.
+- The `.env` block `install.ps1` writes on first run, and its first-run
+  ACTION REQUIRED console message, now describe auto-generation and the reason
+  to set `HOST` to a fixed IP.
+- `backend/.env.example`'s Host & TLS note points at the installer's behaviour.
+
+### Verification
+
+Run live on this Windows machine against a package built by `package.ps1`:
+
+- **Generate path:** `install.ps1 -SkipServiceInstall` with `HOST=10.10.110.31`
+  and cert paths in an empty folder → certificate written with
+  `Subject CN=10.10.110.31`, SAN `IP Address=10.10.110.31, DNS Name=<host>,
+  DNS Name=localhost, IP Address=127.0.0.1`, EKU Server Authentication, expiry
+  2031-09-07. `node https.createServer({key,cert})` loaded the pair, completed a
+  TLS handshake, and answered `GET /api/health` with `200`. Private-key file
+  ACL confirmed `SYSTEM` + `Administrators` read-only.
+- **Keep path:** a second `install.ps1 -SkipServiceInstall` reported
+  "Certificate present … Left exactly as-is"; both file hashes unchanged.
+- **Standalone:** the DER-writer + `CertificateRequest` sequence exercised in
+  isolation first, with a byte-level check of the emitted PEM.
+
+**Not verified:** NSSM service registration/start and the post-start health
+check (steps 8–9) — NSSM is not installed on this development laptop, unchanged
+from §65. The certificate the service would load has been verified through Node
+directly.
+
+Quality gate: backend `tsc --noEmit` clean + 58/58 Vitest; frontend `tsc -b`
+clean + 124/124 Vitest; `oxlint` 0 errors. `install.ps1` and `package.ps1`
+pass a PowerShell parser check.
+
+**Database migration:** none. PowerShell installer and documentation only — no
+schema change, no `prisma db push`, no migration added or modified, no
+application code touched, `dev.db` untouched.

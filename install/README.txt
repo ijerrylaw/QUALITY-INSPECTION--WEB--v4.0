@@ -11,7 +11,7 @@ You do not need to be a developer to follow this. Work through it in order.
 
 
 -------------------------------------------------------------------------------
- BEFORE YOU START - three things must already be in place
+ BEFORE YOU START - two things must already be in place
 -------------------------------------------------------------------------------
 
  1. NODE.JS, version 20.19 or newer (version 22 LTS is recommended).
@@ -24,23 +24,34 @@ You do not need to be a developer to follow this. Work through it in order.
     the PATH, or just note where you put it - the installer accepts the path
     directly.
 
- 3. A TLS CERTIFICATE AND PRIVATE KEY, in PEM format, from the company
-    certificate authority. Request these from IT.
-
-    The installer does NOT create a certificate, and this is deliberate. A
-    self-signed certificate would make every browser display a security
-    warning, and Microsoft Entra ID sign-in would not work at all.
-
-    When requesting it, tell IT:
-      - the certificate must cover every hostname and IP address staff will
-        use to reach this server;
-      - it must be supplied in PEM format, as two files: the certificate and
-        the private key;
-      - the issuing certificate authority must be trusted on the PCs and
-        tablets that will open the application.
-
  The server also needs outbound internet access, so the installer can download
  the application's dependencies.
+
+
+-------------------------------------------------------------------------------
+ ABOUT THE TLS CERTIFICATE - USUALLY NOTHING TO DO
+-------------------------------------------------------------------------------
+
+ You do NOT need to obtain a certificate. If none is present when the installer
+ runs, it generates a self-signed certificate for this server automatically,
+ issued to the server's hostname and IP address and valid for 5 years.
+
+ A self-signed certificate is fully functional and the connection is
+ encrypted, but each browser shows a one-time "Not secure" warning the first
+ time it opens the app - staff click Advanced, then Continue. See the section
+ "THE BROWSER SECURITY WARNING" further down.
+
+ Two optional things you can do:
+
+   - If the server has a FIXED IP that staff will type into their browsers,
+     set HOST to that IP in backend\.env (STEP 5) so the certificate is issued
+     to exactly that address.
+
+   - If your organisation runs its own certificate authority and you would
+     rather use a certificate from it, put the PEM certificate and private key
+     files in place BEFORE running the installer, at the paths you set for
+     TLS_CERT_PATH / TLS_KEY_PATH. Existing files are used untouched - the
+     installer never overwrites a certificate it finds.
 
 
 -------------------------------------------------------------------------------
@@ -90,15 +101,22 @@ You do not need to be a developer to follow this. Work through it in order.
 
             TLS_KEY_PATH
             TLS_CERT_PATH
-              Full paths to the private key and certificate files IT gave you.
+              Where the installer should place the TLS private key and
+              certificate, e.g. C:\ProgramData\QualityInspection\certs\ . If
+              you have no certificate of your own, just give two writable
+              paths and the installer generates a self-signed pair there. If
+              you DO have your own PEM files, copy them to these paths first.
 
             WIPE_ENDPOINT_PASSWORD
               A password you choose. It protects the maintenance function that
               erases inspection data. Store it with the site's other
               credentials.
 
-          HOST, PORT and NODE_ENV are already filled in with working defaults.
-          Leave them alone unless you have a reason to change them.
+          PORT and NODE_ENV are already filled in with working defaults; leave
+          them alone unless you have a reason to change them. HOST defaults to
+          0.0.0.0 (all network interfaces), which is fine - but if the server
+          has a fixed IP that staff will type into their browsers, set HOST to
+          that exact IP so the auto-generated certificate matches it.
 
  STEP 6 - Run the installer again:
 
@@ -168,6 +186,23 @@ You do not need to be a developer to follow this. Work through it in order.
 
 
 -------------------------------------------------------------------------------
+ THE BROWSER SECURITY WARNING
+-------------------------------------------------------------------------------
+
+ If the installer generated a self-signed certificate, every browser shows a
+ "Your connection is not private" / "Not secure" warning the FIRST time it
+ opens the app. This is expected for a self-signed certificate.
+
+   - Click Advanced, then Continue / Proceed to the site.
+   - The browser remembers the choice for that machine.
+   - The connection is still encrypted the whole time.
+
+ To remove the warning for everyone, ask IT to distribute the certificate file
+ (the file at TLS_CERT_PATH) to staff machines' "Trusted Root Certification
+ Authorities" store, for example via Group Policy.
+
+
+-------------------------------------------------------------------------------
  IF SOMETHING GOES WRONG
 -------------------------------------------------------------------------------
 
@@ -177,9 +212,11 @@ You do not need to be a developer to follow this. Work through it in order.
    "NSSM was not found"
      nssm.exe is not on the PATH. Re-run with -NssmPath pointing at it.
 
-   "The TLS certificate files were not found"
-     TLS_KEY_PATH or TLS_CERT_PATH in backend\.env does not match where the
-     files actually are. Check for typos and confirm both files exist.
+   "Could not generate a self-signed certificate"
+     Rare. Needs .NET Framework 4.7.2 or newer (standard on Windows Server
+     2019+ and Windows 10 1809+ / Windows 11). The message explains the
+     fallback: create a PEM certificate and key by hand, place them at the
+     configured paths, and re-run.
 
    "The configuration file is incomplete"
      One or more CHANGE_ME placeholders are still in backend\.env. The message
