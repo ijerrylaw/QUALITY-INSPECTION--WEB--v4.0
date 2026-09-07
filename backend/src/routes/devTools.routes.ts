@@ -25,6 +25,12 @@
  * AUDIT_REPORT.md carries an open item noting this router exists and must
  * be manually confirmed dead/removed before go-live, even though it's
  * env-gated — a conscious pre-launch checklist item, not just trust-the-gate.
+ *
+ * Password gate (issue #24): on top of the NODE_ENV guard, every route here
+ * also requires the caller to send the shared secret as `{ "password": "..." }`
+ * in the JSON body, checked against the WIPE_ENDPOINT_PASSWORD env var. Unlike
+ * the HOST/TLS_* vars in server.ts, this one has NO default: if it is unset the
+ * gate fails closed (401, no wipe). See `requireWipePassword` below.
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
@@ -48,6 +54,37 @@ function blockInProduction(_req: Request, res: Response, next: NextFunction): vo
 }
 
 router.use(blockInProduction);
+
+/**
+ * Password gate for every wipe route on this router (issue #24). Runs right
+ * after `blockInProduction`, before any wipe logic. The caller must send the
+ * shared secret as `{ "password": "..." }` in the JSON body — not a header,
+ * not a query param.
+ *
+ * The secret is `WIPE_ENDPOINT_PASSWORD`. It follows the env-var-loading
+ * pattern used elsewhere (server.ts) with one deliberate difference: it has
+ * NO default. If it is unset (or empty) the gate refuses every wipe — fail
+ * closed — so a misconfigured environment can't silently leave the endpoint
+ * open. A missing or wrong password is answered 401 and the wipe never runs.
+ */
+function requireWipePassword(req: Request, res: Response, next: NextFunction): void {
+  const expected = process.env['WIPE_ENDPOINT_PASSWORD'];
+  if (!expected) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  const raw = (req.body ?? {}) as { password?: unknown };
+  const provided = typeof raw.password === 'string' ? raw.password : '';
+  if (provided !== expected) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  next();
+}
+
+router.use(requireWipePassword);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DELETE /api/dev/submissions/all

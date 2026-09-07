@@ -83,6 +83,7 @@ or summarized in the split — this is the original content, relocated.
 - [§58](#58-production-database-separated-from-the-dev-seed-via-a-database_url-default--2026-09-07) — Production database separated from the dev seed via a DATABASE_URL default — 2026-09-07
 - [§59](#59-quality-analytics-menu-item-frozen-behind-a-frontend-feature-flag--2026-09-07) — Quality Analytics menu item frozen behind a frontend feature flag — 2026-09-07
 - [§60](#60-github-actions-ci-workflow-runs-the-quality-gate-on-push-and-pr-to-master--2026-09-07) — GitHub Actions CI workflow runs the quality gate on push and PR to master — 2026-09-07
+- [§61](#61-dev-tools-wipe-endpoint-gated-behind-a-password-issue-24--2026-09-07) — Dev-tools wipe endpoint gated behind a password (issue #24) — 2026-09-07
 
 ---
 
@@ -7419,3 +7420,61 @@ order, each failing the job on any non-zero exit (Actions' default; no
   the first real push or PR to `master` pick it up — in particular the
   Playwright install step and the browser-mode frontend test run, which are
   the parts most likely to need adjustment on a clean CI runner.
+
+---
+
+## 61. Dev-tools wipe endpoint gated behind a password (issue #24) — 2026-09-07
+
+The dev-only destructive-tools router (`backend/src/routes/devTools.routes.ts`)
+exposes two data-wiping routes — `DELETE /api/dev/submissions/all` and
+`DELETE /api/dev/submissions/by-product-code`. Until now the only thing in
+front of them was the `NODE_ENV !== 'production'` guard (a double guard: the
+router's own `blockInProduction` plus the conditional `app.use` in
+`server.ts`). In any non-production environment they fired on request alone,
+so an accidental call — or anyone who could reach the port — wiped the test
+data. Issue #24 asked for a password in front of them; the routes themselves
+are unchanged and stay in the tree until go-live. **Code-only: one new
+env var and a middleware. No schema, migration, Prisma command, or
+`dev.db` / `prod.db` change; no application logic outside this router
+touched.**
+
+### The gate
+
+A new router-level middleware, `requireWipePassword`, mounted with
+`router.use()` immediately after `blockInProduction` — so it runs before any
+wipe route's own body parsing or logic, for every route on the router,
+present and future.
+
+- **Secret:** `WIPE_ENDPOINT_PASSWORD`, read as `process.env['WIPE_ENDPOINT_PASSWORD']`,
+  the same bracket-access pattern `server.ts` uses for `HOST` / `PORT` /
+  `TLS_KEY_PATH` / `TLS_CERT_PATH`.
+- **No default — fail closed.** The four vars in `server.ts` all `?? <laptop
+  value>` so local dev needs none of them. This one deliberately does not: if
+  it is unset or empty, the middleware answers `401` and the wipe never runs.
+  A misconfigured environment cannot leave the endpoint open, only closed.
+- **Transport:** the caller sends `{ "password": "..." }` in the JSON request
+  body — not a header, not a query string. `by-product-code` already reads
+  `productCode` from the same body, so its callers now send both keys.
+- **Check:** exact-string compare against the env var. Missing key, non-string
+  value, or wrong value → `401 { "error": "Unauthorized" }`, no wipe. Match →
+  `next()` and the existing wipe logic runs completely unchanged.
+- **No logging / audit trail** — deliberately kept minimal per the issue.
+
+### Files
+
+- **`backend/src/routes/devTools.routes.ts`** — added `requireWipePassword`
+  and its `router.use()`; expanded the file header comment. `NextFunction` was
+  already imported.
+- **`backend/.env.example`** — new "Dev-tools wipe password" section
+  documenting the var and its no-default / fail-closed behaviour.
+
+Jerry's gitignored `backend/.env` currently has only `DATABASE_URL`; to keep
+using the local dev wipe tools he must add `WIPE_ENDPOINT_PASSWORD=<value>`
+to it. Left for him to set — no value was invented.
+
+### Verification
+
+- Backend `npx tsc --noEmit`: clean.
+- Backend `npm test` → `vitest run`: 58/58, unchanged from baseline.
+- Frontend untouched; `tsc -b` / `oxlint` / `vitest run` re-run as a
+  regression check, all at baseline (121/121).
