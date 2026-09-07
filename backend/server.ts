@@ -113,6 +113,38 @@ if (process.env['NODE_ENV'] !== 'production') {
   app.use('/api/dev', devToolsRouter);
 }
 
+// ── Static SPA (deployed installs only) ───────────────────────────────────────
+// On a real server this process is the ONLY thing listening: it serves both the
+// JSON API above and the built React bundle, so the app is reachable at a single
+// origin (https://<host>:<PORT>). That is what makes the frontend's own defaults
+// work with no configuration — ConfigContext's API_BASE_URL falls back to
+// `https://<page hostname>:4009` and msalConfig's redirectUri falls back to
+// window.location.origin, both of which are simply this origin.
+//
+// Guarded by an existence check on the built index.html: during local dev
+// frontend/dist does not exist (the Vite dev server on :4001 serves the UI
+// instead), so none of this mounts and dev behaviour is byte-for-byte unchanged.
+const FRONTEND_DIST = path.resolve(REPO_ROOT, 'frontend', 'dist');
+const SPA_INDEX = path.join(FRONTEND_DIST, 'index.html');
+const SPA_ENABLED = fs.existsSync(SPA_INDEX);
+
+if (SPA_ENABLED) {
+  // Hashed asset filenames from `vite build` are safe to serve directly.
+  app.use(express.static(FRONTEND_DIST));
+
+  // History fallback for client-side routes (/wizard, /system, ...): hand back
+  // index.html so a deep link or a browser refresh doesn't 404. A RegExp is used
+  // rather than a '*' string because it behaves identically across Express 4 and
+  // 5 (whose path-to-regexp rewrite changed wildcard string handling). The
+  // negative lookahead keeps /api and /api/... out of the fallback so unknown
+  // API routes still fall through to the JSON 404 below instead of silently
+  // returning HTML — which would surface to a fetch() caller as an opaque JSON
+  // parse error rather than a clean 404.
+  app.get(/^\/(?!api(?:\/|$)).*/, (_req, res) => {
+    res.sendFile(SPA_INDEX);
+  });
+}
+
 // ── 404 Fallback ──────────────────────────────────────────────────────────────
 app.use((_req, res) => {
   res.status(404).json({ error: 'Route not found' });
@@ -130,6 +162,11 @@ app.use(globalErrorHandler);
 https.createServer(httpsOptions, app).listen(PORT, HOST, () => {
   console.log(`[QI Backend v4.0] Server running → https://localhost:${PORT}`);
   console.log(`  Bound to:    ${HOST}:${PORT}   TLS cert: ${TLS_CERT_PATH}`);
+  console.log(
+    SPA_ENABLED
+      ? `  Web UI:      serving ${FRONTEND_DIST}`
+      : `  Web UI:      not served (no frontend/dist build — use the Vite dev server)`
+  );
   console.log(`  Health:      GET   https://localhost:${PORT}/api/health`);
   console.log(`  Config:      GET   https://localhost:${PORT}/api/config`);
   console.log(`  Config:      PATCH https://localhost:${PORT}/api/config`);
