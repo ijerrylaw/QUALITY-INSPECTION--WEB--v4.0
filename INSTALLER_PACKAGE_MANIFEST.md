@@ -1,9 +1,30 @@
 # Installer Package Manifest — what ships to a server, what never does
 
-**Status:** definition + verification only. No installer/packaging script exists in
-this repo yet (verified: no `Dockerfile`, `docker-compose.yml`, CI YAML, `Procfile`,
-`deploy*`, `package*.sh/.ps1`, `rsync`/`robocopy` wrapper, or `build:package` npm
-script anywhere). This file is the spec that the future packaging step MUST follow.
+**Status: IMPLEMENTED 2026-09-07 — see `CHANGELOG.md` §65.** This file remains the
+spec; the two scripts that now satisfy it are:
+
+| Script | Runs on | Role | Ships? |
+|---|---|---|---|
+| `package.ps1` | development machine | builds the package from `git archive HEAD`, prunes, then **fails** on any forbidden path/string or missing required file | **No** — pruned from its own output, since its exclusion list names every internal document by filename |
+| `install.ps1` | target server | prerequisites → `.env` → TLS → seed DB → `npm ci` → `prisma generate` → frontend build → NSSM service → health check | Yes, with `install/README.txt` |
+
+Two intentional divergences from the sections below, both following from the
+decision to BUILD THE FRONTEND ON THE SERVER rather than ship a prebuilt bundle
+(which is what makes the package independent of any one build machine):
+
+1. **`frontend/src` and its build config now ship**, so the §1/§3 rule "never
+   `frontend/src/`" does not apply. Consequence: the two frontend files in §4's
+   table no longer get their comments stripped by `vite build`, and were
+   reworded along with the four backend ones (`CHANGELOG.md` §63).
+2. **The seed database ships as `install/seed.db` sourced from `prod.db`**, not
+   from `dev.db`. The two are byte-identical (`CHANGELOG.md` §58); §3.1 option 1
+   is otherwise followed exactly.
+
+`install.ps1` sits at the repository root rather than under `install/`.
+
+The §3 exclude recipes below are retained as the specification of intent — the
+implemented equivalents live in `package.ps1`, which additionally asserts the §3
+verification checks rather than leaving them to be run by hand.
 
 **Goal restated:** the folder copied to a customer's server must not reveal that
 AI tooling (Claude Code, Antigravity) was used to build this app. The local repo
@@ -85,7 +106,7 @@ schema + migrations, install/update scripts, and env templates. Nothing else.
 | 4 | **`CHANGELOG.md`, `AUDIT_REPORT.md`** | yes, tracked (CHANGELOG is 447 KB) | **No** | Both contain "Claude Code" / "Antigravity" / model-ID prose. |
 | 5 | **The other root spec docs** (`API_AND_INTEGRATION_SPEC.md`, `DATA_SCHEMAS_AND_TYPES.md`, `ISO2859_MATH_ENGINE.md`, `NAVIGATION_AND_RBAC.md`, `UI_DESIGN_SYSTEM.md`) | yes, tracked | **No** | Not AI-revealing per se, but internal design docs with no place on a customer server. Excluded for the same reason as #3/#4. |
 | 6 | **`archived/` folder** (8 files incl. `archived/AI_RULES.md` titled "Antigravity AI Project Rules") | yes, tracked | **No** — not on the allowlist | Superseded predecessor docs; referenced by nothing runnable. |
-| 7 | **`.claude/`** (and any `.cursor/`, `.windsurf/`, `.aider*`, `.continue/`, `.idea/`, `.vscode/`) | `.claude/` on disk, **gitignored** (`.gitignore:15`), never tracked. Empty `backend/.windsurf/` on disk, untracked, not ignored. | **No** — not on the allowlist; also gitignored so absent from `git archive` | Confirmed explicitly. Recommend deleting the stray empty `backend/.windsurf/` and widening `.gitignore` (see §5). |
+| 7 | **`.claude/`** (and any `.cursor/`, `.windsurf/`, `.aider*`, `.continue/`, `.idea/`, `.vscode/`) | `.claude/` on disk, **gitignored** (`.gitignore:15`), never tracked. Empty `backend/.windsurf/` on disk, untracked, not ignored. | **No** — not on the allowlist; also gitignored so absent from `git archive` | Confirmed explicitly. **DONE 2026-09-07 (`CHANGELOG.md` §63):** the stray empty `backend/.windsurf/` was deleted and `.gitignore` widened to cover all of these. `package.ps1` prunes them and every `.gitignore` besides. |
 | 8 | **`node_modules/`** (root, `frontend/`, `backend/`) | on disk, gitignored | **No** — the server runs `npm ci` itself | Copying it would also be slow, platform-wrong, and could carry `.package-lock`/bin junk. |
 | 9 | **`backend/dev.db`** (seed/reference SQLite data) | **yes — git-TRACKED** (deliberately; `backend/.gitignore` does *not* list `dev.db`) | **No** — not on the allowlist. The server runs against `backend/prod.db` instead (see §3.1) | Because it is tracked, a `git archive` package would include it unless explicitly excluded. It is on the exclude list (§3). Note the earlier "consider `git rm --cached backend/dev.db`" suggestion is **superseded**: `dev.db` stays tracked as this repo's seed/reference database, and the *runtime* database is the separate, gitignored `prod.db` — see §3.1. |
 | 9a | **`backend/prod.db`** (live production data) | **no — gitignored** (`backend/.gitignore`, with its `-journal`/`-wal`/`-shm` companions) | **No** — created on the server at install time, never packaged | Machine-local runtime data. Absent from any `git archive` because it is gitignored, but a working-tree `rsync`/`robocopy` **would** pick it up from a developer machine — hence the explicit exclude in §3. See §3.1 for how it is created. |
@@ -260,13 +281,17 @@ header comments:
 | `backend/src/routes/submissions.routes.ts` | 54, 58 | same pair |
 
 `frontend/src/context/ConfigContext.tsx:23` and `frontend/src/pages/WizardPage.tsx:34`
-have the same `AI_RULES.md` comment, **but** the frontend ships only as
-`vite build` output, which strips all comments — so those do not reach the package.
-The **four backend files do**. These header comments should be reworded (drop the
-`AI_RULES.md` reference and the `Antigravity-era` clause — e.g. just cite the live
-spec docs by their neutral names, or delete the "Level 1/Level 2 precedence" block)
-as a normal working-tree commit before the first real package is cut. This is a
-code-comment edit, unrelated to git-history rewriting.
+have the same `AI_RULES.md` comment. This section originally reasoned that they were
+safe because the frontend ships only as `vite build` output, which strips all
+comments — **that reasoning no longer holds**, because the implemented installer
+builds the frontend on the server, so `frontend/src` ships as source.
+
+**RESOLVED 2026-09-07 (`CHANGELOG.md` §63).** All **six** files — the four backend
+ones in the table above plus those two frontend ones — were reworded to drop the
+`AI_RULES.md` reference and the `Antigravity-era` clause, citing the live spec docs
+by their neutral names instead. A code-comment edit, unrelated to git-history
+rewriting. `package.ps1` now asserts the absence of these strings on every build,
+so a reintroduction fails the package rather than shipping.
 
 **Source maps — confirmed clean.** `frontend/vite.config.ts` has no `build` block,
 so `build.sourcemap` is Vite's default `false` — `vite build` emits no `*.js.map`.
@@ -292,6 +317,9 @@ gitignored and off the package allowlist (§2 row 13).
 
 ## Database migration
 
-**No.** This task added one documentation file (`docs/INSTALLER_PACKAGE_MANIFEST.md`)
-and changed nothing else — no schema change, no `prisma db push`, no migration
-added or modified, no code or data touched.
+**No.** The original task that produced this file added it as documentation and
+changed nothing else. The 2026-09-07 implementation pass (`CHANGELOG.md` §63-§65)
+likewise involved no schema change, no `prisma db push`, no migration added or
+modified, and left `dev.db` untouched — the installer seeds a *new* database file
+from `install/seed.db` on first install only, and never runs `migrate deploy`
+(see the §3.1 drift warning, which still stands).
