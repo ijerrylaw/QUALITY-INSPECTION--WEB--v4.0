@@ -1,14 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Server, KeyRound, Link2, RefreshCw } from 'lucide-react';
 import { API_BASE_URL } from '../../context/ConfigContext';
-import { clientId, tenantId } from '../../lib/msalConfig';
-
-// Manually maintained — no runtime source of truth models "every address
-// this app is reachable from" (see the Azure AD App Registration's own
-// Redirect URIs allowlist, which is the actual authority). Update this list
-// if the LAN IP (see frontend/vite.config.ts's mkcert cert) or either dev
-// port ever changes.
-const EXPECTED_REDIRECT_URIS = ['https://localhost:4001', 'https://10.10.110.31:4001'];
+import { clientId, tenantId, redirectUri, configuredRedirectUri } from '../../lib/msalConfig';
 
 type BackendHealth = {
   status: 'loading' | 'ok' | 'error';
@@ -106,19 +99,39 @@ export function EnvironmentInfoPanel() {
         </div>
       </div>
 
-      {/* Expected Redirect URIs */}
+      {/* Redirect URI */}
       <div className="bg-canvas border border-gray-800 rounded-xl overflow-hidden shadow-sm">
         <div className="bg-surface border-b border-gray-800 p-4 flex items-center gap-3">
           <Link2 className="w-4 h-4 text-brand-secondary" strokeWidth={2} />
-          <h3 className="text-lg font-semibold uppercase text-primary">Expected Redirect URIs</h3>
+          <div>
+            <h3 className="text-lg font-semibold uppercase text-primary">Redirect URI</h3>
+            <p className="text-xs text-muted mt-1 font-normal normal-case">
+              Derived from this session, not a hand-maintained list — this is the exact value sent to
+              Entra ID.
+            </p>
+          </div>
         </div>
 
-        <div className="p-4 space-y-2">
-          {EXPECTED_REDIRECT_URIS.map((uri) => (
-            <div key={uri} className={readOnlyFieldClass}>{uri}</div>
-          ))}
-          <p className="text-xs text-muted mt-1">
-            Manually maintained — update this list if the LAN IP or either dev port ever changes.
+        <div className="p-4 space-y-4">
+          <div className="space-y-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted">Active</label>
+            <div className={readOnlyFieldClass}>{redirectUri}</div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted">Source</label>
+            <div className={readOnlyFieldClass}>
+              {configuredRedirectUri
+                ? 'VITE_MSAL_REDIRECT_URI (build-time override)'
+                : "this page's origin (window.location.origin)"}
+            </div>
+          </div>
+
+          <p className="text-xs text-muted">
+            This exact string must appear in the App Registration's Redirect URIs allowlist, or login
+            fails with a redirect-URI-mismatch error. Entra matches literally, so every additional
+            address the app is reached from — another hostname, a LAN IP, a different port — needs its
+            own entry registered separately.
           </p>
         </div>
       </div>

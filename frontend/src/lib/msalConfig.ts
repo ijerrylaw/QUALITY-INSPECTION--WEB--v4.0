@@ -27,7 +27,19 @@ import type { Configuration } from '@azure/msal-browser';
 
 export const clientId = import.meta.env['VITE_MSAL_CLIENT_ID'] as string | undefined;
 export const tenantId = import.meta.env['VITE_MSAL_TENANT_ID'] as string | undefined;
-const redirectUri = (import.meta.env['VITE_MSAL_REDIRECT_URI'] as string | undefined) ?? window.location.origin;
+/**
+ * The build-time override, when one is set. Exported alongside `redirectUri`
+ * so diagnostics can report *how* the effective value was derived, not just
+ * what it is.
+ */
+export const configuredRedirectUri = import.meta.env['VITE_MSAL_REDIRECT_URI'] as string | undefined;
+
+/**
+ * The redirect URI this client will actually hand to Entra. Exported so the
+ * System > Environment panel can display the live value rather than a
+ * hand-maintained list that goes stale the moment the app moves host.
+ */
+export const redirectUri = configuredRedirectUri ?? window.location.origin;
 
 if (!clientId || !tenantId) {
   // eslint-disable-next-line no-console
