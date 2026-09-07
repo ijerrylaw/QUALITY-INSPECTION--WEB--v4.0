@@ -14,6 +14,7 @@
 import { useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth, rolesInGroups } from '../../context/AuthContext';
+import { QUALITY_ANALYTICS_ENABLED } from '../../lib/featureFlags';
 import { useConfig } from '../../context/ConfigContext';
 import { useWizardGuard } from '../../context/WizardGuardContext';
 import { useHistoryIndicator } from '../../context/HistoryIndicatorContext';
@@ -41,6 +42,13 @@ interface SidebarItem {
   label: string;
   icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
   roles: string[];
+  /**
+   * Temporary freeze (see lib/featureFlags.ts). A frozen item stays VISIBLE
+   * in the nav but renders as a non-interactive row with a "Coming soon"
+   * badge — no navigation, no focus/keyboard activation. Cleared by flipping
+   * the backing feature flag; nothing about the item is otherwise removed.
+   */
+  frozen?: boolean;
 }
 
 // Group A/B/C role lists (AUDIT_REPORT.md §11) — derived from the single
@@ -56,7 +64,7 @@ const sidebarItems: SidebarItem[] = [
   { to: '/wizard', label: 'QUALITY ENTRY WIZARD', icon: ClipboardCheck, roles: ALL_GROUP_ROLES },
   { to: '/history', label: 'INSPECTION RECORDS', icon: History, roles: ALL_GROUP_ROLES },
   { to: '/approvals', label: 'APPROVALS QUEUE', icon: ShieldAlert, roles: GROUP_AB_ROLES },
-  { to: '/analytics', label: 'QUALITY ANALYTICS', icon: BarChart3, roles: GROUP_AB_ROLES },
+  { to: '/analytics', label: 'QUALITY ANALYTICS', icon: BarChart3, roles: GROUP_AB_ROLES, frozen: !QUALITY_ANALYTICS_ENABLED },
   { to: '/config', label: 'CONFIGURATION CONTROL', icon: Sliders, roles: GROUP_AB_ROLES },
   { to: '/pin-admin', label: 'STAFF PIN ACCESS', icon: Users, roles: GROUP_AB_ROLES },
   { to: '/system', label: 'SYSTEM ADMIN', icon: Settings, roles: GROUP_A_ROLES },
@@ -164,6 +172,38 @@ export function Sidebar() {
 
           {visibleItems.map((item) => {
             const Icon = item.icon;
+
+            // Frozen item (e.g. Quality Analytics pending the next release —
+            // see lib/featureFlags.ts): stays visible for discoverability but
+            // is fully inert. Rendered as a plain <div>, not a <NavLink>/<a>,
+            // so there is no href to navigate to and nothing focusable;
+            // aria-disabled + tabIndex={-1} keep it out of the keyboard tab
+            // order and announced as disabled, and pointer-events-none +
+            // cursor-not-allowed block mouse activation.
+            if (item.frozen) {
+              return (
+                <div
+                  key={item.to}
+                  aria-disabled="true"
+                  tabIndex={-1}
+                  title="Coming soon — available in the next release"
+                  className="h-12 px-3.5 rounded-lg flex items-center gap-3.5 text-xs font-semibold uppercase tracking-wide relative text-muted/40 cursor-not-allowed pointer-events-none select-none"
+                >
+                  <span className="relative shrink-0">
+                    <Icon className="w-5 h-5" strokeWidth={2} />
+                  </span>
+                  {!collapsed && (
+                    <>
+                      <span className="truncate">{item.label}</span>
+                      <span className="ml-auto shrink-0 rounded-full border border-gray-700 bg-surface px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted">
+                        Coming soon
+                      </span>
+                    </>
+                  )}
+                </div>
+              );
+            }
+
             return (
               <NavLink
                 key={item.to}

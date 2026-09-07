@@ -21,6 +21,8 @@ import { SystemPage } from './pages/SystemPage';
 import { PinAdminPage } from './pages/PinAdminPage';
 import { DevToolsPage } from './pages/DevToolsPage';
 import { IdleSessionGuard } from './components/auth/IdleSessionGuard';
+import { FeatureRoute } from './components/routing/FeatureRoute';
+import { QUALITY_ANALYTICS_ENABLED } from './lib/featureFlags';
 
 // Group A/B/C role lists (AUDIT_REPORT.md §11) — single source of truth in
 // AuthContext.tsx, shared with Sidebar.tsx's nav-visibility gates.
@@ -113,10 +115,19 @@ export function App() {
                         <ApprovalsPage />
                       </RoleRoute>
                     } />
+                    {/* Quality Analytics is FROZEN pending the next release
+                        (see lib/featureFlags.ts). While the flag is false this
+                        route redirects to /wizard so typed URLs / bookmarks /
+                        back-forward / deep links can't reach it; the Sidebar
+                        keeps the menu item visible but inert. When the flag is
+                        true, FeatureRoute is a pass-through and this is exactly
+                        the original RoleRoute-wrapped AnalyticsPage. */}
                     <Route path="/analytics" element={
-                      <RoleRoute allowedRoles={GROUP_AB_ROLES}>
-                        <AnalyticsPage />
-                      </RoleRoute>
+                      <FeatureRoute enabled={QUALITY_ANALYTICS_ENABLED}>
+                        <RoleRoute allowedRoles={GROUP_AB_ROLES}>
+                          <AnalyticsPage />
+                        </RoleRoute>
+                      </FeatureRoute>
                     } />
                     <Route path="/config" element={
                       <RoleRoute allowedRoles={GROUP_AB_ROLES}>

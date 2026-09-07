@@ -81,6 +81,7 @@ or summarized in the split — this is the original content, relocated.
 - [§56](#56-backendfrontend-tls-cert--host-port-made-environment-configurable-closes-installer_package_manifestmd-tls-blocker--2026-09-06) — Backend/frontend TLS cert + host/port made environment-configurable (closes INSTALLER_PACKAGE_MANIFEST.md TLS blocker) — 2026-09-06
 - [§57](#57-real-data-cleanup-checkpoint-before-devdb-and-proddb-separation--2026-09-07) — Real-data cleanup checkpoint before dev.db and prod.db separation — 2026-09-07
 - [§58](#58-production-database-separated-from-the-dev-seed-via-a-database_url-default--2026-09-07) — Production database separated from the dev seed via a DATABASE_URL default — 2026-09-07
+- [§59](#59-quality-analytics-menu-item-frozen-behind-a-frontend-feature-flag--2026-09-07) — Quality Analytics menu item frozen behind a frontend feature flag — 2026-09-07
 
 ---
 
@@ -7274,3 +7275,74 @@ live data.
 - No schema change, no `prisma db push`, no migration. `backend/dev.db` is
   untouched and still tracked at `9e959df`; `prod.db` is gitignored and appears
   nowhere in `git status`.
+
+---
+
+## 59. Quality Analytics menu item frozen behind a frontend feature flag — 2026-09-07
+
+The "QUALITY ANALYTICS" area (side-menu item + `/analytics` route) is frozen
+pending the next version release. This is a **reversible toggle, not a
+removal** — nothing about `AnalyticsPage`, `AnalyticsDashboard`, or the
+route/nav wiring was deleted. **Code-only: no schema, no migration, no
+`dev.db`/`prod.db` change.**
+
+### The flag
+
+- **`frontend/src/lib/featureFlags.ts`** (new) — a single build-time boolean,
+  `QUALITY_ANALYTICS_ENABLED = false`, at the top of the file with a comment
+  explaining the freeze is temporary and that flipping it back to `true` and
+  rebuilding fully restores the feature with no other change required. This is
+  the only file to touch to unfreeze.
+
+### Nav — visible but inert (`frontend/src/components/layout/Sidebar.tsx`)
+
+- `SidebarItem` gains an optional `frozen?: boolean`; the `/analytics` entry
+  sets `frozen: !QUALITY_ANALYTICS_ENABLED`. Every other entry is unchanged.
+- When `frozen` is true the item still renders (kept visible for
+  discoverability) but as a plain `<div>` — **not** a `<NavLink>`/`<a>`, so
+  there is no `href` to follow and nothing in the tab order — with
+  `aria-disabled="true"`, `tabIndex={-1}`, `cursor-not-allowed`,
+  `pointer-events-none`, dimmed text, and a **"Coming soon"** badge next to the
+  label. No `onClick`, so a click (mouse or synthetic) does nothing.
+- When `frozen` is false the map falls through to the **exact original
+  `<NavLink>`** render path, untouched.
+
+### Route — direct navigation blocked (`frontend/src/App.tsx`)
+
+- **`frontend/src/components/routing/FeatureRoute.tsx`** (new) — a small guard:
+  `enabled === false` → `<Navigate to={fallback} replace />` (fallback
+  defaults to the dashboard, `/wizard`); `enabled === true` → renders
+  `children` verbatim, a transparent pass-through.
+- The `/analytics` `<Route>` is now wrapped
+  `<FeatureRoute enabled={QUALITY_ANALYTICS_ENABLED}>` **outside** the existing
+  `<RoleRoute allowedRoles={GROUP_AB_ROLES}><AnalyticsPage /></RoleRoute>`.
+  With the flag off, a typed URL / bookmark / back-forward / deep link to
+  `/analytics` redirects to `/wizard` instead of mounting the page. With the
+  flag on, `FeatureRoute` is a pass-through and the element is byte-for-byte
+  the pre-freeze `RoleRoute`-wrapped `AnalyticsPage`.
+
+### Tests
+
+- **`frontend/src/components/routing/__tests__/FeatureRoute.test.tsx`** (new,
+  4 tests) — flag off redirects a direct `/analytics` hit to the dashboard;
+  flag on renders the guarded element unchanged; a custom `fallback` is
+  honoured; and a trip-wire asserting the shipped `QUALITY_ANALYTICS_ENABLED`
+  is still `false`.
+- **`frontend/src/components/layout/__tests__/Sidebar.frozenItem.test.tsx`**
+  (new, 4 tests) — the "QUALITY ANALYTICS" label is present but not inside an
+  `<a>`; the row is a `<div>` with `aria-disabled="true"` / `tabindex="-1"`;
+  it carries a "Coming soon" badge; clicking it leaves the route on `/wizard`;
+  and the other nav items are still real links. `useAuth` / `useConfig` /
+  `useWizardGuard` / `useHistoryIndicator` are mocked (this app's Group A
+  login is MSAL-popup based, undrivable in a sandboxed browser —
+  NAVIGATION_AND_RBAC.md §3.1); the flag itself is the real one.
+
+### Verification
+
+- Frontend `tsc -b`: clean. `oxlint`: 0 errors (pre-existing warnings only,
+  none in the new files).
+- Frontend `vitest run` — **121/121** (20 files), the 113/113 baseline plus
+  the 8 new tests. The two `console.error`/`console.warn` 500 lines are the
+  suite's own simulated-failure fixtures.
+- No schema change, no `prisma` command, no `dev.db`/`prod.db` write. Backend
+  untouched.
