@@ -82,6 +82,7 @@ or summarized in the split — this is the original content, relocated.
 - [§57](#57-real-data-cleanup-checkpoint-before-devdb-and-proddb-separation--2026-09-07) — Real-data cleanup checkpoint before dev.db and prod.db separation — 2026-09-07
 - [§58](#58-production-database-separated-from-the-dev-seed-via-a-database_url-default--2026-09-07) — Production database separated from the dev seed via a DATABASE_URL default — 2026-09-07
 - [§59](#59-quality-analytics-menu-item-frozen-behind-a-frontend-feature-flag--2026-09-07) — Quality Analytics menu item frozen behind a frontend feature flag — 2026-09-07
+- [§60](#60-github-actions-ci-workflow-runs-the-quality-gate-on-push-and-pr-to-master--2026-09-07) — GitHub Actions CI workflow runs the quality gate on push and PR to master — 2026-09-07
 
 ---
 
@@ -7346,3 +7347,75 @@ route/nav wiring was deleted. **Code-only: no schema, no migration, no
   suite's own simulated-failure fixtures.
 - No schema change, no `prisma` command, no `dev.db`/`prod.db` write. Backend
   untouched.
+
+---
+
+## 60. GitHub Actions CI workflow runs the quality gate on push and PR to master — 2026-09-07
+
+Until now the project's quality gate (typecheck / lint / test for both
+workspaces) only ran when someone ran it by hand. `.github/workflows/ci.yml`
+(new, and the repo's first CI config of any kind) now runs it automatically.
+**Code-only: a workflow file plus this entry — no schema, migration, or
+`dev.db` change, and no application code touched.**
+
+### Trigger
+
+- `push` to `master` and `pull_request` targeting `master`.
+
+### Job — one job, sequential steps
+
+A single `quality-gate` job on `ubuntu-latest`. **Not** split into a
+frontend/backend matrix: the gate is small, the backend typecheck and tests
+depend on `prisma generate` having run, and a matrix would double the
+`npm ci` + cache cost for no isolation benefit worth having here. Steps, in
+order, each failing the job on any non-zero exit (Actions' default; no
+`continue-on-error`):
+
+1. `actions/checkout@v4`.
+2. `actions/setup-node@v4` — Node **22** with `cache: npm`. There is no
+   `.nvmrc` and no `engines` pin tighter than the root `"node": ">=18"`;
+   local dev runs v24. 22 (current LTS) was chosen as the CI baseline and
+   matches `backend/package.json`'s `@types/node: ^22`. *(Assumption — no
+   repo file dictates the exact version.)*
+3. `npm ci` at the repo root — one `package-lock.json`, npm **workspaces**
+   (`frontend`, `backend`) installs both. No monorepo tool beyond npm itself.
+4. `npx prisma generate` in `backend/` — the Prisma client generates to
+   `backend/generated/prisma` (gitignored, `output = "../generated/prisma"`
+   in `backend/prisma/schema.prisma`), and the backend typecheck + tests
+   import those types, so this runs first. `prisma.config.ts` is auto-loaded
+   from the `backend/` cwd; `generate` needs no DB connection.
+5. `npx tsc --noEmit` in `backend/` — `backend/tsconfig.json` has no `noEmit`
+   and there is no backend typecheck script, so the flag is passed
+   explicitly, matching the documented local baseline command.
+6. `npm test` in `backend/` → `vitest run` (backend's only script).
+7. `npx playwright install --with-deps chromium` in `frontend/` —
+   `frontend/vitest.config.ts` runs tests in Vitest **browser mode** via
+   Playwright/Chromium, so the browser and its OS libraries must be present.
+8. `npx tsc -b` in `frontend/` — the typecheck half of the `build` script
+   (`tsc -b && vite build`); there is no standalone frontend typecheck
+   script.
+9. `npm run lint` in `frontend/` → `oxlint` (confirmed: `frontend`'s `lint`
+   script is `oxlint`, config at `frontend/.oxlintrc.json`; **not** eslint,
+   and the backend has no lint script).
+10. `npm test` in `frontend/` → `vitest run`.
+
+### Exact scripts referenced (verified against `package.json`, not assumed)
+
+| Workspace | Script | Value |
+|---|---|---|
+| root | — | npm workspaces: `["frontend", "backend"]`, single `package-lock.json` |
+| frontend | `lint` | `oxlint` |
+| frontend | `test` | `vitest run` |
+| frontend | `build` | `tsc -b && vite build` (CI uses `tsc -b` alone for typecheck) |
+| backend | `test` | `vitest run` |
+| backend | typecheck | no script — `npx tsc --noEmit` per the local baseline |
+
+### Verification
+
+- `.github/workflows/ci.yml` is well-formed YAML and every `run:` command is
+  copied from the `package.json` scripts above.
+- **Not executed.** GitHub Actions cannot be triggered from this environment,
+  so the workflow has never actually run. It must be confirmed by watching
+  the first real push or PR to `master` pick it up — in particular the
+  Playwright install step and the browser-mode frontend test run, which are
+  the parts most likely to need adjustment on a clean CI runner.

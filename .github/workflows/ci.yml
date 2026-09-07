@@ -1,0 +1,71 @@
+name: CI
+
+# Runs this repo's existing local quality gate automatically.
+# Mirrors, step for step, what a developer runs by hand:
+#   backend : npx prisma generate → npx tsc --noEmit → npm test (vitest run)
+#   frontend: npx tsc -b → npm run lint (oxlint) → npm test (vitest run)
+# Every step fails the job on a non-zero exit (Actions' default; no
+# continue-on-error anywhere).
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  quality-gate:
+    name: Quality gate (typecheck / lint / test)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # No .nvmrc / engines pin beyond root "node >=18"; local dev is on v24.
+      # Pinning to 22 (current LTS) as the CI baseline — backend/@types/node
+      # is ^22, so this matches the type surface the code is written against.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Single root package-lock.json; npm workspaces installs both
+      # frontend/ and backend/ in one shot.
+      - name: Install dependencies (npm workspaces)
+        run: npm ci
+
+      # Prisma client is generated to backend/generated/prisma (gitignored),
+      # and backend typecheck + tests import those types — so this must run
+      # before either. prisma.config.ts is auto-loaded from the backend/ cwd;
+      # `generate` needs no database connection.
+      - name: Generate Prisma client
+        working-directory: backend
+        run: npx prisma generate
+
+      - name: Backend — typecheck
+        working-directory: backend
+        run: npx tsc --noEmit
+
+      - name: Backend — tests
+        working-directory: backend
+        run: npm test
+
+      # frontend/vitest.config.ts runs tests in Vitest browser mode via
+      # Playwright/Chromium, so the browser + its OS libs must be present.
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Frontend — typecheck
+        working-directory: frontend
+        run: npx tsc -b
+
+      - name: Frontend — lint (oxlint)
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Frontend — tests
+        working-directory: frontend
+        run: npm test
