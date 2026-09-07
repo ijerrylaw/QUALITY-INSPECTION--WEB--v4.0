@@ -109,6 +109,11 @@ $PruneFiles = @(
 $PruneTestDirs  = @('__tests__', '__screenshots__', '.vitest-attachments')
 $PruneTestFiles = @('*.test.ts', '*.test.tsx', 'vitest.config.ts')
 
+# Removed wherever they appear, at any depth. There is one of these at the repo
+# root and one in each workspace; they are git plumbing with no runtime role, and
+# the root copy additionally enumerates local editor/assistant state directories.
+$PruneAnywhereFiles = @('.gitignore', '.gitattributes')
+
 # Strings that must not appear anywhere in the finished package.
 $ForbiddenStrings = @(
     'AI_RULES',
@@ -242,6 +247,15 @@ foreach ($rel in $PruneFiles) {
         Remove-Item -LiteralPath $p -Force
         $removed++
     }
+}
+
+foreach ($fileName in $PruneAnywhereFiles) {
+    Get-ChildItem -LiteralPath $OutputDir -Recurse -File -Force |
+        Where-Object { $_.Name -eq $fileName } |
+        ForEach-Object {
+            Remove-Item -LiteralPath $_.FullName -Force
+            $removed++
+        }
 }
 
 foreach ($dirName in $PruneTestDirs) {

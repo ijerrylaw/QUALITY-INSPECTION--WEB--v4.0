@@ -16,7 +16,12 @@
  *   the full surface this entrypoint wires up)
  */
 
-import 'dotenv/config'; // Load .env before anything else (DATABASE_URL etc.)
+// MUST stay the first import: it populates process.env (DATABASE_URL, TLS paths,
+// NODE_ENV) from backend/.env, and the modules below read those values as they
+// load. Resolves the file from this package's directory rather than the working
+// directory — see src/lib/loadEnv.ts for why that distinction is load-bearing
+// when running as a service.
+import './src/lib/loadEnv';
 import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';

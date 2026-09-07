@@ -448,6 +448,14 @@ if (Test-Path -LiteralPath $DbPath) {
 Write-Step 'Installing dependencies (this takes several minutes)'
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Build tools are required here, not just runtime libraries: the web interface is
+# compiled on this machine a few steps below, so `npm ci --omit=dev` would remove
+# the very packages the build needs. One consequence is that the test runner's
+# dependencies come along too — including Playwright, which by default downloads
+# several hundred MB of browsers on install. This server never runs tests, so
+# that download is suppressed.
+$env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = '1'
+
 Write-Info 'Running npm ci - downloading exact dependency versions...'
 Invoke-Checked -Exe 'npm' -Arguments @('ci') -WorkingDir $AppRoot -What 'npm ci'
 Write-Pass 'Dependencies installed'
