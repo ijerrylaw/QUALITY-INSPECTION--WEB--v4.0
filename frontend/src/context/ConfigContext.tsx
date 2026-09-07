@@ -20,7 +20,7 @@
  * PROFILE DESIGN: InspectionProfiles are PRODUCT-AGNOSTIC. They are selected
  * by the user in Step 1 of the wizard. productProfileMap has been removed.
  *
- * Level 1 System Precedence: AI_RULES.md & UI_DESIGN_SYSTEM.md
+ * Level 1 System Precedence: UI_DESIGN_SYSTEM.md
  * Data Contracts: DATA_SCHEMAS_AND_TYPES.md
  */
 

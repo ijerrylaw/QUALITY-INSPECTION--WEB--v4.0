@@ -51,11 +51,10 @@
  *  - amendmentsRouter (mounted at /api/amendments) — pending queue, approve, reject.
  *  - verdictRouter     (mounted at /api/verdict)    — read-only verdict preview, no persistence.
  *
- * Level 1 System Precedence: AI_RULES.md & UI_DESIGN_SYSTEM.md
+ * Level 1 System Precedence: UI_DESIGN_SYSTEM.md
  * Level 2 Feature Spec: API_AND_INTEGRATION_SPEC.md § 1 "Submissions &
  *   History" / "Amendments & Approvals" / "Verdict Preview" &
  *   DATA_SCHEMAS_AND_TYPES.md § 1 (Submission / AmendmentLog)
- *   (superseded the Antigravity-era v4_optimized_blueprint.md / implementation_plan.md)
  */
 
 import { Router, Request, Response } from 'express';

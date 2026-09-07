@@ -31,7 +31,7 @@
  * - Step Tabs: §2.1 — Active: bg-brand-primary text-white, h-10 px-6 rounded-t-lg.
  * - Inactive tabs: bg-surface text-muted hover:text-primary hover:bg-surface-light.
  *
- * Level 1 Precedence: AI_RULES.md & UI_DESIGN_SYSTEM.md
+ * Level 1 Precedence: UI_DESIGN_SYSTEM.md
  * API Contract: API_AND_INTEGRATION_SPEC.md §1 → POST /api/submissions
  *               API_AND_INTEGRATION_SPEC.md §1 → POST /api/submissions/:id/amendments
  * Data Shape: DATA_SCHEMAS_AND_TYPES.md → Submission interface

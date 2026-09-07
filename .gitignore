@@ -11,5 +11,13 @@ __screenshots__/
 *.xlsx
 *.xls
 
-# Local Claude Code session config (launch config, permission allowlist)
+# Local editor / assistant workspace state (launch configs, permission
+# allowlists, per-tool caches). Machine-local and never part of a release —
+# these are also excluded from the installer package by install/package.ps1.
 .claude/
+.cursor/
+.windsurf/
+.aider*
+.continue/
+.idea/
+.vscode/
