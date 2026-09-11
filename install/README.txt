@@ -83,10 +83,12 @@ You do not need to be a developer to follow this. Work through it in order.
 
             Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
- STEP 5 - THE FIRST RUN STOPS ON PURPOSE.
+ STEP 5 - THE FIRST RUN STOPS ON PURPOSE - TWICE.
 
           It creates a configuration file and then stops, so you can fill in
-          this site's real values. The file is:
+          this site's real values. There are two such files, checked and
+          created one at a time, so you may need to run .\install.ps1 more
+          than once before it gets past this point. The first is:
 
             backend\.env
 
@@ -118,6 +120,29 @@ You do not need to be a developer to follow this. Work through it in order.
           0.0.0.0 (all network interfaces), which is fine - but if the server
           has a fixed IP that staff will type into their browsers, set HOST to
           that exact IP so the auto-generated certificate matches it.
+
+          Run .\install.ps1 again. If backend\.env is now complete, the
+          installer creates the SECOND configuration file and stops again:
+
+            frontend\.env.local
+
+          Open it in Notepad and replace the two placeholder GUIDs:
+
+            VITE_MSAL_CLIENT_ID
+              This App Registration's Application (client) ID, from the
+              Entra ID admin center - Overview page.
+
+            VITE_MSAL_TENANT_ID
+              This App Registration's Directory (tenant) ID, from the same
+              page.
+
+          IMPORTANT: unlike backend\.env, these two values are baked into the
+          web interface when it is BUILT (a step further down), not read each
+          time the service starts. If you ever need to change them later -
+          moving to a different App Registration, for example - editing this
+          file is not enough: you must run .\install.ps1 again (or
+          `npm run build --workspace=frontend`) to rebuild, then restart the
+          service. A restart alone will keep using the old values.
 
  STEP 6 - Run the installer again:
 
@@ -188,7 +213,8 @@ You do not need to be a developer to follow this. Work through it in order.
 
  1. Stop the service:              sc stop QualityInspection
  2. Back up the database file.
- 3. Copy the new package over the application folder, keeping backend\.env.
+ 3. Copy the new package over the application folder, keeping backend\.env
+    and frontend\.env.local.
  4. Run .\install.ps1 again from an administrator PowerShell window.
 
  The installer detects the existing database and leaves it completely
@@ -235,6 +261,18 @@ You do not need to be a developer to follow this. Work through it in order.
    "The configuration file is incomplete"
      One or more CHANGE_ME placeholders are still in backend\.env. The message
      lists exactly which ones.
+
+   "The Entra ID configuration file is incomplete"
+     VITE_MSAL_CLIENT_ID and/or VITE_MSAL_TENANT_ID are still the placeholder
+     GUID (00000000-...) in frontend\.env.local. The message lists exactly
+     which ones. Fill them in and run .\install.ps1 again - it must rebuild
+     the web interface, so a plain service restart will not pick this up.
+
+   "AADSTS900144: Missing client_id" (during sign-in, after install finished)
+     The web interface was BUILT with an empty VITE_MSAL_CLIENT_ID - normally
+     caught by the check above, but if you see this anyway (e.g. the value
+     was edited after a build, or an older package was used), fix
+     frontend\.env.local and run .\install.ps1 again to rebuild.
 
    "The service did not start"
      Almost always an unreadable certificate or key file, or another program

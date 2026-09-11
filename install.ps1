@@ -81,6 +81,8 @@ $AppRoot = [System.IO.Path]::GetFullPath($AppRoot)
 
 $EnvFile      = Join-Path $AppRoot 'backend\.env'
 $EnvTemplate  = Join-Path $AppRoot 'backend\.env.example'
+$FrontendEnvFile     = Join-Path $AppRoot 'frontend\.env.local'
+$FrontendEnvTemplate = Join-Path $AppRoot 'frontend\.env.example'
 $SeedDb       = Join-Path $AppRoot 'install\seed.db'
 $BackendDir   = Join-Path $AppRoot 'backend'
 $ServerEntry  = Join-Path $AppRoot 'backend\server.ts'
@@ -97,6 +99,17 @@ $BundledNssmSha256 = 'EEE9C44C29C2BE011F1F1E43BB8C3FCA888CB81053022EC5A0060035DE
 # still holding the CHANGE_ME placeholder, because a half-edited .env is the
 # likeliest failure and the least obvious from a service that just won't start.
 $RequiredKeys = @('NODE_ENV', 'HOST', 'DATABASE_URL', 'TLS_KEY_PATH', 'TLS_CERT_PATH', 'WIPE_ENDPOINT_PASSWORD')
+
+# Microsoft Entra ID / MSAL values. Unlike $RequiredKeys above, these are read
+# by the FRONTEND at BUILD time (frontend\src\lib\msalConfig.ts, via Vite) and
+# baked into the compiled JavaScript - not read at service-start time like the
+# backend's .env. A missing value here does not fail loudly the way a missing
+# backend key does: Vite happily bakes in `undefined`, msalConfig.ts falls back
+# to an empty clientId, and the app builds and starts fine - it only fails once
+# a user tries to sign in, with Entra's AADSTS900144 ("Missing client_id").
+# Validating these before the build step (same fail-closed pattern as
+# $RequiredKeys) is what prevents that from shipping silently.
+$FrontendRequiredKeys = @('VITE_MSAL_CLIENT_ID', 'VITE_MSAL_TENANT_ID')
 
 $MinNodeMajor = 20
 $MinNodeMinor = 19
@@ -526,6 +539,72 @@ if ($envValues.ContainsKey('PORT') -and -not [string]::IsNullOrWhiteSpace($envVa
 }
 Write-Pass "Listen address: $($envValues['HOST']):$Port"
 
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Step 'Checking configuration file (frontend\.env.local)'
+# ─────────────────────────────────────────────────────────────────────────────
+
+if (-not (Test-Path -LiteralPath $FrontendEnvTemplate)) {
+    Fail "The installation package looks incomplete - missing: $FrontendEnvTemplate" `
+         @() `
+         @('Re-copy the full package folder to this server and try again.')
+}
+
+if (-not (Test-Path -LiteralPath $FrontendEnvFile)) {
+    Copy-Item -LiteralPath $FrontendEnvTemplate -Destination $FrontendEnvFile -Force
+
+    Write-Host ''
+    Write-Host '  ============================================================' -ForegroundColor Yellow
+    Write-Host '   ACTION REQUIRED - MICROSOFT ENTRA ID CONFIGURATION CREATED' -ForegroundColor Yellow
+    Write-Host '  ============================================================' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host '   A configuration file has been created at:' -ForegroundColor White
+    Write-Host "     $FrontendEnvFile" -ForegroundColor White
+    Write-Host ''
+    Write-Host '   It contains placeholder Entra ID values that must be replaced' -ForegroundColor White
+    Write-Host '   before sign-in will work. Open it in Notepad and set:' -ForegroundColor White
+    Write-Host ''
+    Write-Host '     VITE_MSAL_CLIENT_ID   this App Registration''s Application (client) ID' -ForegroundColor White
+    Write-Host '     VITE_MSAL_TENANT_ID   this App Registration''s Directory (tenant) ID' -ForegroundColor White
+    Write-Host ''
+    Write-Host '   These are baked into the web interface when it is BUILT, not read' -ForegroundColor Gray
+    Write-Host '   when the service starts - so changing them later requires running' -ForegroundColor Gray
+    Write-Host '   this installer again (or `npm run build --workspace=frontend`),' -ForegroundColor Gray
+    Write-Host '   not just a service restart.' -ForegroundColor Gray
+    Write-Host ''
+    Write-Host '   Then run this script again:' -ForegroundColor White
+    Write-Host '     .\install.ps1' -ForegroundColor Cyan
+    Write-Host ''
+    exit 2
+}
+
+Write-Pass 'frontend\.env.local exists'
+
+$frontendEnvValues = Read-EnvFile -Path $FrontendEnvFile
+
+$frontendMissingKeys     = @()
+$frontendPlaceholderKeys = @()
+foreach ($key in $FrontendRequiredKeys) {
+    if (-not $frontendEnvValues.ContainsKey($key) -or [string]::IsNullOrWhiteSpace($frontendEnvValues[$key])) {
+        $frontendMissingKeys += $key
+    } elseif ($frontendEnvValues[$key] -match '^0+-0+-0+-0+-0+$') {
+        # The shipped template's placeholder is the all-zero GUID, not CHANGE_ME
+        # (see frontend\.env.example) - matched loosely so any run of zero groups
+        # in that shape is caught, not just the exact literal.
+        $frontendPlaceholderKeys += $key
+    }
+}
+
+if ($frontendMissingKeys.Count -gt 0 -or $frontendPlaceholderKeys.Count -gt 0) {
+    $detail = @()
+    foreach ($k in $frontendMissingKeys)     { $detail += "$k  - not set" }
+    foreach ($k in $frontendPlaceholderKeys) { $detail += "$k  - still set to the placeholder GUID" }
+    Fail 'The Entra ID configuration file is incomplete.' $detail `
+         @("Open $FrontendEnvFile in Notepad.",
+           'Give VITE_MSAL_CLIENT_ID and VITE_MSAL_TENANT_ID this App Registration''s real values.',
+           'Save the file and run .\install.ps1 again.')
+}
+Write-Pass "All $($FrontendRequiredKeys.Count) required Entra ID settings have values"
+
 # The single source of truth for "what address does the server actually answer
 # on" - used below for the certificate SAN, the health check, and the closing
 # message. server.ts binds to HOST verbatim: a specific address (the setup this
@@ -799,6 +878,12 @@ Write-Pass 'Database client generated'
 Write-Step 'Building the web interface'
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Vite reads frontend\.env.local and bakes VITE_MSAL_CLIENT_ID / VITE_MSAL_TENANT_ID
+# into the compiled JavaScript right here - this is the one and only point those
+# values are read. That's why they were validated earlier (the "frontend\.env.local"
+# step, before TLS) rather than left for the frontend to discover at runtime: by
+# the time the app is running, changing frontend\.env.local does nothing until this
+# build step runs again.
 Invoke-Checked -Exe 'npm' -Arguments @('run', 'build', '--workspace=frontend') -WorkingDir $AppRoot -What 'frontend build'
 
 $distIndex = Join-Path $AppRoot 'frontend\dist\index.html'

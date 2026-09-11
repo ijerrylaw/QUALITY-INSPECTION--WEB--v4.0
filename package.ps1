@@ -140,6 +140,7 @@ $RequiredPaths = @(
     'backend/server.ts',
     'backend/package.json',
     'backend/.env.example',
+    'frontend/.env.example',
     'backend/prisma/schema.prisma',
     'frontend/package.json',
     'frontend/vite.config.ts',
