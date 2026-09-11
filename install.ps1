@@ -526,6 +526,25 @@ if ($envValues.ContainsKey('PORT') -and -not [string]::IsNullOrWhiteSpace($envVa
 }
 Write-Pass "Listen address: $($envValues['HOST']):$Port"
 
+# The single source of truth for "what address does the server actually answer
+# on" - used below for the certificate SAN, the health check, and the closing
+# message. server.ts binds to HOST verbatim: a specific address (the setup this
+# installer recommends, so the certificate matches) binds ONLY that interface,
+# NOT loopback too - 0.0.0.0 is the one value that also answers on localhost.
+# Getting this wrong is exactly how the health check used to fail against a
+# server that was actually running fine.
+#
+# Two different fallbacks for two different audiences when HOST is 0.0.0.0:
+#   HealthHost - probed by THIS script, on THIS machine, right after install.
+#                'localhost' is correct because 0.0.0.0 also answers there.
+#   PublicHost - shown to the operator as the address STAFF should use, from
+#                other machines. 'localhost' would be wrong there - it always
+#                means "your own PC" to whoever visits it - so this falls back
+#                to the computer name instead, same as before this fix.
+$HostIsSpecific = ($envValues['HOST']) -and (@('0.0.0.0', '::', '') -notcontains $envValues['HOST']) -and ($envValues['HOST'] -ne 'localhost')
+$HealthHost     = if ($HostIsSpecific) { $envValues['HOST'] } else { 'localhost' }
+$PublicHost     = if ($HostIsSpecific) { $envValues['HOST'] } else { $env:COMPUTERNAME }
+
 # ─────────────────────────────────────────────────────────────────────────────
 Write-Step 'Checking TLS certificate'
 # ─────────────────────────────────────────────────────────────────────────────
@@ -568,15 +587,16 @@ else {
     # the browser refuses the connection outright - a name mismatch is a hard
     # error, unlike the click-through "not trusted" warning a self-signed cert
     # already carries.
+    # Reuses $HostIsSpecific computed above STEP 3 - the same test the health
+    # check and closing message key off, so the certificate always matches
+    # whatever address this installer will actually tell you to use.
     $sanCandidates = New-Object System.Collections.Generic.List[string]
-    $hostEnv = $envValues['HOST']
-    $hostSpecific = ($hostEnv) -and (@('0.0.0.0', '::', '') -notcontains $hostEnv) -and ($hostEnv -ne 'localhost')
 
-    if ($hostSpecific) {
-        $sanCandidates.Add($hostEnv)
-        $primarySubject = $hostEnv
+    if ($HostIsSpecific) {
+        $sanCandidates.Add($envValues['HOST'])
+        $primarySubject = $envValues['HOST']
     } else {
-        Write-Warn "HOST is '$hostEnv' (all interfaces) - not usable as a certificate name on its own."
+        Write-Warn "HOST is '$($envValues['HOST'])' (all interfaces) - not usable as a certificate name on its own."
         Write-Info 'Using this machine''s computer name and detected IPv4 addresses instead.'
         Write-Info 'For an exact match, set HOST to the fixed IP staff will use and re-run.'
         $primarySubject = $env:COMPUTERNAME
@@ -596,7 +616,7 @@ else {
         } catch { $detectedIps = @() }
     }
     foreach ($ip in $detectedIps) { $sanCandidates.Add($ip) }
-    if (-not $hostSpecific -and $detectedIps.Count -gt 0) { $primarySubject = $detectedIps[0] }
+    if (-not $HostIsSpecific -and $detectedIps.Count -gt 0) { $primarySubject = $detectedIps[0] }
 
     $sanCandidates.Add('localhost')
     $sanCandidates.Add('127.0.0.1')
@@ -900,7 +920,7 @@ $originalPolicy = [System.Net.ServicePointManager]::CertificatePolicy
 [System.Net.ServicePointManager]::CertificatePolicy = New-Object QiInstallCertPolicy
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
 
-$healthUrl = "https://localhost:$Port/api/health"
+$healthUrl = "https://${HealthHost}:$Port/api/health"
 $healthy = $false
 $lastError = ''
 
@@ -932,7 +952,6 @@ if (-not $healthy) {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-$hostName = $env:COMPUTERNAME
 Write-Host ''
 Write-Host '  ============================================================' -ForegroundColor Green
 Write-Host '   INSTALLATION COMPLETE' -ForegroundColor Green
@@ -942,7 +961,7 @@ Write-Host '   The application is running and will start automatically' -Foregro
 Write-Host '   whenever this server reboots.' -ForegroundColor White
 Write-Host ''
 Write-Host '   Staff open the app at:' -ForegroundColor White
-Write-Host "     https://$hostName`:$Port" -ForegroundColor Cyan
+Write-Host "     https://${PublicHost}:$Port" -ForegroundColor Cyan
 Write-Host ''
 if ($SelfSignedGenerated) {
     Write-Host '   The certificate is self-signed, so the FIRST visit from each' -ForegroundColor White
@@ -959,10 +978,12 @@ Write-Host '   The app shows the precise value it will use under' -ForegroundCol
 Write-Host '   System > Environment > Redirect URI.' -ForegroundColor Yellow
 Write-Host ''
 Write-Host '   Managing the service:' -ForegroundColor White
-Write-Host "     Restart   :  nssm restart $ServiceName" -ForegroundColor Gray
-Write-Host "     Stop      :  nssm stop $ServiceName" -ForegroundColor Gray
-Write-Host "     Status    :  nssm status $ServiceName" -ForegroundColor Gray
-Write-Host "     Logs      :  $LogDir" -ForegroundColor Gray
+Write-Host '     Easiest  :  open services.msc and find' -ForegroundColor Gray
+Write-Host '                 "Quality Inspection (Web) v4.0" to Start/Stop/Restart it.' -ForegroundColor Gray
+Write-Host "     Or       :  sc query $ServiceName    (status)" -ForegroundColor Gray
+Write-Host "                 sc stop  $ServiceName" -ForegroundColor Gray
+Write-Host "                 sc start $ServiceName" -ForegroundColor Gray
+Write-Host "     Logs     :  $LogDir" -ForegroundColor Gray
 Write-Host ''
 Write-Host '   Back up this file - it holds all inspection data:' -ForegroundColor White
 Write-Host "     $DbPath" -ForegroundColor Cyan

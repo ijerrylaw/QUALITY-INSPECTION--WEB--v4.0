@@ -54,6 +54,7 @@ or summarized in that split either.
 - [§65](#65-on-prem-installer-and-packaging-step--windows-service-seeded-database-exclusion-verification--2026-09-07) — On-prem installer and packaging step — Windows service, seeded database, exclusion verification — 2026-09-07
 - [§66](#66-installer-generates-a-self-signed-tls-certificate-when-none-is-supplied--2026-09-07) — Installer generates a self-signed TLS certificate when none is supplied — 2026-09-07
 - [§67](#67-nssm-service-wrapper-bundled-into-the-installer-package--2026-09-07) — NSSM service wrapper bundled into the installer package — 2026-09-07
+- [§68](#68-installer-review-fixes-host-aware-health-check-and-service-management-commands--2026-09-11) — Installer review fixes: HOST-aware health check and service management commands — 2026-09-11
 
 ---
 
@@ -2512,3 +2513,83 @@ needs an elevated run on a server, unchanged from §65/§66.
 **Database migration:** none. A vendored binary, PowerShell, and documentation —
 no schema change, no `prisma db push`, no migration, no application code, `dev.db`
 untouched.
+
+---
+
+## 68. Installer review fixes: HOST-aware health check and service management commands — 2026-09-11
+
+A final review of the §63-§67 installer arc found a real trial-blocker plus two
+smaller rough edges, all from the same root cause: pieces of `install.ps1`
+assumed the server always answers on `localhost`, or that `nssm` is always on
+PATH, and §66/§67 quietly made both assumptions false on the recommended setup.
+
+**The trial-blocker.** STEP 9's health check hit `https://localhost:$Port`
+unconditionally, but `server.ts` binds to `HOST` verbatim, and §66's own
+guidance tells the operator to set `HOST` to the server's fixed IP so the
+certificate matches it. A specific `HOST` binds ONLY that interface — not
+loopback too. Reproduced live: with `HOST=10.10.110.31`, `netstat` showed
+`TCP 10.10.110.31:4009 LISTENING`, and both `https://localhost:4009` and
+`https://127.0.0.1:4009` refused the connection while `https://10.10.110.31:4009`
+answered fine. STEP 9 would have looped ten times, then printed
+`Fail 'The service is running but is not answering requests.'` — a false
+failure, on exactly the setup the installer itself recommends, during the
+one run (a trial install) where a clean pass matters most.
+
+**Fix:** one HOST-aware test, computed once right after STEP 2 resolves `HOST`
+and `PORT`, and reused everywhere an address is needed:
+
+- `$HostIsSpecific` — true when `HOST` is neither `0.0.0.0`, `::`, empty, nor
+  `localhost`.
+- `$HealthHost` — the address THIS script probes, on THIS machine, right after
+  install: the specific `HOST` when set, else `localhost` (correct, because
+  `0.0.0.0` also answers on loopback).
+- `$PublicHost` — the address shown to the operator for STAFF to use, from
+  other machines: the specific `HOST` when set, else the computer name (NOT
+  `localhost`, which would tell every visitor to reach their own PC). Same
+  fallback as before this fix, so the unchanged `HOST=0.0.0.0` path is
+  unaffected.
+
+STEP 3's certificate-SAN logic had independently reimplemented the same
+`HOST`-is-specific test in its own scope — the exact kind of duplication that
+let this bug exist in the first place (STEP 9 simply never got a copy of it).
+It now reuses `$HostIsSpecific` too, so there is one source of truth for "what
+address does this server actually answer on."
+
+**Also fixed, same review pass:**
+
+- `install.ps1`'s closing "Staff open the app at" line and `install/README.txt`
+  used the plain `$env:COMPUTERNAME` regardless of `HOST`; now uses
+  `$PublicHost`, so the address the operator is told to share always matches
+  what the server is actually bound to (and the certificate's CN).
+- `install.ps1`'s closing "Managing the service" block and three spots in
+  `install/README.txt` (EVERYDAY MANAGEMENT, and the "UPDATING TO A NEWER
+  VERSION" stop-the-service step) told the operator to run bare `nssm status` /
+  `nssm restart` / `nssm stop` — commands that fail outright since §67 stopped
+  putting `nssm.exe` on PATH. Replaced with `services.msc` (right-click
+  Start/Stop/Restart, no typing) as the primary suggestion and `sc.exe`
+  (built into Windows, no path needed) as the command-line option; NSSM is
+  kept as a documented fallback with its real path, `install\tools\nssm.exe`.
+
+**Verification.** Built a package from HEAD, overlaid the fixed `install.ps1`,
+and reproduced the original repro exactly: `HOST=10.10.110.31`, boot the built
+server as NSSM would (`node --import tsx server.ts`, `cwd` = app root). Ran the
+fixed STEP 9 logic against it — `HealthHost` resolved to `10.10.110.31`,
+`https://10.10.110.31:4009/api/health` returned `200`, while a control check
+against `https://localhost:4009` still failed to connect (confirming this is
+the same bug, not an environment quirk, and the fix routes around it). Then
+reset `HOST=0.0.0.0` and re-ran: `HealthHost` resolved to `localhost`,
+`PublicHost` to the computer name, health check `200` — the unchanged default
+path still behaves exactly as before.
+
+Quality gate: backend `tsc --noEmit` clean + 58/58 Vitest; frontend `tsc -b`
+clean + 124/124 Vitest; `oxlint` 0 errors; `install.ps1` and `package.ps1`
+both pass a PowerShell parser check.
+
+**Not in scope for this pass** (flagged in the review as optional/low-priority):
+`INSTALLER_PACKAGE_MANIFEST.md` not mentioning §66/§67 (nothing in it is
+incorrect), and `install.ps1`'s `NODE_ENV` check being case-insensitive where
+`server.ts`'s is case-sensitive.
+
+**Database migration:** none. `install.ps1` and `install/README.txt` only — no
+schema change, no `prisma db push`, no migration, no application code touched,
+`dev.db` untouched.

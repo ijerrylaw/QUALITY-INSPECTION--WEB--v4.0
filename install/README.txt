@@ -145,17 +145,27 @@ You do not need to be a developer to follow this. Work through it in order.
  EVERYDAY MANAGEMENT
 -------------------------------------------------------------------------------
 
- Check it is running     nssm status QualityInspection
- Restart it              nssm restart QualityInspection
- Stop it                 nssm stop QualityInspection
- Start it                nssm start QualityInspection
+ EASIEST: open the Windows Services console (run services.msc), find
+ "Quality Inspection (Web) v4.0" in the list, and right-click it for
+ Start / Stop / Restart.
+
+ From the command line, sc.exe is built into Windows - no extra path needed:
+
+   Check it is running     sc query QualityInspection
+   Stop it                 sc stop QualityInspection
+   Start it                sc start QualityInspection
+   Restart it              sc stop QualityInspection, wait a few seconds,
+                            then sc start QualityInspection
+
+ NSSM (which registered the service) also works if you have a reason to use
+ it, but it is NOT on the system PATH - it ships inside the application
+ folder, so give its full path:
+
+   install\tools\nssm.exe restart QualityInspection
 
  Application logs are in the logs folder inside the application directory:
    service.out.log    normal output
    service.err.log    errors - look here first if something is wrong
-
- The service is also visible in the standard Windows Services console
- (services.msc) under the name "Quality Inspection (Web) v4.0".
 
 
 -------------------------------------------------------------------------------
@@ -176,7 +186,7 @@ You do not need to be a developer to follow this. Work through it in order.
  UPDATING TO A NEWER VERSION
 -------------------------------------------------------------------------------
 
- 1. Stop the service:              nssm stop QualityInspection
+ 1. Stop the service:              sc stop QualityInspection
  2. Back up the database file.
  3. Copy the new package over the application folder, keeping backend\.env.
  4. Run .\install.ps1 again from an administrator PowerShell window.
