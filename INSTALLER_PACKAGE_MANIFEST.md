@@ -1,7 +1,16 @@
 # Installer Package Manifest — what ships to a server, what never does
 
-**Status: IMPLEMENTED 2026-09-07 — see `CHANGELOG.md` §65.** This file remains the
-spec; the two scripts that now satisfy it are:
+**Status: IMPLEMENTED 2026-09-07, LIVE IN PRODUCTION.** Track A (the installer
+itself) is complete: `CHANGELOG.md` §65 shipped the two scripts below, §66-§67
+added self-signed TLS generation and a bundled NSSM service wrapper, §68 fixed
+a real trial-blocker (health check assumed `localhost`, false-failed on a
+specific `HOST`) plus two smaller rough edges, §69 verified the update-in-place
+path end-to-end (byte-identical `.env`/TLS/database preservation across a
+rebuild-and-reinstall), and §70 fixed a gap where the frontend's MSAL/Entra
+env vars weren't validated before build (the bug that caused the real trial
+install below to fail). A real server install at One Glove Group with Hakim
+completed 2026-09-14/15 and is now the live production deployment — this file
+remains the spec; the two scripts that satisfy it are:
 
 | Script | Runs on | Role | Ships? |
 |---|---|---|---|
