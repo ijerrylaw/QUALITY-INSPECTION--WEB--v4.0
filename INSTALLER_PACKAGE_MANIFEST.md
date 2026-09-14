@@ -265,10 +265,13 @@ defect taxonomy and product matrix from scratch.
 
 ## 4. Risk assessment — does the current approach already exclude everything?
 
-**There is no packaging script yet, so there is nothing that "already" excludes
-anything.** The risk of accidental inclusion is **real and high** if the future
-step is written naively, because everything dangerous sits at or near the repo
-root next to the code that must ship:
+**`package.ps1` already performs this exclusion** — it implements §3's recipe and
+independently asserts on every build that `.git/`, `docs/`, `archived/`,
+`AI_RULES.md`, `CHANGELOG.md`, `AUDIT_REPORT.md`, and every other forbidden path
+or string are absent from the package it produces, failing the build on any hit.
+The risk below is what a **naive alternative to `package.ps1`** — a raw copy that
+bypasses it — would still get wrong, because everything dangerous sits at or near
+the repo root next to the code that must ship:
 
 - `.git/` (7 MB of history with `Antigravity AI` authorship + Claude trailers),
   `AI_RULES.md`, `CHANGELOG.md`, `AUDIT_REPORT.md`, `archived/`, and `docs/`
