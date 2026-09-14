@@ -55,6 +55,7 @@ or summarized in that split either.
 - [§66](#66-installer-generates-a-self-signed-tls-certificate-when-none-is-supplied--2026-09-07) — Installer generates a self-signed TLS certificate when none is supplied — 2026-09-07
 - [§67](#67-nssm-service-wrapper-bundled-into-the-installer-package--2026-09-07) — NSSM service wrapper bundled into the installer package — 2026-09-07
 - [§68](#68-installer-review-fixes-host-aware-health-check-and-service-management-commands--2026-09-11) — Installer review fixes: HOST-aware health check and service management commands — 2026-09-11
+- [§69](#69-installers-update-in-place-path-verified-end-to-end--2026-09-14) — Installer's update-in-place path verified end-to-end — 2026-09-14
 
 ---
 
@@ -2593,3 +2594,61 @@ incorrect), and `install.ps1`'s `NODE_ENV` check being case-insensitive where
 **Database migration:** none. `install.ps1` and `install/README.txt` only — no
 schema change, no `prisma db push`, no migration, no application code touched,
 `dev.db` untouched.
+
+## 69. Installer's update-in-place path verified end-to-end — 2026-09-14
+
+`install/README.txt`'s "UPDATING TO A NEWER VERSION" section has existed since
+§65, but every prior verification of `install.ps1` (§65-§68) tested a fresh
+install onto a clean machine. The update path itself — re-running the
+installer over an existing install after real development happened — had
+never actually been exercised. This entry closes that gap.
+
+**Method.** Built a package from `a61058b` (HEAD at the time) and ran
+`install.ps1 -SkipServiceInstall` against it in a throwaway test location
+through to a completed first install (self-signed cert generated, seed
+database copied, dependencies installed, web interface built). Recorded
+SHA256 hashes of `backend\.env`, `frontend\.env.local`, the TLS cert + key,
+and the database file. Made a one-line, purely cosmetic change (the sidebar's
+fallback portal title string) and committed it (`ddf80a2`), simulating
+development happening between releases. Built a second package from that
+commit and copied it over the SAME install location — the actual update
+step — then re-ran `install.ps1 -SkipServiceInstall` there.
+
+**Result: every guarantee held.**
+- `backend\.env` and `frontend\.env.local` — byte-identical hashes before and
+  after; the run recognized both as already complete and never re-prompted.
+- TLS certificate and private key — byte-identical hashes; the log reported
+  "Left exactly as-is" (STEP 4 short-circuits once existing PEM files parse).
+- Database file — byte-identical hash; STEP 5 reported "Existing database
+  found — left untouched."
+- The new commit's change WAS reflected in the rebuild: the marker string
+  from `ddf80a2` was present in the newly-built `frontend/dist` bundle, and
+  confirmed being served live — the built server was started by hand
+  (`node --import tsx backend\server.ts`, the same invocation NSSM uses) against
+  the updated files and the unmodified database; `/api/health` reported
+  `"database":"connected"`, and the served JS bundle contained the new string.
+- The update run completed with every step `[ OK ]`, no `ACTION REQUIRED`
+  stop, no `[FAIL]`, and no step waited on input that should already have
+  been on disk.
+
+**Testing-environment caveat, not a product issue.** This session has no
+Administrator rights, so `-SkipServiceInstall` was used throughout (as in
+§65-§68) and the real service-registration/NSSM steps were not exercised
+again here — only the file-preservation and rebuild behavior, which is what
+an update actually risks. Separately, STEP 4's `icacls` hardening on the
+private key (`NT AUTHORITY\SYSTEM:(R)`, `BUILTIN\Administrators:(R)`) means a
+non-elevated account cannot even read it back — this session had to grant its
+own account explicit read access after each certificate generation purely so
+the verification script could hash the file. A real update always runs
+elevated (`install.ps1` requires it outside `-SkipServiceInstall`), and the
+service itself normally runs as `LocalSystem`, already covered by the ACL, so
+this does not affect a real deployment — it only affected this test rig's
+ability to observe the file.
+
+The marker commit (`ddf80a2`) was reverted immediately after verification
+(`9ac58fa`) since it carried no real change — kept only long enough to
+produce a second, genuinely different package to update from.
+
+**Database migration:** none. Verification only; no schema change, no
+`prisma db push`, no migration. `dev.db` untouched throughout — the test used
+an isolated copy of `backend/prod.db` in a temp directory outside the repo.

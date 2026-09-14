@@ -221,6 +221,12 @@ You do not need to be a developer to follow this. Work through it in order.
  untouched. It only ever installs the starter database when no database file
  exists yet.
 
+ This flow has been verified end-to-end (2026-09-14): a real update, from a
+ completed install to a newer package copied over the same folder, leaves
+ backend\.env, frontend\.env.local, the TLS certificate and key, and the
+ database file byte-for-byte unchanged, while the new package's code changes
+ do take effect. See CHANGELOG.md §69.
+
 
 -------------------------------------------------------------------------------
  THE BROWSER SECURITY WARNING
