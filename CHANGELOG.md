@@ -56,6 +56,7 @@ or summarized in that split either.
 - [§67](#67-nssm-service-wrapper-bundled-into-the-installer-package--2026-09-07) — NSSM service wrapper bundled into the installer package — 2026-09-07
 - [§68](#68-installer-review-fixes-host-aware-health-check-and-service-management-commands--2026-09-11) — Installer review fixes: HOST-aware health check and service management commands — 2026-09-11
 - [§69](#69-installers-update-in-place-path-verified-end-to-end--2026-09-14) — Installer's update-in-place path verified end-to-end — 2026-09-14
+- [§70](#70-installer-now-validates-frontend-msalentra-env-vars-before-the-build-step--2026-09-11) — Installer now validates frontend MSAL/Entra env vars before the build step — 2026-09-11
 
 ---
 
@@ -2652,3 +2653,51 @@ produce a second, genuinely different package to update from.
 **Database migration:** none. Verification only; no schema change, no
 `prisma db push`, no migration. `dev.db` untouched throughout — the test used
 an isolated copy of `backend/prod.db` in a temp directory outside the repo.
+
+## 70. Installer now validates frontend MSAL/Entra env vars before the build step — 2026-09-11
+
+`install.ps1`'s existing `$RequiredKeys` check covers `backend\.env` — six
+keys read by the server at service-start time, validated with a fail-closed
+stop before anything is built. It never covered the frontend's
+`VITE_MSAL_CLIENT_ID` / `VITE_MSAL_TENANT_ID`. Those are read by Vite at
+**build** time and baked directly into the compiled JavaScript
+(`frontend\src\lib\msalConfig.ts`) — not read at service-start like every
+backend key. A missing value there does not fail loudly the way a missing
+backend key does: Vite happily bakes in `undefined`, `msalConfig.ts` falls
+back to an empty `clientId`, and the install completes, the service starts,
+and the app looks fine right up until someone tries to sign in and Entra
+rejects it with `AADSTS900144: Missing client_id`. This is exactly what
+happened on Hakim's real trial install of the §65-§68 installer package —
+the first time it was run against a genuinely new environment rather than
+this session's own dev machine.
+
+**Fix.** `install.ps1` gets a second configuration-and-stop step, mirroring
+the existing `backend\.env` pattern: a new `$FrontendRequiredKeys` array
+(`VITE_MSAL_CLIENT_ID`, `VITE_MSAL_TENANT_ID`) is validated against
+`frontend\.env.local` before "Building the web interface" runs. If the file
+doesn't exist yet, it's created from `frontend\.env.example` and the script
+stops with `ACTION REQUIRED` for the site admin to fill in real values,
+exactly like the backend flow already does — so the first run can now stop
+**twice**, once per file, and `install/README.txt`'s STEP 5 is rewritten to
+walk through both stops in order. The placeholder check matches the
+shipped template's all-zero-GUID placeholder shape, not a literal
+`CHANGE_ME` string, since Entra IDs are GUIDs. Both the script's
+`ACTION REQUIRED` message and the README call out explicitly that these two
+values are baked in at build time, not read at service start — changing
+them later means rerunning `install.ps1` (or
+`npm run build --workspace=frontend`) to rebuild, not just restarting the
+service; a plain restart keeps serving the old values. README also gets a
+troubleshooting entry for `AADSTS900144` itself, for the case where an older
+package or a post-build edit lets it through anyway.
+
+`package.ps1`'s `$RequiredPaths` gains `frontend/.env.example`, so a package
+built without it fails the build instead of shipping an installer that can
+never pass its own new check.
+
+The trial-install package (`quality-inspection-package-hakim-20260911`,
+built from `bdcec65`) that hit this bug is superseded by a rebuild from this
+fix, `quality-inspection-package-hakim-20260912`.
+
+**Database migration:** none. `install.ps1`, `install/README.txt`, and
+`package.ps1` only — no schema change, no `prisma db push`, no migration, no
+application code touched, `dev.db` untouched.
