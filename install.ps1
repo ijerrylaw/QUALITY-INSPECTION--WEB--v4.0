@@ -505,7 +505,12 @@ if ($missingKeys.Count -gt 0 -or $placeholderKeys.Count -gt 0) {
 }
 Write-Pass "All $($RequiredKeys.Count) required settings have values"
 
-if ($envValues['NODE_ENV'] -ne 'production') {
+if ($envValues['NODE_ENV'] -cne 'production') {
+    # -cne (case-sensitive): server.ts checks NODE_ENV with a strict === 'production'
+    # comparison, so a value like 'Production' or 'PRODUCTION' is NOT production to
+    # the server - it leaves the destructive /api/dev maintenance routes mounted.
+    # PowerShell's default -ne is case-insensitive and would silently accept such a
+    # value here, so this check must match server.ts's case sensitivity exactly.
     Write-Warn "NODE_ENV is '$($envValues['NODE_ENV'])', not 'production'."
     Write-Info 'On a live server this should be production - it keeps the destructive'
     Write-Info 'maintenance endpoints unmounted. Continuing anyway.'
