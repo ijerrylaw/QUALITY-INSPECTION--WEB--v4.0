@@ -59,6 +59,7 @@ or summarized in that split either.
 - [§70](#70-installer-now-validates-frontend-msalentra-env-vars-before-the-build-step--2026-09-11) — Installer now validates frontend MSAL/Entra env vars before the build step — 2026-09-11
 - [§71](#71-dev-tools-wipe-endpoint-gating--closed-at-its-own-go-live-trigger--2026-09-1415) — Dev-tools wipe endpoint gating — closed at its own go-live trigger — 2026-09-14/15
 - [§72](#72-batch-entry-grid-sequence-no-auto-fills-on-add-lot--2026-09-14) — Batch Entry Grid Sequence No. auto-fills on ADD LOT — 2026-09-14
+- [§73](#73-batch-entry-grid-gets-the-unsaved-progress-navigation-guard--2026-09-14) — Batch Entry Grid gets the unsaved-progress navigation guard — 2026-09-14
 
 ---
 
@@ -2778,3 +2779,58 @@ never locks.
 only — reuses the existing `GET /api/submissions/sequence-hint` endpoint and
 the existing `Submission.batchNumber` `@unique` constraint. No schema
 change, no `prisma db push`, no migration.
+
+## 73. Batch Entry Grid gets the unsaved-progress navigation guard — 2026-09-14
+
+Single Entry has warned before discarding in-progress work since the
+`WizardGuardContext`/`wizardDirty.ts` guard was built — navigate away with
+unsaved data and Sidebar.tsx intercepts the click with a Continue/Discard
+prompt. Batch Entry never had this. `WizardPage.tsx`'s `dirty` computation
+hardcoded `false` for Batch mode with a comment saying so explicitly: "Batch
+Entry grid mode has its own state, not covered by this guard." Navigating
+away mid-batch silently lost everything.
+
+**Discovery, not a rebuild.** The guard mechanism itself — `WizardGuardContext`
+(one shared `isWizardDirty` boolean) plus `Sidebar.tsx`'s `handleNavClick`
+interceptor — is already entry-mode-agnostic; it only reads the boolean, it
+has no idea whether the wizard is in Single or Batch mode. The only gap was
+that nothing fed it a real value for Batch mode. No `beforeunload` handler
+exists anywhere in the frontend for Single Entry either, so Batch Entry
+correctly gets none — matching parity exactly rather than over-scoping.
+
+**The dirty definition (confirmed with Jerry before implementing, since it's
+the one real judgment call here):** reuse `hasRealData` — the exact same
+per-row "does this row have a touched dimension slot or a recorded defect"
+check `handleSubmitBatch` already uses to decide what's real and worth
+submitting. This mirrors Single Entry's own `isWizardDirty` philosophy
+exactly: boilerplate/auto-filled scaffolding (default Side/Cartons/Sample,
+the auto-filled Sequence No. from §72) never counts as dirty, only genuine
+inspection data entry does. It's also the only definition that resets
+correctly after a successful submit with zero extra bookkeeping — rows stay
+in the grid post-submit (only their `dirtySlots`/`dimensions`/`defects` get
+cleared to `{}`), so a broader "any row exists" or "SEQ NO/cartons differ
+from default" definition would have false-positived on every clean submit
+unless a new per-row "already submitted" flag were added — real added
+complexity for a signal the app doesn't need today.
+
+**Implementation.** `BatchEntry.tsx` gains an `onDirtyChange` prop and
+computes `isGridDirty = rows.some(hasRealData)`, reported via an effect
+(with an unmount cleanup calling `onDirtyChange?.(false)`). `WizardPage.tsx`
+gains a `batchDirty` state fed by that callback, folded into the existing
+`dirty` memo that already feeds `setWizardDirty` — `WizardGuardContext.tsx`
+and `Sidebar.tsx` are untouched, genuinely zero duplicated logic.
+
+Verified live in the browser: empty grid → no prompt; a row added with only
+defaults (no dimensions/defects) → no prompt, confirming boilerplate isn't
+dirty; entering a real defect count → prompt fires; "RETURN TO WIZARD" stays
+on the page with grid data intact; "DISCARD CHANGES" navigates away and the
+state is lost (via the existing unmount-based discard, same as Single
+Entry); submitting the batch for real (one lot, `A001A6257001`, now a real
+row in `dev.db`) and immediately navigating away produces no false-positive
+prompt.
+
+**Database migration:** none. `frontend/src/pages/WizardPage.tsx` and
+`frontend/src/pages/wizard/BatchEntry.tsx` only, plus the one real test
+submission left in `dev.db` from live verification (kept, not cleaned up —
+see the separate `chore(dev.db)` commit). No schema change, no
+`prisma db push`, no migration.

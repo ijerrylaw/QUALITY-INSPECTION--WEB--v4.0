@@ -380,7 +380,14 @@ export interface BatchEntryHandle {
   submitBatch: () => void;
 }
 
-export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
+interface BatchEntryProps {
+  /** Reports whether the grid has unsaved real inspection data, for
+   * WizardPage.tsx to feed into the shared sidebar navigation guard
+   * (WizardGuardContext) — same mechanism Single Entry already uses. */
+  onDirtyChange?: (dirty: boolean) => void;
+}
+
+export const BatchEntry = forwardRef<BatchEntryHandle, BatchEntryProps>(({ onDirtyChange }, ref) => {
   const { config, isLoading } = useConfig();
   const { user } = useAuth();
   const { addToast } = useToast();
@@ -546,6 +553,23 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
     const defsHasData = Object.values(r.defects).some(v => v > 0);
     return dimsDirty || defsHasData;
   };
+
+  // ── Unsaved-progress navigation guard ───────────────────────────────────
+  // Mirrors StepMetadata.tsx's `isWizardDirty` philosophy: only genuine
+  // inspection data entry (a touched dimension slot, a recorded defect)
+  // counts as "dirty," not boilerplate/auto-filled row scaffolding (default
+  // Side/Cartons/Sample, the auto-filled Sequence No.). Reuses `hasRealData`
+  // — the exact same per-row signal handleSubmitBatch already uses to decide
+  // what's real — so this stays a zero-new-state reuse rather than a second
+  // definition of "dirty" to keep in sync. It also self-resets correctly
+  // after a successful submit: handleSubmitBatch clears each submitted row's
+  // dirtySlots/dimensions/defects to `{}`, so `hasRealData` naturally goes
+  // false for that row even though it stays in the grid.
+  const isGridDirty = rows.some(hasRealData);
+  useEffect(() => {
+    onDirtyChange?.(isGridDirty);
+    return () => onDirtyChange?.(false);
+  }, [isGridDirty, onDirtyChange]);
 
   const handleSubmitBatch = async () => {
     const validRows = rows.filter(hasRealData);

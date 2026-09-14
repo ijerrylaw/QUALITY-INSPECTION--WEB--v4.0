@@ -171,6 +171,8 @@ export function WizardPage() {
   // ── Mode State ───────────────────────────────────────────────────────────
   const [entryMode, setEntryMode] = useState<EntryMode>('GUIDED');
   const batchEntryRef = useRef<BatchEntryHandle>(null);
+  // Reported by BatchEntry.tsx via onDirtyChange — see the `dirty` memo below.
+  const [batchDirty, setBatchDirty] = useState(false);
 
   // ── Guided Wizard State ──────────────────────────────────────────────────
   const [currentStep, setCurrentStep] = useState(1);
@@ -220,19 +222,21 @@ export function WizardPage() {
   }, [matrixEntry, config?.dimensions]);
 
   const { setWizardDirty } = useWizardGuard();
-  const dirty = useMemo(
-    () =>
-      entryMode === 'GUIDED'
-        ? isWizardDirty({
-            inspectionData,
-            originalData,
-            activeDimensions,
-            defectDefinitions: activeProfile?.defectDefinitions ?? [],
-            aqlCategories: activeProfile?.aqlCategories ?? [],
-          })
-        : false, // Batch Entry grid mode has its own state, not covered by this guard.
-    [entryMode, inspectionData, originalData, activeDimensions, activeProfile],
-  );
+  const dirty = useMemo(() => {
+    if (entryMode === 'GUIDED') {
+      return isWizardDirty({
+        inspectionData,
+        originalData,
+        activeDimensions,
+        defectDefinitions: activeProfile?.defectDefinitions ?? [],
+        aqlCategories: activeProfile?.aqlCategories ?? [],
+      });
+    }
+    // Batch Entry grid mode (the only other EntryMode) reports its own dirty
+    // state via onDirtyChange (see the <BatchEntry> render below) since its
+    // data lives entirely in its own component state, not in `inspectionData`.
+    return batchDirty;
+  }, [entryMode, inspectionData, originalData, activeDimensions, activeProfile, batchDirty]);
   useEffect(() => {
     setWizardDirty(dirty);
     return () => setWizardDirty(false);
@@ -906,7 +910,7 @@ export function WizardPage() {
           </div>
         ) : (
           <div className="w-full">
-            <BatchEntry ref={batchEntryRef} />
+            <BatchEntry ref={batchEntryRef} onDirtyChange={setBatchDirty} />
           </div>
         )}
       </div>
