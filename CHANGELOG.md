@@ -58,6 +58,7 @@ or summarized in that split either.
 - [§69](#69-installers-update-in-place-path-verified-end-to-end--2026-09-14) — Installer's update-in-place path verified end-to-end — 2026-09-14
 - [§70](#70-installer-now-validates-frontend-msalentra-env-vars-before-the-build-step--2026-09-11) — Installer now validates frontend MSAL/Entra env vars before the build step — 2026-09-11
 - [§71](#71-dev-tools-wipe-endpoint-gating--closed-at-its-own-go-live-trigger--2026-09-1415) — Dev-tools wipe endpoint gating — closed at its own go-live trigger — 2026-09-14/15
+- [§72](#72-batch-entry-grid-sequence-no-auto-fills-on-add-lot--2026-09-14) — Batch Entry Grid Sequence No. auto-fills on ADD LOT — 2026-09-14
 
 ---
 
@@ -2733,3 +2734,47 @@ actually arrived.
 **Database migration:** none. Documentation only — `AUDIT_REPORT.md` and this
 entry. No schema change, no `prisma db push`, no migration, no application
 code touched, `dev.db` untouched.
+
+## 72. Batch Entry Grid Sequence No. auto-fills on ADD LOT — 2026-09-14
+
+The Batch Entry Grid's SEQ NO field stayed blank on every "+ ADD LOT" click,
+on purpose: a 2026-08-10 decision removed sequence auto-default/auto-increment
+from both wizards, reasoning that auto-incrementing would capture submission
+order, not true production order — the business explicitly did not want
+that, and batch entry is exactly where operators consolidate multi-lot
+results out of order. Three days later (2026-08-13) the single-entry wizard
+(`StepMetadata.tsx`) got a convenience auto-prefill back from the same
+`GET /api/submissions/sequence-hint` endpoint; Batch Entry was deliberately
+left without it, creating an asymmetry between the two wizards that persisted
+until now.
+
+Revisited and reversed on request (Jerry, after the conflict above was
+surfaced and confirmed): `BatchEntry.tsx`'s `handleAddRow` now auto-fills
+SEQ NO on click, from two sources depending on grid state:
+
+- **Grid already has rows:** scans *all* rows currently in the grid (not
+  just the last one, so mid-batch deletes/reorders are handled correctly),
+  takes the highest SEQ NO, +1, zero-padded to 3 digits.
+- **Grid is empty (first lot of the batch):** falls back to the DB via the
+  existing Line+Side+YJJJ `sequence-hint` lookup — reuses the `sequenceHints`
+  state already prefetched per side if it's resolved, else fires a fresh
+  non-blocking lookup and fills the value in once it resolves, guarded so an
+  in-flight lookup can never clobber a value the operator already typed while
+  waiting. No prior record for that key starts at `001`.
+
+The field remains fully editable in both cases — a convenience default, not
+a lock — and submit-time validation (`handleSubmitBatch`) still blocks a
+cleared/blank Sequence No., unchanged.
+
+Verified live in the browser (not just read-through): empty-grid DB fallback
+→ `001`; grid continuation → `002`; edited an earlier row to a higher value
+than the last row and confirmed a newly added row picked up the *grid* max
+(not last-row+1); deleted all rows mid-batch and confirmed the next ADD LOT
+correctly fell back to the DB again rather than continuing from a stale
+in-memory max; manually overwrote an auto-filled value to confirm the field
+never locks.
+
+**Database migration:** none. `frontend/src/pages/wizard/BatchEntry.tsx`
+only — reuses the existing `GET /api/submissions/sequence-hint` endpoint and
+the existing `Submission.batchNumber` `@unique` constraint. No schema
+change, no `prisma db push`, no migration.

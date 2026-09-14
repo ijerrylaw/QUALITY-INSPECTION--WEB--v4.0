@@ -432,13 +432,19 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
 
   // --- Grid Actions ---
   const handleAddRow = () => {
-    // Sequence No is intentionally left blank — no auto-default, no
-    // auto-increment. Auto-incrementing would capture submission order, not
-    // true production order (operators consolidate multi-lot test results
-    // out of production order routinely); the business explicitly does not
-    // want that. Side/Sample Size/Total Carton remain convenience copies from
-    // the previous row since Sequence is the only field this requirement
-    // applies to.
+    // Sequence No is auto-filled as a convenience default, never a lock —
+    // the operator can always overwrite it, and the field stays required at
+    // submit time (see handleSubmitBatch) so a cleared value still blocks.
+    // Two sources, matching the task's intra-batch-vs-first-lot split:
+    //  - Grid already has rows: continue from the highest SEQ NO currently
+    //    IN the grid (not just the last row — rows can be deleted/reordered)
+    //    + 1. This reflects the physical lots the operator has already
+    //    entered for this batch, so it's a safe same-batch continuation.
+    //  - Grid is empty (first lot of this batch): fall back to the DB via
+    //    the same Line+Side+YJJJ "suggested next sequence" hint already
+    //    fetched into `sequenceHints` below (reused if resolved, else fetched
+    //    fresh) — same source StepMetadata.tsx's single-entry prefill uses.
+    //    No prior record for this key starts at 001.
     let prevSampleSize = '125';
     let prevTotalCarton = '18';
     let prevSide = 'A';
@@ -457,9 +463,37 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
       }
     }
 
+    const newId = crypto.randomUUID();
+    let initialSeq = '';
+
+    if (rows.length > 0) {
+      const maxSeq = rows.reduce((max, r) => {
+        const n = parseInt(r.sequenceNo, 10);
+        return Number.isFinite(n) && n > max ? n : max;
+      }, 0);
+      initialSeq = String(maxSeq + 1).padStart(3, '0');
+    } else {
+      const cachedHint = sequenceHints[prevSide];
+      if (cachedHint !== undefined) {
+        initialSeq = String((cachedHint ?? 0) + 1).padStart(3, '0');
+      } else if (lineId && yjjj) {
+        // Hint not resolved yet — add the row now (never block on the
+        // lookup), fill Sequence No in once it resolves. Guarded so an
+        // in-flight lookup can never clobber a value the operator already
+        // typed while waiting.
+        fetchSuggestedNextSequence(lineId, prevSide, yjjj).then((result) => {
+          setRows((prev) => prev.map((r) => (
+            r.id === newId && r.sequenceNo === ''
+              ? { ...r, sequenceNo: String((result ?? 0) + 1).padStart(3, '0') }
+              : r
+          )));
+        });
+      }
+    }
+
     const newRow: BatchLotRow = {
-      id: crypto.randomUUID(),
-      sequenceNo: '',
+      id: newId,
+      sequenceNo: initialSeq,
       side: prevSide,
       totalCarton: prevTotalCarton,
       sampleSize: prevSampleSize,
@@ -531,9 +565,10 @@ export const BatchEntry = forwardRef<BatchEntryHandle>((_props, ref) => {
     }
 
     // Side and Sequence No are required for a well-formed lot number —
-    // Sequence specifically has no auto-default (see handleAddRow), so a row
-    // with real inspection data but a blank sequence must block the whole
-    // batch rather than silently submit a malformed batchNumber.
+    // Sequence's auto-fill (see handleAddRow) is a convenience default the
+    // operator can clear, so a row with real inspection data but a blank
+    // sequence must still block the whole batch rather than silently submit
+    // a malformed batchNumber.
     const incompleteRow = validRows.find((row) => !row.side || !row.sequenceNo);
     if (incompleteRow) {
       const rowNum = rows.findIndex((r) => r.id === incompleteRow.id) + 1;
