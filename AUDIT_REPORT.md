@@ -27,20 +27,20 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
     by the single-tenant-per-deployment correction. No fix scheduled.
     → `CHANGELOG.md` §5.4, §9.2.
 
-24. **Pre-launch checklist item — dev-tools wipe, not an active fix.** A
-    dev-only "Delete All Submissions" tool (`DELETE
-    /api/dev/submissions/all`, `/dev-tools`) exists for test-data cleanup.
-    Both production gates verified live (backend 404s under
-    `NODE_ENV=production`; frontend dead-code-eliminates the page).
-    **Decision 2026-09-02 (Jerry):** stays gated and in active use during
-    development; not to be touched now. Before go-live: manually confirm
-    deployment `NODE_ENV=production`, and decide delete-outright vs.
-    keep-gated.
-    → `CHANGELOG.md` §24.
-
 ---
 
 ## Resolved (summary — full detail in CHANGELOG.md)
+
+24. **RESOLVED 2026-09-14/15 — live-verified.** Dev-tools wipe endpoint
+    gating (`DELETE /api/dev/submissions/all`, `/dev-tools`), revisited at
+    its own "before go-live" trigger: the app went live in production at
+    One Glove Group on 2026-09-14/15. **Decision (Jerry):** KEEP the
+    endpoints gated as-is (`requireWipePassword` + `NODE_ENV` check) —
+    not deleted. Kept intentionally for future test/reset use, including
+    possible Track B deployments. Both required confirmations done on the
+    live server: `WIPE_ENDPOINT_PASSWORD` is set (Hakim set it), and
+    `NODE_ENV=production` is set.
+    → `CHANGELOG.md` §24, §61, §71.
 
 2. **RESOLVED 2026-09-06 — documentation-only.** Reconciled `prof_default`'s
    live `dev.db` taxonomy against the **QA tab** of `docs/reference/2026-07

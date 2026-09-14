@@ -57,6 +57,7 @@ or summarized in that split either.
 - [§68](#68-installer-review-fixes-host-aware-health-check-and-service-management-commands--2026-09-11) — Installer review fixes: HOST-aware health check and service management commands — 2026-09-11
 - [§69](#69-installers-update-in-place-path-verified-end-to-end--2026-09-14) — Installer's update-in-place path verified end-to-end — 2026-09-14
 - [§70](#70-installer-now-validates-frontend-msalentra-env-vars-before-the-build-step--2026-09-11) — Installer now validates frontend MSAL/Entra env vars before the build step — 2026-09-11
+- [§71](#71-dev-tools-wipe-endpoint-gating--closed-at-its-own-go-live-trigger--2026-09-1415) — Dev-tools wipe endpoint gating — closed at its own go-live trigger — 2026-09-14/15
 
 ---
 
@@ -2701,3 +2702,34 @@ fix, `quality-inspection-package-hakim-20260912`.
 **Database migration:** none. `install.ps1`, `install/README.txt`, and
 `package.ps1` only — no schema change, no `prisma db push`, no migration, no
 application code touched, `dev.db` untouched.
+
+## 71. Dev-tools wipe endpoint gating — closed at its own go-live trigger — 2026-09-14/15
+
+`AUDIT_REPORT.md` #24 has tracked the dev-only "Delete All Submissions" tool
+(`DELETE /api/dev/submissions/all`, `/dev-tools`) since 2026-09-02, gated by
+§61's `requireWipePassword` middleware and a `NODE_ENV` check on top of it.
+That entry was deliberately left open with an explicit trigger: "before
+go-live, manually confirm deployment `NODE_ENV=production`, and decide
+delete-outright vs. keep-gated." Go-live happened — the real server install
+at One Glove Group with Hakim completed 2026-09-14/15 and is now the live
+production deployment (see the installer-arc closeout, §65-§70). This entry
+closes #24 against that trigger.
+
+**Decision (Jerry): KEEP the wipe endpoints gated as-is, do not delete them.**
+They're retained intentionally for future test/reset use, including possible
+Track B deployments — deleting the route entirely would remove a tool that's
+still expected to be useful, when the existing double gate (password +
+`NODE_ENV`) already makes it safe to leave in place.
+
+**Both required confirmations done on the live server:**
+- `WIPE_ENDPOINT_PASSWORD` is set — Hakim set it during the real install.
+- `NODE_ENV=production` is set.
+
+No code change. `requireWipePassword` and the `NODE_ENV` gate (§61) are
+unchanged; this entry documents that both were verified live and records the
+keep-vs-delete decision now that the condition #24 was waiting on has
+actually arrived.
+
+**Database migration:** none. Documentation only — `AUDIT_REPORT.md` and this
+entry. No schema change, no `prisma db push`, no migration, no application
+code touched, `dev.db` untouched.
