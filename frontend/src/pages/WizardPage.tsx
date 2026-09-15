@@ -343,8 +343,16 @@ export function WizardPage() {
           // Amendment source ID preserved for submit routing
           _amendSourceId:   target.id,
         };
-        setInspectionData(mappedData);
-        setOriginalData(mappedData);
+        // `originalData` must stay an independent snapshot of the pre-edit record —
+        // every current edit path (StepDimensions/StepDefects) copies-before-mutating,
+        // but that's a convention, not a guarantee. Cloning `inspectionData` here
+        // breaks the reference by construction instead of relying on every future
+        // edit path getting that right; freezing `mappedData` makes an accidental
+        // top-level mutation of `originalData` loud/no-op instead of silently
+        // corrupting the snapshot (shallow only — the clone above is what actually
+        // protects the nested dimensions/defects/qualitative objects).
+        setInspectionData(structuredClone(mappedData));
+        setOriginalData(Object.freeze(mappedData));
 
         addToast('success', `Loaded record ${target.batchNumber} — review and amend all fields.`);
       })
