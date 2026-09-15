@@ -40,7 +40,11 @@ prose for every item remains in `CHANGELOG.md` at the pointers given.
     possible Track B deployments. Both required confirmations done on the
     live server: `WIPE_ENDPOINT_PASSWORD` is set (Hakim set it), and
     `NODE_ENV=production` is set.
-    → `CHANGELOG.md` §24, §61, §71.
+    **Amended 2026-09-15:** the production block can now be deliberately
+    lifted with `ALLOW_WIPE_IN_PRODUCTION=true` (default off, fail closed;
+    the password is still required) — a temporary allowance for the
+    soft-launch testing period, to be turned off when testing concludes.
+    → `CHANGELOG.md` §24, §61, §71, §74.
 
 2. **RESOLVED 2026-09-06 — documentation-only.** Reconciled `prof_default`'s
    live `dev.db` taxonomy against the **QA tab** of `docs/reference/2026-07

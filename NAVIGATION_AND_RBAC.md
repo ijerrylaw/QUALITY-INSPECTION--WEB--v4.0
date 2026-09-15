@@ -120,7 +120,7 @@ Every mutating backend route is gated by `requireRole(...)`/`requireGroup(...)` 
 | `GET/POST /api/registry/categories`, `PATCH /api/registry/categories/:id` | Group A/B |
 | `GET/POST /api/registry/defects`, `PATCH /api/registry/defects/:id` | Group A/B |
 | All other `GET` routes (`/api/health`, `/api/config`, `/api/submissions`) and `POST /api/verdict/preview` | Ungated — non-mutating |
-| `DELETE /api/dev/submissions/all` | Dev-only — 404s under `NODE_ENV=production` (`blockInProduction` guard), not role-gated |
+| `DELETE /api/dev/submissions/all`, `DELETE /api/dev/submissions/by-product-code` | Not role-gated — requires `WIPE_ENDPOINT_PASSWORD` in the body (401 otherwise, every environment); 404s under `NODE_ENV=production` unless the temporary `ALLOW_WIPE_IN_PRODUCTION=true` override is set (`API_AND_INTEGRATION_SPEC.md`, Dev Tools) |
 
 **Registry routes are the second gated `GET` family.** Unlike `/api/config`, the two `GET /api/registry/*` routes are gated (Group A/B) rather than ungated-because-non-mutating. They serve the global Master Defect List and Category Inventory together with per-entry lock state and submission counts — configuration-administration data with no consumer outside Configuration Control, so there is no reason to expose it to a floor session. Group A/B rather than Group A: this is ordinary configuration work, and Group A is reserved for System Admin.
 

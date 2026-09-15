@@ -402,7 +402,8 @@ if (-not (Test-Path -LiteralPath $EnvFile)) {
         '# ===========================================================================',
         '',
         '# Leave as production on a real server. This also keeps the destructive',
-        '# dev-only maintenance endpoints unmounted.',
+        '# dev-only maintenance endpoints unmounted (unless the OPTIONAL',
+        '# ALLOW_WIPE_IN_PRODUCTION switch described earlier in this file is on).',
         'NODE_ENV=production',
         '',
         '# Network interface to listen on. 0.0.0.0 means all interfaces, which is',
@@ -514,6 +515,20 @@ if ($envValues['NODE_ENV'] -cne 'production') {
     Write-Warn "NODE_ENV is '$($envValues['NODE_ENV'])', not 'production'."
     Write-Info 'On a live server this should be production - it keeps the destructive'
     Write-Info 'maintenance endpoints unmounted. Continuing anyway.'
+}
+
+# ALLOW_WIPE_IN_PRODUCTION is OPTIONAL and deliberately not in $RequiredKeys: absent
+# means off. It only gets a mention here so an operator can see when it is on.
+# -ceq / -cne (case-sensitive) for the same reason as the NODE_ENV check above:
+# the server enables it only for the exact lowercase string 'true'.
+$allowWipe = $envValues['ALLOW_WIPE_IN_PRODUCTION']
+if ($allowWipe -ceq 'true') {
+    Write-Warn 'ALLOW_WIPE_IN_PRODUCTION=true - the password-protected data-wipe maintenance'
+    Write-Info 'endpoints are reachable in production. This is a temporary switch for the'
+    Write-Info 'soft-launch testing period; remove it once testing concludes.'
+} elseif (-not [string]::IsNullOrWhiteSpace($allowWipe) -and $allowWipe -cne 'false') {
+    Write-Warn "ALLOW_WIPE_IN_PRODUCTION is '$allowWipe' - only the exact value true turns it on,"
+    Write-Info 'so it is treated as OFF. Continuing.'
 }
 
 $dbUrl = $envValues['DATABASE_URL']

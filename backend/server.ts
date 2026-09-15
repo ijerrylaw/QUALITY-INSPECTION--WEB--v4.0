@@ -36,6 +36,7 @@ import accessLogRouter from './src/routes/accessLog.routes';
 import registryRouter from './src/routes/registry.routes';
 import devToolsRouter from './src/routes/devTools.routes';
 import { globalErrorHandler } from './src/lib/internalError';
+import { areWipeRoutesBlocked, isWipeAllowedInProduction } from './src/lib/wipeGate';
 
 const app = express();
 const PORT = process.env['PORT'] ? Number(process.env['PORT']) : 4009;
@@ -110,12 +111,23 @@ app.use('/api/auth', m365AuthRouter);
 app.use('/api/access-log', accessLogRouter);
 app.use('/api/registry', registryRouter);
 
-// Dev-only destructive testing utilities — never mounted in production, on
-// top of that router's own internal NODE_ENV check (devTools.routes.ts):
+// Dev-only destructive testing utilities — not mounted in production, on top
+// of that router's own internal production check (devTools.routes.ts):
 // structural double-guard so a slipped/misconfigured env var can't leave
-// only one layer standing between this and prod data.
-if (process.env['NODE_ENV'] !== 'production') {
+// only one layer standing between this and prod data. Both layers read the
+// same rule (src/lib/wipeGate.ts): the only way to mount this in production
+// is the explicit, temporary ALLOW_WIPE_IN_PRODUCTION=true override
+// (CHANGELOG §74), and even then every route still requires
+// WIPE_ENDPOINT_PASSWORD.
+if (!areWipeRoutesBlocked()) {
   app.use('/api/dev', devToolsRouter);
+  if (process.env['NODE_ENV'] === 'production' && isWipeAllowedInProduction()) {
+    console.warn(
+      '[QI Backend v4.0] WARNING: ALLOW_WIPE_IN_PRODUCTION=true — the password-gated ' +
+        '/api/dev/submissions/* wipe routes are mounted in production. Temporary ' +
+        'soft-launch testing switch; remove it once testing concludes.'
+    );
+  }
 }
 
 // ── Static SPA (deployed installs only) ───────────────────────────────────────

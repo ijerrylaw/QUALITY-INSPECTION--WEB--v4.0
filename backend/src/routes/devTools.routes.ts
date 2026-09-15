@@ -1,8 +1,10 @@
 /**
  * @file devTools.routes.ts
- * @description Dev-only destructive testing utilities. NEVER reachable in
+ * @description Dev-only destructive testing utilities. Not reachable in
  * production — see the `blockInProduction` guard below, applied to every
- * route on this router before any other logic runs.
+ * route on this router before any other logic runs — unless the deployment
+ * explicitly sets the temporary ALLOW_WIPE_IN_PRODUCTION=true override
+ * (src/lib/wipeGate.ts, CHANGELOG §74). The password gate applies either way.
  *
  * Endpoints:
  *
@@ -26,7 +28,7 @@
  * be manually confirmed dead/removed before go-live, even though it's
  * env-gated — a conscious pre-launch checklist item, not just trust-the-gate.
  *
- * Password gate (issue #24): on top of the NODE_ENV guard, every route here
+ * Password gate (issue #24): on top of the production guard, every route here
  * also requires the caller to send the shared secret as `{ "password": "..." }`
  * in the JSON body, checked against the WIPE_ENDPOINT_PASSWORD env var. Unlike
  * the HOST/TLS_* vars in server.ts, this one has NO default: if it is unset the
@@ -36,6 +38,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prismaClient';
 import { internalErrorBody } from '../lib/internalError';
+import { areWipeRoutesBlocked } from '../lib/wipeGate';
 
 const router = Router();
 
@@ -45,9 +48,14 @@ const router = Router();
  * that deletes production data must never get far enough to do anything
  * else when NODE_ENV is 'production'. 404, not 403, so the route's
  * existence isn't even disclosed to a production caller.
+ *
+ * The one exception is ALLOW_WIPE_IN_PRODUCTION=true (exact string), a
+ * deliberate, temporary soft-launch testing switch — same rule as the mount
+ * in server.ts, both via areWipeRoutesBlocked(). It only lifts this guard;
+ * `requireWipePassword` below still runs and is unchanged.
  */
 function blockInProduction(_req: Request, res: Response, next: NextFunction): void {
-  if (process.env['NODE_ENV'] === 'production') {
+  if (areWipeRoutesBlocked()) {
     res.status(404).json({ error: 'Route not found' });
     return;
   }

@@ -115,6 +115,13 @@ You do not need to be a developer to follow this. Work through it in order.
               erases inspection data. Store it with the site's other
               credentials.
 
+          OPTIONAL - ALLOW_WIPE_IN_PRODUCTION: leave it out for a normal
+          install. Setting ALLOW_WIPE_IN_PRODUCTION=true makes that data-erase
+          function usable on this production server (still password
+          protected). It is a temporary switch for the soft-launch testing
+          period only; remove it once testing concludes. The installer does
+          not ask for it. See the notes in backend\.env for details.
+
           PORT and NODE_ENV are already filled in with working defaults; leave
           them alone unless you have a reason to change them. HOST defaults to
           0.0.0.0 (all network interfaces), which is fine - but if the server

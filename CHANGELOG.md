@@ -60,6 +60,7 @@ or summarized in that split either.
 - [§71](#71-dev-tools-wipe-endpoint-gating--closed-at-its-own-go-live-trigger--2026-09-1415) — Dev-tools wipe endpoint gating — closed at its own go-live trigger — 2026-09-14/15
 - [§72](#72-batch-entry-grid-sequence-no-auto-fills-on-add-lot--2026-09-14) — Batch Entry Grid Sequence No. auto-fills on ADD LOT — 2026-09-14
 - [§73](#73-batch-entry-grid-gets-the-unsaved-progress-navigation-guard--2026-09-14) — Batch Entry Grid gets the unsaved-progress navigation guard — 2026-09-14
+- [§74](#74-dev-tools-wipe-endpoints-get-a-temporary-production-override-flag--2026-09-15) — Dev-tools wipe endpoints get a temporary production override flag — 2026-09-15
 
 ---
 
@@ -2834,3 +2835,93 @@ prompt.
 submission left in `dev.db` from live verification (kept, not cleaned up —
 see the separate `chore(dev.db)` commit). No schema change, no
 `prisma db push`, no migration.
+
+## 74. Dev-tools wipe endpoints get a temporary production override flag — 2026-09-15
+
+§71 closed AUDIT #24 by keeping the wipe endpoints
+(`DELETE /api/dev/submissions/all`, `DELETE /api/dev/submissions/by-product-code`)
+gated as-is. In production that gate made them unreachable outright — the
+password never even got checked. The live deployment is now in a
+soft-launch/testing period where resetting test submissions on the real
+server is genuinely needed, so the production block needed a deliberate,
+reversible way to open **without** relaxing anything else that
+`NODE_ENV=production` controls.
+
+**This is a temporary testing-period allowance, not a permanent
+relaxation.** The switch should be turned off once soft-launch testing
+concludes.
+
+**Discovery — three layers, not two.** The gate was two `NODE_ENV` checks
+plus the password, not one of each: `server.ts` doesn't *mount* the `/api/dev`
+router under production, and the router's own `blockInProduction` guard 404s
+as a second structural layer (§61's double-guard), then `requireWipePassword`
+runs. Lifting only one `NODE_ENV` layer would have changed nothing.
+
+**Change.** New `ALLOW_WIPE_IN_PRODUCTION` env var and a new
+`backend/src/lib/wipeGate.ts` holding the one rule both production layers now
+read — `areWipeRoutesBlocked()` = `NODE_ENV === 'production'` AND the flag is
+not on. Both layers still exist and still agree, so the double guard is
+intact, it just has one shared definition now.
+
+- **Fails closed.** Only the exact lowercase string `true` turns it on. Unset,
+  empty, `false`, `TRUE`, `True`, `1`, `yes`, ` true` all leave the routes
+  blocked. This matches the strict `=== 'production'` comparison `NODE_ENV`
+  itself gets. Covered by the new `wipeGate.test.ts` (15 tests).
+- **Password gate unchanged.** `requireWipePassword` / `WIPE_ENDPOINT_PASSWORD`
+  is not touched and applies in every environment, override or not. In
+  production with the override on, a wipe needs **both**.
+- **Nothing else keyed on `NODE_ENV` moves.** `internalError.ts` (generic 500
+  bodies) and `prismaClient.ts` (HMR cache) still read `NODE_ENV` directly and
+  are untouched.
+- **Non-production is unchanged:** password only, flag ignored.
+- `server.ts` logs a `console.warn` at startup whenever the override is
+  active in production, so it shows up in the service log rather than being
+  a silent state.
+- **The frontend `/dev-tools` page is still stripped from production builds**
+  (`import.meta.env.PROD`, a build-time constant). That is out of scope here,
+  so with the override on, the endpoints are called directly. For example:
+  `Invoke-RestMethod -Method Delete -Uri https://<server>:4009/api/dev/submissions/by-product-code -ContentType 'application/json' -Body '{"password":"…","productCode":"…"}'`.
+
+**Docs / installer.**
+- `backend/.env.example` documents the flag as commented-out
+  `ALLOW_WIPE_IN_PRODUCTION=false`, with the temporary-switch explanation.
+  `install.ps1` seeds `backend\.env` from this template, so a fresh server
+  gets the note too.
+- `install.ps1`: the flag is deliberately **not** in `$RequiredKeys` and not
+  prompted for. The installer only reports it — a warning when it is `true`,
+  and a warning when it holds a non-canonical value it will treat as off
+  (e.g. `TRUE`; same case-sensitivity lesson as §70's `NODE_ENV` `-cne`).
+- `install/README.txt` has a short OPTIONAL note.
+- `API_AND_INTEGRATION_SPEC.md` Dev Tools section and the
+  `NAVIGATION_AND_RBAC.md` §5.1 row were both stale beyond this change. They
+  omitted `/by-product-code` and the password gate, and said "the production
+  block is the only guard". Both are rewritten to the current three-layer
+  gate. The AUDIT_REPORT #24 entry has a pointer here.
+
+**Verified live, not just read-through.** An isolated backend ran on
+`127.0.0.1:4019` on a scratch copy of `dev.db`, restarted once per scenario,
+with both routes exercised in every scenario (8-submission code
+`N025SKB-OC-24FT`, 10 rows total):
+
+| Scenario | wrong / missing pw | correct pw, `/by-product-code` | correct pw, `/all` | malformed-JSON 500 body |
+| :--- | :--- | :--- | :--- | :--- |
+| `NODE_ENV=production`, flag unset | 404 | 404, rows unchanged (10) | 404, rows unchanged | `{error}` only |
+| `NODE_ENV=production`, flag `false` | 404 | 404, unchanged | 404, unchanged | `{error}` only |
+| `NODE_ENV=production`, flag `TRUE` | 404 | 404, unchanged | 404, unchanged | `{error}` only |
+| `NODE_ENV=production`, flag `true` | 401, rows unchanged | **200** `beforeCount 8 → afterCount 0, unlocked` | **200** `2 → 0` | `{error}` only |
+| `NODE_ENV` unset (dev), flag unset | 401 | 200 `8 → 0` | 200 `2 → 0` | `{error, details}` |
+
+The malformed-JSON column goes through `globalErrorHandler` →
+`internalErrorBody()`. It shows the production 500 hardening holds with the
+override on and still returns `details` in dev, so `internalError.ts`
+behaviour is unaffected. The startup warning appeared only in the
+`flag true` run. This also closes the carry-over that
+`/by-product-code` had never itself been live-verified with a correct
+password. The real `backend/dev.db` was byte-compared against the pre-test
+copy afterwards: identical.
+
+**Database migration:** none. Code, config template, installer and docs
+only — `backend/src/lib/wipeGate.ts` (new), its test, `server.ts`,
+`devTools.routes.ts`, `backend/.env.example`, `install.ps1`,
+`install/README.txt`, the two core docs, `AUDIT_REPORT.md`. No schema
+change, no `prisma db push`, no migration.

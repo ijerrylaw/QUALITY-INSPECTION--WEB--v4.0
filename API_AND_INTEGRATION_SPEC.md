@@ -234,9 +234,18 @@ Real MSAL/Entra ID SSO role assignment (`NAVIGATION_AND_RBAC.md` §3.1). The gra
 
 * `DELETE /api/dev/submissions/all`
   * **Role:** Wipes every `Submission` and `AmendmentLog` row (child table deleted first, same transaction) so a developer can reset test data without touching `PinUser`/`M365UserRole`/`AppConfig`. Backing the `/dev-tools` frontend page.
+  * **Payload:** `{ password: string }`
   * **Response 200:** `{ beforeCount, afterCount, unlockedProductCodes: string[] }` — `unlockedProductCodes` lists every distinct `productCode` that had ≥1 `Submission` before the wipe (and is therefore "locked" per `getProductCodeUsage()`'s rule in `PATCH /api/config`), since deleting every submission unlocks all of them.
-  * **Production gating:** every route on this router runs `blockInProduction` first — under `NODE_ENV=production` it returns `404 { error: 'Route not found' }` before any other logic runs (not `403`, so the route's existence isn't even disclosed). Verified live: backend 404s under `NODE_ENV=production`, and the frontend dead-code-eliminates the `/dev-tools` page in a production build (AUDIT_REPORT.md #24 — pre-launch checklist item, not an active fix).
-  * **Auth:** No `X-User-Role` gate — the production block above is the only guard. Development use only.
+* `DELETE /api/dev/submissions/by-product-code`
+  * **Role:** Same wipe scoped to one exact `productCode` — deletes only that code's `AmendmentLog` children and `Submission` rows (one transaction); every other code is untouched.
+  * **Payload:** `{ password: string, productCode: string }`
+  * **Response 200:** `{ productCode, beforeCount, afterCount, unlocked: boolean }` (`unlocked` is `afterCount === 0`). **Response 400:** `{ error }` for a blank `productCode`. **Response 404:** `{ error }` when no submissions have that code.
+
+Gating shared by both routes, in order:
+
+* **Production gating:** the `/api/dev` router is not even mounted under `NODE_ENV=production` (`server.ts`), and every route on it also runs `blockInProduction` first, returning `404 { error: 'Route not found' }` before any other logic (not `403`, so the route's existence isn't disclosed). Both layers read one rule, `areWipeRoutesBlocked()` (`backend/src/lib/wipeGate.ts`). **Temporary override:** `ALLOW_WIPE_IN_PRODUCTION=true` (exact lowercase string; anything else, or unset, is off) lifts both production layers — a deliberate switch for the soft-launch testing period, to be turned off when testing concludes (CHANGELOG §74). It does not touch the password gate or any other `NODE_ENV`-driven behaviour. The frontend `/dev-tools` page is dead-code-eliminated from any production build regardless, so with the override on, the endpoints are called directly.
+* **Password gate:** `requireWipePassword` — the body's `password` must equal `WIPE_ENDPOINT_PASSWORD`; missing/wrong → `401 { error: 'Unauthorized' }`, and an unset `WIPE_ENDPOINT_PASSWORD` fails closed (always `401`). Applies in every environment, override or not (CHANGELOG §61).
+* **Auth:** No `X-User-Role` gate — the two gates above are the guards.
 
 ---
 
