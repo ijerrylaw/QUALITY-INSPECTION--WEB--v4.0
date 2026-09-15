@@ -64,6 +64,7 @@ or summarized in that split either.
 - [§75](#75-wizard-defect-id-display-matches-the-registry-screens-def-0xx-code--2026-09-15) — Wizard Defect ID display matches the Registry screen's DEF-0XX code — 2026-09-15
 - [§76](#76-wizard-tab-checkmarks-and-submit-lot-reflect-real-per-step-validity--2026-09-15) — Wizard tab checkmarks and SUBMIT LOT reflect real per-step validity — 2026-09-15
 - [§77](#77-sequenceno-actually-enforced-in-the-batch-setup-required-field-gate--2026-09-15) — sequenceNo actually enforced in the Batch Setup required-field gate — 2026-09-15
+- [§78](#78-live-aql-verdict-indicator-on-the-wizard-defects-step--2026-09-15) — Live AQL verdict indicator on the wizard Defects step — 2026-09-15
 
 ---
 
@@ -3086,3 +3087,58 @@ LOT`.
 **Database migration:** none. Client-side validity logic only —
 `frontend/src/utils/batchSetupValidity.ts`,
 `frontend/src/pages/wizard/StepMetadata.tsx`.
+
+## 78. Live AQL verdict indicator on the wizard Defects step — 2026-09-15
+
+Single Entry (GUIDED) wizard, Step 3 (`StepDefects.tsx`) had no feedback
+against AQL thresholds while entering defects — the operator only found out
+whether a category passed or failed at Step 4 (`StepReviewSubmit.tsx`,
+which already called `POST /api/verdict/preview` for exactly this). Added
+the same server-authoritative preview to Step 3, scoped per active category
+tab, debounced 400ms after the last edit (a rapid-tap counter would
+otherwise fire one request per click) — the debounce collapsed an 8-click
+burst into exactly one network call, confirmed live via the network log.
+
+Unlike `StepReviewSubmit.tsx`'s own use of this endpoint (which resets to a
+`loading` state on every change), the last-known `categoryResults[]` array
+is kept on screen across a new fetch or a failed one — a live per-tab
+indicator during active typing would be unreadable if it blanked on every
+keystroke pause. Investigated `StepDimensions.tsx`'s instant-feedback
+pattern first (per the task's instruction to match it) and found it has no
+fetch at all — its pass/fail is a synchronous local `useMemo`, so there was
+no in-flight behavior to mirror; documented as a discrepancy rather than
+assumed away.
+
+**CUMULATIVE-mode categories** (e.g. `AND`, `BARRIER`) get a category-level
+`PASS`/`FAIL n/ac` pill next to the existing evaluation-mode badge, reusing
+UI_DESIGN_SYSTEM.md §4.8B's Emerald/Rose state-badge tokens verbatim.
+**GRANULAR-mode categories** (e.g. `VISUALS`) get no category rollup badge
+at all — only the specific defect line(s) that individually crossed their
+own Ac are flagged, derived client-side from the same response's
+`failingDefects[]` (no second API call). Switching tabs mid-edit reads the
+already-fetched `categoryResults[]` by category id, so a different tab's
+verdict can never leak onto the active one.
+
+**Refinement (same session, second pass):** the GRANULAR per-defect flag
+first shipped as a bottom-of-card `⚠ EXCEEDS AC (n)` pill with the counter
+card border turning rose. Replaced with a compact `count/Re` indicator
+(e.g. `08/08`) at the top of the card next to the existing `ID: DEF-0XX`
+label — reads as part of the card header, not a separate banner. `Re` was
+already present on the same `threshold` object `Ac` was being read from, so
+no new derivation was needed. The counter card's rose border/count-text
+fail treatment was left unchanged.
+
+**Verified live** (PIN login, Jason Tan/OT4321): `AND` (zero-tolerance
+CUMULATIVE) flipped `PASS 0/0` → `FAIL 1/0` on incrementing Cut past
+Ac=0, and back on decrementing. `VISUALS` (GRANULAR, AQL 2.5, Ac=7/Re=8):
+pushing Dirt/Stain to 8 showed `08/08` on that card only, with no
+VISUALS-tab-level badge at any point; dropping back to 7 (= Ac) made the
+indicator disappear. Switching AND → BARRIER → VISUALS → AND mid-edit
+never showed a stale verdict on the wrong tab. Captured the DOM
+immediately after a click, before the 400ms debounce elapsed, and
+confirmed the previous verdict badge was still showing (no flicker to
+empty/loading).
+
+**Database migration:** none. Code-only —
+`frontend/src/pages/wizard/StepDefects.tsx`. The endpoint used
+(`POST /api/verdict/preview`) is read-only and pre-existing.

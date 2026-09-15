@@ -31,13 +31,15 @@ import { useState, useMemo, useEffect } from 'react';
 import {
   ShieldAlert,
   AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
   Info,
   Minus,
   Plus,
   Eye,
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { useConfig } from '../../context/ConfigContext';
+import { useConfig, API_BASE_URL } from '../../context/ConfigContext';
 import { OriginalValueNote, hasFieldChanged } from '../../utils/fieldDiff';
 import type { AQLCategory, DefectDefinition } from '../../context/ConfigContext';
 
@@ -188,6 +190,88 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
     [qualitativeDefectIds, qualitativeStates],
   );
 
+  // ── Live AQL Verdict Preview (debounced) ──────────────────────────────────
+  // Per-category CUMULATIVE/GRANULAR pass/fail is server-authoritative (same
+  // resolveVerdict()/evaluateAQLVerdict() engine StepReviewSubmit.tsx's own
+  // POST /api/verdict/preview call uses — see that file's header comment) —
+  // there is no client-side copy of the AQL matrix to compute it locally.
+  // Unlike StepReviewSubmit's every-keystroke fetch, this is debounced 400ms
+  // after the last edit (a rapid-tap counter would otherwise fire one request
+  // per click), and the LAST-KNOWN result is kept on screen while a fetch is
+  // in flight or fails, instead of flickering to a loading/empty state — this
+  // step shows a live per-tab indicator during active data entry, not a
+  // one-time review-step computation, so resetting it on every request would
+  // make the indicator unreadable while typing.
+  interface VerdictThreshold { ac: number; re: number; }
+  interface VerdictFailingDefect { defectId: string; defectName: string; count: number; threshold: VerdictThreshold; }
+  interface VerdictCategoryResult {
+    categoryId: string;
+    categoryName: string;
+    evaluationMode: 'CUMULATIVE' | 'GRANULAR' | 'N/A' | '';
+    threshold: VerdictThreshold;
+    totalCount: number;
+    passed: boolean;
+    failingDefects: VerdictFailingDefect[];
+  }
+
+  const [previewResults, setPreviewResults] = useState<VerdictCategoryResult[] | null>(null);
+  const [previewFetching, setPreviewFetching] = useState(false);
+
+  const sampleSize: number = inspectionData?.sampleSize ?? 125;
+  const defectsSignature = JSON.stringify(combinedDefects);
+
+  useEffect(() => {
+    if (aqlCategories.length === 0) return undefined;
+    let cancelled = false;
+    setPreviewFetching(true);
+
+    const timer = setTimeout(() => {
+      fetch(`${API_BASE_URL}/api/verdict/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profileId: inspectionData?.profileId ?? null,
+          productCode: inspectionData?.productCode,
+          sampleSize,
+          defects: combinedDefects,
+        }),
+      })
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`Server responded ${res.status}`))))
+        .then((data) => {
+          if (cancelled) return;
+          setPreviewResults(data.categoryResults ?? []);
+          setPreviewFetching(false);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          console.warn('[StepDefects] POST /api/verdict/preview failed:', err instanceof Error ? err.message : String(err));
+          // Last-known previewResults is intentionally left untouched — see the
+          // no-flicker rationale above.
+          setPreviewFetching(false);
+        });
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defectsSignature, inspectionData?.profileId, inspectionData?.productCode, sampleSize, aqlCategories.length]);
+
+  // Slice of the last-known preview scoped to the active tab only — a
+  // category never rendered on screen (a different tab) simply never reads
+  // its own entry out of this array, so switching tabs can't leak a stale
+  // verdict onto the wrong category.
+  const activeCategoryResult = useMemo<VerdictCategoryResult | null>(() => {
+    if (!previewResults || !activeCategory) return null;
+    return previewResults.find((r) => r.categoryId === activeCategory.id) ?? null;
+  }, [previewResults, activeCategory]);
+
+  const activeGranularFailIds = useMemo<Set<string>>(() => {
+    if (!activeCategoryResult || activeCategoryResult.evaluationMode !== 'GRANULAR') return new Set();
+    return new Set(activeCategoryResult.failingDefects.map((fd) => fd.defectId));
+  }, [activeCategoryResult]);
+
   // ── Auto-save: Push defect data to WizardPage ─────────────────────────────
   useEffect(() => {
     onUpdate?.({
@@ -216,6 +300,9 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
   const activeCategoryAql = activeCategory?.aql ?? activeCategory?.aqlLevel ?? '—';
   const isQual = isQualitativeAql(activeCategoryAql);
   const isRecordOnly = isRecordOnlyAql(activeCategoryAql);
+  const activeEvalMode = activeCategory && !isQual && !isRecordOnly
+    ? (activeCategory.evalMode ?? activeCategory.evaluationMode ?? 'CUMULATIVE')
+    : null;
 
   return (
     <form id="wizard-step-form" onSubmit={handleSubmit} className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -306,9 +393,28 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
                     AQL: {activeCategoryAql}
                   </span>
                   {/* Evaluation Mode Badge */}
-                  {activeCategory && !isQual && !isRecordOnly && (
+                  {activeEvalMode && (
                     <span className="px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 border-emerald-500/30 text-emerald-400">
-                      {activeCategory.evalMode ?? activeCategory.evaluationMode ?? 'CUMULATIVE'}
+                      {activeEvalMode}
+                    </span>
+                  )}
+                  {/* Live AQL Verdict Badge — CUMULATIVE only. GRANULAR shows
+                      pass/fail per defect line instead (below), so it never
+                      gets this category-level rollup — see StepDefects.tsx's
+                      live-preview block above for why. Absent until the first
+                      debounced /api/verdict/preview response lands. */}
+                  {activeEvalMode === 'CUMULATIVE' && activeCategoryResult && (
+                    <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 transition-opacity ${
+                      previewFetching ? 'opacity-60' : ''
+                    } ${
+                      activeCategoryResult.passed
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                        : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                    }`}>
+                      {activeCategoryResult.passed
+                        ? <CheckCircle2 className="w-3 h-3" strokeWidth={2.5} />
+                        : <AlertTriangle className="w-3 h-3" strokeWidth={2.5} />}
+                      {activeCategoryResult.passed ? 'PASS' : 'FAIL'} {activeCategoryResult.totalCount}/{activeCategoryResult.threshold.ac}
                     </span>
                   )}
                   {activeCategory && isQual && (
@@ -390,13 +496,38 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
                   // qualitative branch above for the token-gap note.
                   const isChanged = originalData != null &&
                     hasFieldChanged(true, originalData?.defects?.[defect.id] ?? 0, count);
+                  // GRANULAR live AQL fail — this specific defect's own count
+                  // has crossed its Ac, per the debounced /api/verdict/preview
+                  // response above. Inline-only per UI_DESIGN_SYSTEM.md §4.8B
+                  // (no category-level rollup badge for GRANULAR — see the
+                  // header block's comment for why).
+                  const isGranularFail = activeEvalMode === 'GRANULAR' && activeGranularFailIds.has(defect.id);
                   return (
                     <div key={defect.id} className={`border rounded-lg p-3 flex flex-col justify-between shadow-sm transition-colors ${
-                      isChanged ? 'bg-brand-secondary/5 border-brand-secondary/50' : 'bg-surface border-gray-700/50 hover:border-gray-700'
+                      isGranularFail
+                        ? 'bg-rose-500/5 border-rose-500/50'
+                        : isChanged
+                          ? 'bg-brand-secondary/5 border-brand-secondary/50'
+                          : 'bg-surface border-gray-700/50 hover:border-gray-700'
                     }`}>
                       <div className="mb-3 flex items-start justify-between gap-2">
                         <span className="font-mono text-sm font-bold text-primary tracking-wide truncate">{defect.name}</span>
-                        <span className="font-mono text-[10px] text-muted uppercase tracking-widest shrink-0">ID: {defect.code ?? defect.id.toUpperCase()}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {/* GRANULAR live AQL fail — compact count/Re glance
+                              flag, part of the card header rather than a
+                              separate banner. transition-opacity echoes the
+                              header badge's in-flight cue without hiding the
+                              last-known state while a new debounced fetch
+                              runs — see the live-preview block above. */}
+                          {isGranularFail && activeCategoryResult && (
+                            <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 transition-opacity ${
+                              previewFetching ? 'opacity-60' : ''
+                            }`}>
+                              {count.toString().padStart(2, '0')}/{activeCategoryResult.threshold.re.toString().padStart(2, '0')}
+                            </span>
+                          )}
+                          <span className="font-mono text-[10px] text-muted uppercase tracking-widest">ID: {defect.code ?? defect.id.toUpperCase()}</span>
+                        </div>
                       </div>
 
                       <div className="flex items-center justify-between bg-canvas rounded-lg p-1 border border-gray-800 shadow-inner">
@@ -413,7 +544,9 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
 
                         {/* Count Display — JetBrains Mono per UI_DESIGN_SYSTEM.md §1.3 */}
                         <div className="flex-1 flex justify-center">
-                          <span className={`text-2xl font-mono font-bold ${count > 0 ? 'text-brand-secondary' : 'text-gray-500'}`}>
+                          <span className={`text-2xl font-mono font-bold ${
+                            isGranularFail ? 'text-rose-400' : count > 0 ? 'text-brand-secondary' : 'text-gray-500'
+                          }`}>
                             {count.toString().padStart(2, '0')}
                           </span>
                         </div>
