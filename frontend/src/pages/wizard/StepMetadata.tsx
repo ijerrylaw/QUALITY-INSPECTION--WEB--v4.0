@@ -411,11 +411,16 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
     e.preventDefault();
 
     // Single source of truth shared with WizardPage.tsx's tab-click gate
-    // (utils/batchSetupValidity.ts) — side/sequenceNo/gloveWeight are
-    // deliberately NOT in this list (side defaults on mount, sequenceNo is
-    // auto-suggested, gloveWeight's own grading consumer already tolerates a
-    // blank value), so this no longer requires more than the tab gate does.
-    const missing = getMissingBatchSetupFields({ profileId, productCode, lineId, size, sampleSize, totalCarton });
+    // (utils/batchSetupValidity.ts) — side/gloveWeight are deliberately NOT
+    // in this list (side defaults on mount, gloveWeight's own grading
+    // consumer already tolerates a blank value); sequenceNo IS, since its
+    // async auto-suggest can genuinely leave it blank. Must pass sequenceNo
+    // through explicitly here — the shared function only checks whatever
+    // keys are present on the object handed to it, so omitting it from this
+    // literal would silently exempt this call site from the same check
+    // WizardPage.tsx's tab gate enforces (it passes the whole inspectionData
+    // object, so it was never at risk of this).
+    const missing = getMissingBatchSetupFields({ profileId, productCode, lineId, size, sampleSize, totalCarton, sequenceNo });
     if (missing.length > 0) {
       addToast('error', `Complete required fields: ${missing.join(', ')}.`);
       return;

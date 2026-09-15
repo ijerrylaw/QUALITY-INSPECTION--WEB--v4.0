@@ -63,6 +63,7 @@ or summarized in that split either.
 - [§74](#74-dev-tools-wipe-endpoints-get-a-temporary-production-override-flag--2026-09-15) — Dev-tools wipe endpoints get a temporary production override flag — 2026-09-15
 - [§75](#75-wizard-defect-id-display-matches-the-registry-screens-def-0xx-code--2026-09-15) — Wizard Defect ID display matches the Registry screen's DEF-0XX code — 2026-09-15
 - [§76](#76-wizard-tab-checkmarks-and-submit-lot-reflect-real-per-step-validity--2026-09-15) — Wizard tab checkmarks and SUBMIT LOT reflect real per-step validity — 2026-09-15
+- [§77](#77-sequenceno-actually-enforced-in-the-batch-setup-required-field-gate--2026-09-15) — sequenceNo actually enforced in the Batch Setup required-field gate — 2026-09-15
 
 ---
 
@@ -3039,4 +3040,49 @@ confirmed unchanged.
 `frontend/src/pages/WizardPage.tsx`,
 `frontend/src/pages/wizard/StepDimensions.tsx`,
 `frontend/src/pages/wizard/StepDefects.tsx`,
+`frontend/src/pages/wizard/StepMetadata.tsx`.
+
+## 77. sequenceNo actually enforced in the Batch Setup required-field gate — 2026-09-15
+
+§76 reconciled `WizardPage.tsx`'s 6-field `isStep1Valid` and
+`StepMetadata.tsx`'s own stricter 9-field Next-button check onto one shared
+list — but reconciled them onto the 6-field (weaker) side, dropping
+`sequenceNo` from StepMetadata's own check instead of adding it to the
+shared gate as had actually been decided and requested. Live-verified: a
+fresh Single Entry with every other Batch Setup field filled and
+`sequenceNo` left genuinely blank (its async auto-suggest hadn't fired —
+network round-trip, gated on `lineId`/`side`/`lot4Digit` resolving first)
+let the operator click straight into DIMENSIONS with no sequence number
+ever recorded. The original reported bug was still present after §76.
+
+**Fix.** `sequenceNo` added to `batchSetupValidity.ts`'s
+`BATCH_SETUP_REQUIRED_FIELDS` (now 7 fields). An unresolved auto-suggestion
+correctly still reads as "not filled" — the check only ever reads whatever
+is actually in `data.sequenceNo`, no special-casing needed. `side` and
+`gloveWeight` stay out of the required set, unchanged from §76: `side`
+defaults to a real value on mount, and `gloveWeight`'s only grading
+consumer (`StepReviewSubmit.tsx`) already tolerates it being blank.
+
+**A second bug, found by checking rather than assuming the fix would
+propagate.** `WizardPage.tsx` passes the whole `inspectionData` object into
+the shared check, so it picked up `sequenceNo` automatically. `StepMetadata.tsx`'s
+own Next-button call site did not: `getMissingBatchSetupFields({ profileId,
+productCode, lineId, size, sampleSize, totalCarton })` was a hand-picked
+object literal that never included `sequenceNo` at all. Left as-is, that
+would have made `data.sequenceNo` always read `undefined` — StepMetadata's
+own Next button would have reported Sequence No. as missing forever, even
+after the operator typed a valid value. Fixed by adding `sequenceNo` to
+that literal.
+
+**Verified live** (Group C PIN, Jason Tan/OT4321): fresh Single Entry,
+every other field filled, `sequenceNo` left blank — clicking DIMENSIONS now
+bounces back to BATCH SETUP with `Complete BATCH SETUP first. Missing:
+Sequence No..`; filling it lets navigation through. Regression-checked
+against §76's scenarios: Defects left unvisited after a direct Step 1 → 4
+jump still shows no checkmark and `SUBMIT LOT` stays disabled; completing
+Defects (the qualitative Donning defect set to PASS) still enables `SUBMIT
+LOT`.
+
+**Database migration:** none. Client-side validity logic only —
+`frontend/src/utils/batchSetupValidity.ts`,
 `frontend/src/pages/wizard/StepMetadata.tsx`.
