@@ -178,6 +178,16 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
   );
   const totalIssues = totalQuantitativeDefects + totalQualitativeFails;
 
+  // ── Validity: every qualitative (PASS/FAIL) defect in the active profile
+  // has been explicitly set ─────────────────────────────────────────────────
+  // Quantitative counts have no "complete" state — 0 is a legitimate final
+  // answer — so only the qualitative subset can meaningfully be "unset."
+  // Vacuously true for a profile with no qualitative categories at all.
+  const defectsValid = useMemo(
+    () => Array.from(qualitativeDefectIds).every((id) => qualitativeStates[id] !== undefined),
+    [qualitativeDefectIds, qualitativeStates],
+  );
+
   // ── Auto-save: Push defect data to WizardPage ─────────────────────────────
   useEffect(() => {
     onUpdate?.({
@@ -185,9 +195,10 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
       qualitative: qualitativeStates,
       totalIssues,
       profileId: inspectionData?.profileId ?? activeProfile?.id ?? '',
+      defectsValid,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [combinedDefects, qualitativeStates, totalIssues, activeProfile?.id]);
+  }, [combinedDefects, qualitativeStates, totalIssues, activeProfile?.id, defectsValid]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

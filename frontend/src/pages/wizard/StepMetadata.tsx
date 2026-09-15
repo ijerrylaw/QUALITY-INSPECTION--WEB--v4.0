@@ -32,6 +32,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useConfig, hasUsableCategories } from '../../context/ConfigContext';
+import { getMissingBatchSetupFields } from '../../utils/batchSetupValidity';
 import {
   resolveShiftAndEffectiveDate,
   composeYJJJ,
@@ -409,19 +410,20 @@ export function StepMetadata({ onNext, onUpdate, initialData, originalData }: St
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!profileId) { addToast('error', 'Inspection Profile is required.'); return; }
+    // Single source of truth shared with WizardPage.tsx's tab-click gate
+    // (utils/batchSetupValidity.ts) — side/sequenceNo/gloveWeight are
+    // deliberately NOT in this list (side defaults on mount, sequenceNo is
+    // auto-suggested, gloveWeight's own grading consumer already tolerates a
+    // blank value), so this no longer requires more than the tab gate does.
+    const missing = getMissingBatchSetupFields({ profileId, productCode, lineId, size, sampleSize, totalCarton });
+    if (missing.length > 0) {
+      addToast('error', `Complete required fields: ${missing.join(', ')}.`);
+      return;
+    }
     if (isProfileUnusable) {
       addToast('error', 'This product profile has no usable inspection categories configured — contact an admin before inspecting this lot.');
       return;
     }
-    if (!productCode) { addToast('error', 'Product Code is required.'); return; }
-    if (!size) { addToast('error', 'Glove Size is required.'); return; }
-    if (!lineId) { addToast('error', 'Production Line is required.'); return; }
-    if (!side) { addToast('error', 'Side is required.'); return; }
-    if (!sequenceNo) { addToast('error', 'Sequence Number is required.'); return; }
-    if (!totalCarton) { addToast('error', 'Total Carton is required.'); return; }
-    if (!sampleSize) { addToast('error', 'Sample Size is required.'); return; }
-    if (!gloveWeight) { addToast('error', 'Glove Weight is required.'); return; }
 
     onNext({
       profileId,

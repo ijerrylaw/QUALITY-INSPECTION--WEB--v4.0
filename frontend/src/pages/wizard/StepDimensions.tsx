@@ -276,15 +276,21 @@ export function StepDimensions({
   }, [measurements, activeDimensions, sizeEntry, matrixEntry]);
 
   // ── Auto-save: Push measurements to WizardPage ────────────────────────────
+  // `dimensionsValid` mirrors the exact completeness check handleSubmit's own
+  // Next-button gate below already enforces (filledSlots < totalSlots), just
+  // reported on every change instead of only at submit time — so WizardPage's
+  // tab checkmark and SUBMIT LOT gate reflect the same real state without
+  // duplicating this step's product-matrix/spec resolution.
   useEffect(() => {
     onUpdate?.({
       dimensions: measurements,
       dimensionDirtySlots: dirtySlots,
       dimensionStats: stats,
       totalSlots,
+      dimensionsValid: filledSlots >= totalSlots,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [measurements, dirtySlots, stats, totalSlots]);
+  }, [measurements, dirtySlots, stats, totalSlots, filledSlots]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

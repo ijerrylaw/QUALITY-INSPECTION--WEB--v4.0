@@ -62,6 +62,7 @@ or summarized in that split either.
 - [§73](#73-batch-entry-grid-gets-the-unsaved-progress-navigation-guard--2026-09-14) — Batch Entry Grid gets the unsaved-progress navigation guard — 2026-09-14
 - [§74](#74-dev-tools-wipe-endpoints-get-a-temporary-production-override-flag--2026-09-15) — Dev-tools wipe endpoints get a temporary production override flag — 2026-09-15
 - [§75](#75-wizard-defect-id-display-matches-the-registry-screens-def-0xx-code--2026-09-15) — Wizard Defect ID display matches the Registry screen's DEF-0XX code — 2026-09-15
+- [§76](#76-wizard-tab-checkmarks-and-submit-lot-reflect-real-per-step-validity--2026-09-15) — Wizard tab checkmarks and SUBMIT LOT reflect real per-step validity — 2026-09-15
 
 ---
 
@@ -2974,3 +2975,68 @@ the two screens now agree.
 change only — `backend/src/engine/aqlEvaluator.ts`,
 `backend/src/engine/profileRules.ts`, `backend/src/routes/config.routes.ts`,
 `frontend/src/context/ConfigContext.tsx`, `frontend/src/pages/wizard/StepDefects.tsx`.
+
+## 76. Wizard tab checkmarks and SUBMIT LOT reflect real per-step validity — 2026-09-15
+
+`WizardPage.tsx`'s tab-click gate (BATCH SETUP as the only hard gate,
+`handleTabClick`) was already correct and untouched by this fix. The bug
+was `isComplete`: `currentStep > step.number && step1Done` — a pure
+navigation-position heuristic. Jumping straight from Step 1 to Step 4 (free
+navigation between unlocked tabs is intentional) falsely green-checked
+DIMENSIONS and DEFECTS even though neither had been visited. `SUBMIT LOT`
+had no validity gate at all in normal (non-amendment) mode — it reduced to
+just `isSubmitting`.
+
+**Reconciled a real, already-shipped divergence first.** `WizardPage.tsx`'s
+6-field `isStep1Valid` and `StepMetadata.tsx`'s own 9-field Next-button
+check disagreed (the extra three: `side`, `sequenceNo`, `gloveWeight`) — a
+user could tab-navigate past Step 1 in a state StepMetadata's own Next
+button would have rejected. New `frontend/src/utils/batchSetupValidity.ts`
+(`BATCH_SETUP_REQUIRED_FIELDS`, `isBatchSetupValid`,
+`getMissingBatchSetupFields`) is now the single source both call. The three
+dropped fields were confirmed not silently load-bearing: `side` defaults on
+mount, `sequenceNo` is auto-suggested, and `gloveWeight`'s only grading
+consumer (`StepReviewSubmit.tsx`) already guards on
+`typeof gloveWeight === 'number'`.
+
+**Real per-step validity, surfaced without duplicating step-local logic.**
+`StepDimensions.tsx` already computed real completeness
+(`filledSlots`/`totalSlots`) but only enforced it locally at its own Next
+button — now also reported as `dimensionsValid` through the same `onUpdate`
+auto-save effect it already fires on every change. `StepDefects.tsx` had no
+completeness concept at all; added `defectsValid` — true once every
+qualitative (PASS/FAIL) defect in the active profile has been explicitly
+set (quantitative counts never block it; 0 is a legitimate final count).
+`WizardPage.tsx`'s `isComplete` now reads `step1Done` /
+`inspectionData.dimensionsValid` / `inspectionData.defectsValid` per step
+(Step 4 has no checkmark concept beyond the existing amendment-ack chain).
+`SUBMIT LOT` now additionally blocks in normal mode on
+`step1Done && dimensionsValid && defectsValid`, layered onto the untouched
+amendment-mode branch (`amendmentReasonCode`/`amendmentAck.ready`).
+
+**Amendment reopen seeds validity true, not just data.** `dimensionsValid`/
+`defectsValid` are only ever recomputed once their step component mounts —
+reopening a real prior submission for amendment would otherwise show both
+tabs unchecked until the operator manually visited them, despite the
+loaded data already being a complete, previously-graded record. The
+amendment-load effect now seeds both `true` alongside the mapped data,
+overwritten immediately if the operator's edit actually empties a slot or
+unresolves a PASS/FAIL choice.
+
+**Verified live** (Group C PIN flow, Jason Tan/OT4321), all four scenarios:
+jumping Step 1 → Step 4 directly left DIMENSIONS/DEFECTS unchecked and
+`SUBMIT LOT` disabled; Dimensions auto-filled valid with one qualitative
+defect (Donning) left unset kept DEFECTS unchecked and `SUBMIT LOT`
+disabled; setting Donning to PASS flipped the DEFECTS checkmark live and
+enabled `SUBMIT LOT`, which was used to submit a real lot
+(`A001A6258---`); reopening that submission via AMEND RECORD showed all
+three data-entry tabs green immediately on load, with the pre-existing
+amendment-ack gate (`SUBMIT AMENDMENT` disabled pending a reason code)
+confirmed unchanged.
+
+**Database migration:** none. Client-side validity/gating logic only —
+`frontend/src/utils/batchSetupValidity.ts` (new),
+`frontend/src/pages/WizardPage.tsx`,
+`frontend/src/pages/wizard/StepDimensions.tsx`,
+`frontend/src/pages/wizard/StepDefects.tsx`,
+`frontend/src/pages/wizard/StepMetadata.tsx`.

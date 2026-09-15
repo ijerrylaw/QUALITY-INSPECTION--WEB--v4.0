@@ -46,6 +46,7 @@ import { useAuth, authHeader, authIdentity } from '../context/AuthContext';
 import { useToast } from '../components/ui/ToastProvider';
 import { useWizardGuard } from '../context/WizardGuardContext';
 import { isWizardDirty } from '../utils/wizardDirty';
+import { isBatchSetupValid, getMissingBatchSetupFields } from '../utils/batchSetupValidity';
 
 import { StepMetadata } from './wizard/StepMetadata';
 import { StepDimensions } from './wizard/StepDimensions';
@@ -74,16 +75,6 @@ const WIZARD_STEPS = [
   { number: 2, label: 'DIMENSIONS' },
   { number: 3, label: 'DEFECTS' },
   { number: 4, label: 'REVIEW & SUBMIT' },
-];
-
-// ── Mandatory Step 1 fields that must be set before navigating forward ─────────
-const STEP1_REQUIRED_FIELDS: { key: string; label: string }[] = [
-  { key: 'profileId',   label: 'Inspection Profile' },
-  { key: 'productCode', label: 'Product Code' },
-  { key: 'lineId',      label: 'Line' },
-  { key: 'size',        label: 'Size' },
-  { key: 'sampleSize',  label: 'Sample Size' },
-  { key: 'totalCarton', label: 'Total Carton' },
 ];
 
 /**
@@ -342,6 +333,17 @@ export function WizardPage() {
           overallVerdict:   target.verdict === 'PASSED' ? 'PASS' : 'FAIL',
           // Amendment source ID preserved for submit routing
           _amendSourceId:   target.id,
+          // Seeded true rather than left unset: StepDimensions/StepDefects only
+          // report their real dimensionsValid/defectsValid once mounted (i.e.
+          // once the operator actually visits that tab), which would otherwise
+          // leave both tabs' checkmarks — and SUBMIT LOT's gate, were this an
+          // amendment — looking incomplete on load despite `target` being a
+          // real, previously-complete submission. Overwritten the instant the
+          // operator visits either tab with that step's actual current state,
+          // so an edit that empties a slot or unresolves a PASS/FAIL choice
+          // still flips this back to false correctly.
+          dimensionsValid:  true,
+          defectsValid:     true,
         };
         // `originalData` must stay an independent snapshot of the pre-edit record —
         // every current edit path (StepDimensions/StepDefects) copies-before-mutating,
@@ -365,11 +367,10 @@ export function WizardPage() {
   }, [amendId, config]);
 
   // ── Validate Step 1 before allowing forward navigation ────────────────────
-  const isStep1Valid = useCallback((data: Record<string, any>): boolean => {
-    return STEP1_REQUIRED_FIELDS.every(
-      (f) => data[f.key] !== undefined && data[f.key] !== '' && data[f.key] !== null
-    );
-  }, []);
+  // isBatchSetupValid/getMissingBatchSetupFields (utils/batchSetupValidity.ts)
+  // are the single source of truth, also used by StepMetadata.tsx's own
+  // Next-button check — the two can no longer drift apart.
+  const isStep1Valid = isBatchSetupValid;
 
   // ── Tab Click Handler — free navigation with Step 1 guard ─────────────────
   const handleTabClick = useCallback(
@@ -378,18 +379,15 @@ export function WizardPage() {
         setCurrentStep(1);
         return;
       }
-      if (!isStep1Valid(inspectionData)) {
-        const missing = STEP1_REQUIRED_FIELDS
-          .filter((f) => !inspectionData[f.key] || inspectionData[f.key] === '')
-          .map((f) => f.label)
-          .join(', ');
-        addToast('error', `Complete BATCH SETUP first. Missing: ${missing}.`);
+      const missing = getMissingBatchSetupFields(inspectionData);
+      if (missing.length > 0) {
+        addToast('error', `Complete BATCH SETUP first. Missing: ${missing.join(', ')}.`);
         setCurrentStep(1);
         return;
       }
       setCurrentStep(stepNumber);
     },
-    [inspectionData, isStep1Valid, addToast]
+    [inspectionData, addToast]
   );
 
   // ── Step Handlers ─────────────────────────────────────────────────────────
@@ -729,7 +727,19 @@ export function WizardPage() {
           <div className="flex items-center gap-0 overflow-x-auto scrollbar-hide w-full md:w-auto">
             {entryMode === 'GUIDED' || isAmendmentMode ? (
               WIZARD_STEPS.map((step, idx) => {
-                const isComplete = currentStep > step.number && step1Done;
+                // Real per-step validity, not "have I scrolled past this tab's
+                // number" — a `currentStep > step.number` heuristic falsely
+                // green-checked Dimensions/Defects when jumping straight from
+                // Step 1 to Step 4 (free navigation, §1 above, means that's a
+                // normal path, not an edge case). Step 4 (Review & Submit) is
+                // the destination step, not itself gated by a completeness
+                // concept beyond the existing amendment-ack chain, so it never
+                // shows a checkmark.
+                const isComplete =
+                  step.number === 1 ? step1Done :
+                  step.number === 2 ? Boolean(inspectionData?.dimensionsValid) :
+                  step.number === 3 ? Boolean(inspectionData?.defectsValid) :
+                  false;
                 const isActive   = currentStep === step.number;
                 // Steps 2–4 are locked if Step 1 is not yet valid
                 const isLocked   = step.number > 1 && !step1Done;
@@ -816,13 +826,17 @@ export function WizardPage() {
                     // reason code, its note when the code is OTHER, and every
                     // server-detected change acknowledged. `amendmentAck.ready`
                     // is false while the diff is loading or errored, so a failed
-                    // preview can never leave this enabled.
+                    // preview can never leave this enabled. Normal (non-
+                    // amendment) mode instead blocks on real per-step validity —
+                    // previously this branch was unconditionally enabled, the
+                    // same gap the tab checkmarks had (§ isComplete above).
                     disabled={
                       isSubmitting ||
-                      (isAmendmentMode &&
-                        (!amendmentReasonCode ||
-                          (requiresSupervisorNote(amendmentReasonCode) && !amendmentReason.trim()) ||
-                          !amendmentAck.ready))
+                      (isAmendmentMode
+                        ? (!amendmentReasonCode ||
+                            (requiresSupervisorNote(amendmentReasonCode) && !amendmentReason.trim()) ||
+                            !amendmentAck.ready)
+                        : !(step1Done && inspectionData?.dimensionsValid && inspectionData?.defectsValid))
                     }
                     className={`h-10 px-8 rounded-lg font-bold text-xs tracking-wider uppercase shadow-lg shadow-brand-primary/20 flex items-center justify-center gap-2 transition-all outline-none disabled:opacity-40 disabled:cursor-not-allowed
                       ${isAmendmentMode
