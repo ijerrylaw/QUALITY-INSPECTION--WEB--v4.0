@@ -95,7 +95,7 @@ describe('AccessLogPanel: USER / ROLE column ("Name · Role" format)', () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response(
         JSON.stringify({
-          logs: [accessLogRow({ userDisplayName: 'Jerry Law', role: 'ADMIN', userId: 'aad-jerry-law' })],
+          logs: [accessLogRow({ userDisplayName: 'Test User', role: 'ADMIN', userId: 'aad-test-user' })],
           count: 1, page: 1, limit: 50, totalCount: 1, hasMore: false,
         }),
         { status: 200 },
@@ -104,8 +104,8 @@ describe('AccessLogPanel: USER / ROLE column ("Name · Role" format)', () => {
 
     const { findByText } = render(<AccessLogPanel />);
 
-    await findByText('Jerry Law · ADMIN');
-    await findByText('aad-jerry-law');
+    await findByText('Test User · ADMIN');
+    await findByText('aad-test-user');
   });
 
   test('a null userDisplayName (pre-migration row, or a login that never resolved) renders "—" gracefully', async () => {

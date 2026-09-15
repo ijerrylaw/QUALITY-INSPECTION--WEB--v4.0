@@ -209,7 +209,7 @@ describe('HistoryFeed: real component, real worst-case data', () => {
     sampleSize: 125,
     defects: Object.fromEntries(buildDefectDefinitions().map((d) => [d.id, 1])),
     verdict: 'FAILED',
-    inspectorName: 'Jerry Law',
+    inspectorName: 'Test User',
     amendmentStatus: 'UNMODIFIED',
     totalCarton: 18,
     gloveWeight: 2.07,
