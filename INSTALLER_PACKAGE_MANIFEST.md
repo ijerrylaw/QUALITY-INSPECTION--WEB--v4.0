@@ -9,8 +9,40 @@ path end-to-end (byte-identical `.env`/TLS/database preservation across a
 rebuild-and-reinstall), and §70 fixed a gap where the frontend's MSAL/Entra
 env vars weren't validated before build (the bug that caused the real trial
 install below to fail). A real server install at One Glove Group with Hakim
-completed 2026-09-14/15 and is now the live production deployment — this file
-remains the spec; the two scripts that satisfy it are:
+completed 2026-09-14/15 and is now the live production deployment.
+
+**Five more commits landed on `origin/master` since, none of which change the
+installer scripts or this file's spec:**
+
+- `8c516c4` — `ALLOW_WIPE_IN_PRODUCTION` (`CHANGELOG.md` §74): a new,
+  **optional, off-by-default** env var that lets the dev-tools wipe endpoints
+  (`/api/dev/submissions/all`, `/by-product-code`) be deliberately re-enabled
+  on a production server for the soft-launch testing period, on top of the
+  existing `WIPE_ENDPOINT_PASSWORD` gate (both are required when the flag is
+  on — it does not replace the password). `backend/.env.example` documents it
+  commented-out as `ALLOW_WIPE_IN_PRODUCTION=false`, so `install.ps1`'s
+  env-seeding step ships the note automatically; the script deliberately does
+  **not** add it to `$RequiredKeys` or prompt for it — it only warns at
+  install time if the flag is `true` or holds a non-canonical value. See §74
+  for the full three-layer gate and the live-verified scenario matrix.
+- `f3b5814`, `84dfaae` — `backend/dev.db` drift, then a wipe of the local test
+  submissions/amendments it had accumulated. **Installer-irrelevant**: per the
+  divergence note in §2 below, the packaged seed (`install/seed.db`) is
+  sourced from `backend/prod.db`, not `dev.db` (`package.ps1:199`) —
+  `dev.db`'s content never reaches a shipped package either way, so this was
+  local hygiene only, not a packaging fix.
+- `328166d` — cosmetic test-fixture cleanup (a real name/email replaced with a
+  generic placeholder in 3 `__tests__/` files). Those files are already
+  excluded from the package by the allowlist (§2 row 11); no manifest impact.
+- `4e31be2` — `frontend/src/pages/WizardPage.tsx` defensive-correctness fix
+  (`structuredClone`/`Object.freeze` so `originalData`/`inspectionData` stop
+  sharing an object reference on amendment load) plus new regression tests.
+  No user-facing behavior change, no new env var, no packaging impact — the
+  file still ships as source per this manifest's frontend-builds-on-server
+  divergence (item 1 below) and was not one of the six AI-tooling-comment
+  files in §4's table.
+
+This file remains the spec; the two scripts that satisfy it are:
 
 | Script | Runs on | Role | Ships? |
 |---|---|---|---|
