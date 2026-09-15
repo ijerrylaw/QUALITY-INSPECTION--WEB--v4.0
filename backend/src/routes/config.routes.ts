@@ -294,10 +294,13 @@ function validateInspectionProfiles(profiles: unknown): UnsetEvalModeCategory[] 
  * JSON blob verbatim. Stage A0: the blob is still WRITTEN for now, but is no
  * longer the read source here, so the next stage can retire that write.
  *
- * The emitted shape is deliberately identical to what the blob produced:
+ * The emitted shape is deliberately identical to what the blob produced,
+ * plus `defectDefinitions[].code` (added so the wizard can display the same
+ * cosmetic DEF-0XX id the Registry screen shows, instead of synthesizing one
+ * client-side — DATA_SCHEMAS_AND_TYPES.md §2.2):
  *   { id, name, isDefault,
  *     aqlCategories:     [{ id, name, aql, evalMode }],
- *     defectDefinitions: [{ id, name, categoryId }] }
+ *     defectDefinitions: [{ id, name, categoryId, code }] }
  * `aql` / `evalMode` carry the same engine/admin dialect the blob stored
  * ('CUMULATIVE' | 'GRANULAR' | 'N/A' | '' for evalMode) — loadProfileRulesMap()
  * already returns exactly those values. A profile with no ProfileCategory rows
@@ -333,6 +336,7 @@ async function reconstructInspectionProfiles(): Promise<any[]> {
         id: d.id,
         name: d.name,
         categoryId: d.categoryId,
+        code: d.code,
       })),
     };
   });

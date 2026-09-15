@@ -78,14 +78,6 @@ function encodeQualitative(states: Record<string, QualitativeState>): Record<str
   );
 }
 
-/** Formats defect IDs into clean, uppercase human-readable slugs (e.g., DEF_DIRT) */
-export const getDisplayId = (defect: { id: string; name: string }) => {
-  if (!defect.id || /^def_\d+$/i.test(defect.id)) {
-    return `DEF_${defect.name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
-  }
-  return defect.id.toUpperCase();
-};
-
 export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: StepDefectsProps) {
   const { config, isLoading, getResolvedProfile } = useConfig();
 
@@ -325,8 +317,6 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
               {/* Defect Cards */}
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {activeCategoryDefects.map((defect) => {
-                  const displayId = getDisplayId(defect);
-
                   if (isQual) {
                     // ── QUALITATIVE: PASS / FAIL Toggle ─────────────
                     const state: QualitativeState | undefined = qualitativeStates[defect.id];
@@ -343,7 +333,7 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
                       }`}>
                         <div className="mb-3 flex items-start justify-between gap-2">
                           <span className="font-mono text-sm font-bold text-primary tracking-wide truncate">{defect.name}</span>
-                          <span className="font-mono text-[10px] text-muted uppercase tracking-widest shrink-0">ID: {displayId}</span>
+                          <span className="font-mono text-[10px] text-muted uppercase tracking-widest shrink-0">ID: {defect.code ?? defect.id.toUpperCase()}</span>
                         </div>
 
                         {/* 2-State Segmented Toggle */}
@@ -395,7 +385,7 @@ export function StepDefects({ inspectionData, onNext, onUpdate, originalData }: 
                     }`}>
                       <div className="mb-3 flex items-start justify-between gap-2">
                         <span className="font-mono text-sm font-bold text-primary tracking-wide truncate">{defect.name}</span>
-                        <span className="font-mono text-[10px] text-muted uppercase tracking-widest shrink-0">ID: {displayId}</span>
+                        <span className="font-mono text-[10px] text-muted uppercase tracking-widest shrink-0">ID: {defect.code ?? defect.id.toUpperCase()}</span>
                       </div>
 
                       <div className="flex items-center justify-between bg-canvas rounded-lg p-1 border border-gray-800 shadow-inner">

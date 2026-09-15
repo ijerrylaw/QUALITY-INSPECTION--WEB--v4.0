@@ -68,6 +68,14 @@ export interface DefectDefinition {
    * link is unambiguous and the two arms cannot disagree.
    */
   categoryId: string;
+  /**
+   * Defect.code ('DEF-001') — cosmetic display id, never used by matching
+   * logic here (the engine links by `id`/`categoryId` only, per the note
+   * above). Optional because the two evaluateAQLVerdict test suites build
+   * DefectDefinition literals by hand without it; every caller that sources
+   * defects from the DB (profileRules.ts) populates it.
+   */
+  code?: string;
 }
 
 export type { AQLThreshold, SampleSizeBracket, SupportedAQLLevel, AchievableAQLLevel };

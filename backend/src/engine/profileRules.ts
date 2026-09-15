@@ -88,14 +88,14 @@ export async function loadProfileRulesMap(): Promise<Map<string, EngineProfileRu
 
   // Bucket defects under their ProfileCategory. The query above is already
   // ordered by sortOrder, so appending preserves per-category order.
-  const defectsByProfileCategory = new Map<string, { id: string; name: string }[]>();
+  const defectsByProfileCategory = new Map<string, { id: string; name: string; code: string }[]>();
   for (const pd of profileDefects) {
     let bucket = defectsByProfileCategory.get(pd.profileCategoryId);
     if (!bucket) {
       bucket = [];
       defectsByProfileCategory.set(pd.profileCategoryId, bucket);
     }
-    bucket.push({ id: pd.defect.id, name: pd.defect.name });
+    bucket.push({ id: pd.defect.id, name: pd.defect.name, code: pd.defect.code });
   }
 
   const rulesByProfile = new Map<string, EngineProfileRules>();
@@ -131,7 +131,7 @@ export async function loadProfileRulesMap(): Promise<Map<string, EngineProfileRu
     // Flatten this category's defects immediately after the category itself, so
     // the flat array ends up in (category sortOrder, defect sortOrder) order.
     for (const d of defectsByProfileCategory.get(pc.id) ?? []) {
-      rules.defectDefinitions.push({ id: d.id, name: d.name, categoryId: pc.category.id });
+      rules.defectDefinitions.push({ id: d.id, name: d.name, categoryId: pc.category.id, code: d.code });
     }
   }
 

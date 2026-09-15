@@ -61,6 +61,7 @@ or summarized in that split either.
 - [§72](#72-batch-entry-grid-sequence-no-auto-fills-on-add-lot--2026-09-14) — Batch Entry Grid Sequence No. auto-fills on ADD LOT — 2026-09-14
 - [§73](#73-batch-entry-grid-gets-the-unsaved-progress-navigation-guard--2026-09-14) — Batch Entry Grid gets the unsaved-progress navigation guard — 2026-09-14
 - [§74](#74-dev-tools-wipe-endpoints-get-a-temporary-production-override-flag--2026-09-15) — Dev-tools wipe endpoints get a temporary production override flag — 2026-09-15
+- [§75](#75-wizard-defect-id-display-matches-the-registry-screens-def-0xx-code--2026-09-15) — Wizard Defect ID display matches the Registry screen's DEF-0XX code — 2026-09-15
 
 ---
 
@@ -2925,3 +2926,51 @@ only — `backend/src/lib/wipeGate.ts` (new), its test, `server.ts`,
 `devTools.routes.ts`, `backend/.env.example`, `install.ps1`,
 `install/README.txt`, the two core docs, `AUDIT_REPORT.md`. No schema
 change, no `prisma db push`, no migration.
+
+## 75. Wizard Defect ID display matches the Registry screen's DEF-0XX code — 2026-09-15
+
+The wizard's Defects step and the Defect Registry/Management screen
+(`RegistryManagerModal.tsx`) showed two different labels for the same
+defect — e.g. `DEF_WET_GLOVE_1` on the wizard vs. `DEF-008` on the Registry
+screen. Root cause: `Defect.code` (schema.prisma, `'DEF-001'` format) is the
+documented cosmetic display id (`DATA_SCHEMAS_AND_TYPES.md` §2.2 — `id` is
+the internal engine lookup key, never meant for display), and the Registry
+screen already read it correctly via `GET /api/registry/defects`. The
+wizard's `GET /api/config` response never included `code` at all — its
+`defectDefinitions` projection was `{ id, name, categoryId }` — so
+`StepDefects.tsx`'s own `getDisplayId()` was a client-side workaround
+synthesizing a fake id from `id`/`name` because it never received the real
+one.
+
+**Fix.** `code` now flows end-to-end: `profileRules.ts` carries it off the
+already-joined `Defect` row (`DefectDefinition.code`, added as optional to
+`aqlEvaluator.ts`'s engine type so the two existing hand-built test fixtures
+there don't need updating — the engine's matching logic only ever used
+`id`/`categoryId`), `config.routes.ts`'s `reconstructInspectionProfiles()`
+projects it into `GET /api/config`'s `defectDefinitions`, and the frontend
+`DefectDefinition` type gained a `code` field. `StepDefects.tsx` dropped
+`getDisplayId()` entirely and renders `defect.code` directly.
+
+**One real gap found, not in `dev.db`.** A direct read-only query confirmed
+all 49 `Defect` rows have a real `code` (the column is `NOT NULL` + unique)
+— but `ConfigContext.tsx`'s own zero-profile bootstrap fallback
+(`DEFAULT_DEFECT_DEFINITION_SEED`, synthesized in-memory only when
+`AppConfig` has no configured profiles at all) predates `code` and isn't
+backed by a real `Defect` row to source one from. `code` was kept optional
+on the frontend type and `StepDefects.tsx` keeps a minimal fallback
+(`defect.code ?? defect.id.toUpperCase()`) for that one path, rather than
+inventing placeholder codes for a seed that was never actually assigned any.
+
+**Verified live** (Group C PIN flow, Jason Tan / OT4321): all 49 defects
+across all 5 categories (AND/BARRIER/VISUALS/OTHERS/RECORD ONLY) on a real
+amendment-reopened submission render clean `DEF-0XX` ids, zero blanks. A
+6-defect sample (Cut, Burst, Donning, Sagging, Embedded Particle, Blister
+Beading) cross-checked byte-for-byte against the `Defect.code` column
+directly — the same column the Registry screen's endpoint reads — confirming
+the two screens now agree.
+
+**Database migration:** none. `Defect.code` already existed as a column
+(added in an earlier migration); this is a projection, type, and display
+change only — `backend/src/engine/aqlEvaluator.ts`,
+`backend/src/engine/profileRules.ts`, `backend/src/routes/config.routes.ts`,
+`frontend/src/context/ConfigContext.tsx`, `frontend/src/pages/wizard/StepDefects.tsx`.

@@ -381,6 +381,20 @@ export interface DefectDefinition {
   name: string;
   /** Links this defect to an AQLCategory.id within the same profile */
   categoryId: string;
+  /**
+   * Defect.code ('DEF-001') — the cosmetic, human-facing display id
+   * (DATA_SCHEMAS_AND_TYPES.md §2.2). `id` is the internal engine lookup
+   * key and was never meant for display; `code` is what StepDefects.tsx and
+   * RegistryManagerModal.tsx both show as "the defect ID."
+   *
+   * Optional, not because any real `Defect` row lacks one (verified against
+   * dev.db: 0 of 49 rows have a null/empty code, and the DB column is
+   * NOT NULL + unique) — but because this file's own zero-profile bootstrap
+   * fallback (`DEFAULT_DEFECT_DEFINITION_SEED` below, synthesized in-memory
+   * when AppConfig has no configured profiles at all) predates `code` and
+   * isn't backed by a real Defect row to source one from.
+   */
+  code?: string;
   defaultClass?: string;
   currentClass?: string;
 }
